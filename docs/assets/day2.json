@@ -1,7 +1,7 @@
 {
   "day": 2,
   "title": "From inspection to transformation",
-  "status": "All Day 2 lessons so far are available through connecting an unconditional entry branch. Conditional entries and state-block branch rewriting are the next exercises.",
+  "status": "Complete Day 2 teaching draft. Lessons 0–16 document our study checkpoints and exercises; lessons 17–27 extend through complete rewriting and correctness checks. The remaining learner implementation is still pending.",
   "groups": [
     {
       "name": "Before mutation",
@@ -61,13 +61,40 @@
       ]
     },
     {
+      "name": "Complete the rewrite",
+      "label": "REWRITE",
+      "key": "complete",
+      "ids": [
+        45,
+        46,
+        47,
+        48,
+        49,
+        50
+      ],
+      "description": "Define the support contract, refactor the builder, and rewrite every original branch form."
+    },
+    {
+      "name": "Verify the transformation",
+      "label": "EVIDENCE",
+      "key": "verify",
+      "ids": [
+        51,
+        52,
+        53,
+        54,
+        55
+      ],
+      "description": "Inspect invariants, compare defined behavior, test hard cases, and record limitations."
+    },
+    {
       "name": "Day 2 reference",
       "label": "GLOSSARY",
       "key": "reference",
-      "description": "Look up the new mutation, type, and dispatcher terms.",
       "ids": [
         44
-      ]
+      ],
+      "description": "SSA, memory, C++ APIs, state-machine construction, and correctness vocabulary."
     }
   ],
   "lessons": [
@@ -176,7 +203,7 @@
           "text": "Checkpoint: Why must eligibility run before mutation? Why is a successful verifier run weaker than proving that a transformation preserves behavior?"
         }
       ],
-      "words": 380,
+      "words": 453,
       "quiz": {
         "q": "Why prepare SSA values before adding dispatcher edges?",
         "choices": [
@@ -303,7 +330,7 @@
           "text": "Checkpoint: What does the vector own? Why do we retain pointers rather than copies? What changes when a later utility deletes a PHI?"
         }
       ],
-      "words": 320,
+      "words": 329,
       "quiz": {
         "q": "What does phis.push_back(phi) copy?",
         "choices": [
@@ -420,11 +447,35 @@
           "text": "Compilation should succeed and the phi.ll count should still be 1. We have changed C++ bookkeeping, not LLVM IR."
         },
         {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "LLVM casts refine a borrowed pointer’s static type",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "A PHINode inherits from Instruction, but a vector<PHINode*> cannot accept an arbitrary Instruction*. dyn_cast<PHINode>(&I) asks LLVM’s class hierarchy whether the existing instruction is a PHI. Success returns a PHINode* to that same object; failure returns nullptr. No PHI is allocated or copied."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "llvm::Instruction *base = &I;\nif (auto *phi = llvm::dyn_cast<llvm::PHINode>(base)) {\n    phis.push_back(phi); // stores the address, not a PHINode copy\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "This is LLVM’s classof-based casting machinery, not C++ dynamic_cast and not a request to enable compiler RTTI. cast<T> asserts that the type is appropriate; dyn_cast<T> handles a possible mismatch. Use isa<T> when you only need a yes/no answer. See [LLVM casting](https://llvm.org/docs/ProgrammersManual.html#the-isa-cast-and-dyn-cast-templates)."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: After a successful cast, do base and phi refer to two instructions or one? Who owns that instruction?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Why is &I later valid for a vector<Instruction*> but invalid here? Explain the difference between a runtime type test and the static type of an expression."
         }
       ],
-      "words": 245,
+      "words": 381,
       "quiz": {
         "q": "Does a successful dyn_cast used only as an if condition retype I?",
         "choices": [
@@ -530,11 +581,31 @@
           "text": "Observed error: Do not delete PHIs while using an ordinary loop over the same instruction list. Collecting first avoids using an invalidated iterator."
         },
         {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "A worklist survives erasure; its pointed-to objects may not",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Collecting pointers separates traversal from mutation. vector<PHINode*> retains pointer values when LLVM erases a PHI, but that erased pointer becomes dangling. Iterating to the next vector element is safe; calling a method through the erased pointer is not. size() counts stored elements, including dangling pointer values, rather than querying the deleted instructions."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "const auto count = phis.size();\nfor (auto *phi : phis) {\n    llvm::DemotePHIToStack(phi);\n    // Do not call phi->getName() here: the helper erased that PHI.\n}\n// count records how many were collected, not how many PHIs remain."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why is reserving vector capacity unrelated to preventing an erased instruction pointer from dangling?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Trace both outcomes of the condition. Which store executes? What does join load? Why must changing IR invalidate cached analyses?"
         }
       ],
-      "words": 376,
+      "words": 479,
       "quiz": {
         "q": "Why collect PHIs before demoting them?",
         "choices": [
@@ -653,11 +724,30 @@
           "text": "After PHI demotion in the current loop fixture, expect i.reload in the worklist. Merely creating the new collection changes no IR; PHI demotion may already have changed it."
         },
         {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "SSA dominance is a graph property, not your expected runtime path",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "For an ordinary use, a definition must dominate that use: every entry-to-use path passes through the definition. A dispatcher adds graph paths even when a state variable is intended to make some paths infeasible. LLVM’s SSA verifier does not infer your entire state-machine invariant to excuse missing dominance. Demotion changes value transport to memory, but the allocation pointer still has to dominate its uses."
+            },
+            {
+              "type": "paragraph",
+              "text": "A PHI incoming operand is special: its use occurs on the corresponding incoming edge. That is why “used in another block” is not the complete story for repairing PHIs; use the PHI-specific helper before ordinary escaping-result demotion. See [LLVM IR dominance and PHIs](https://llvm.org/docs/LangRef.html#phi-instruction)."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why does “we never choose that state first” fail to repair a direct SSA use that no longer dominates?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Find the defining instruction and a use in a different block. Why does a fresh traversal have to happen after PHI demotion rather than before it?"
         }
       ],
-      "words": 441,
+      "words": 568,
       "quiz": {
         "q": "Why can a PHI-free function still need preparation?",
         "choices": [
@@ -791,7 +881,7 @@
           "text": "Checkpoint: Why does ret i32 %x have void instruction type? Why does checking I.getOperand(0)->getType() answer a different question?"
         }
       ],
-      "words": 255,
+      "words": 284,
       "quiz": {
         "q": "What is the result type of the instruction ret i32 %x?",
         "choices": [
@@ -911,7 +1001,7 @@
           "text": "Checkpoint: Why would skipping only void instructions leave alloca in consideration? When would you choose dyn_cast instead of isa?"
         }
       ],
-      "words": 229,
+      "words": 254,
       "quiz": {
         "q": "Why does the alloca instruction need a separate filter?",
         "choices": [
@@ -1100,11 +1190,35 @@
           "text": "Read the actual declarations in the installed LLVM headers. DemoteRegToStack also has optional parameters, including whether loads are volatile and an allocation insertion point. The study fixtures use the defaults; do not invent a runOnFunction method."
         },
         {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "A declaration tells you which conversions are legal",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Read DemoteRegToStack’s Instruction& and DemotePHIToStack’s PHINode* as distinct C++ contracts. Given Instruction *I, *I is an lvalue naming the existing instruction and binds to Instruction&. Given PHINode *phi, phi already has the required pointer type. Neither expression copies an LLVM instruction."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "llvm::DemoteRegToStack(*I); // pointer → existing object, binds reference\nllvm::DemotePHIToStack(phi); // pointer already matches parameter\n// Extra defaulted parameters are supplied at the call site by the declaration."
+            },
+            {
+              "type": "paragraph",
+              "text": "Default arguments do not create overloads with fewer parameters. They provide omitted argument expressions where the declaration is visible. Check the installed LLVM 23 Local.h rather than copying a signature from an older tutorial."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: What would happen if you passed &I when I is already an Instruction*? Name the resulting type."
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Explain what *value does here, why phi previously needed no dereference, and why the vector is a worklist rather than an owner of LLVM instructions."
         }
       ],
-      "words": 243,
+      "words": 363,
       "quiz": {
         "q": "escapingValues stores Instruction*. What does the first DemoteRegToStack parameter require?",
         "choices": [
@@ -1314,11 +1428,35 @@
           "text": "Generate cross-block.ll’s output with the pass followed by verify. Locate the add, its store, the slot allocation, and the load used by the return. A valid result alone is not proof that every future dispatcher preserves the store-before-load order."
         },
         {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "A host C++ pointer and an IR pointer live in different worlds",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "AllocaInst *slot is an address in the compiler process pointing to an IR object. That IR object represents a target-program instruction whose result type is ptr. When the generated program runs, the alloca result denotes its stack storage. Calling slot->getType() inspects a type in the compiler; it does not load the program’s stack slot."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "auto *slot = builder.CreateAlloca(builder.getInt32Ty());\n// slot: C++ AllocaInst*; slot->getType(): LLVM ptr type\n// slot->getAllocatedType(): LLVM i32 type\nauto *loaded = builder.CreateLoad(builder.getInt32Ty(), slot);\n// loaded is a C++ handle to an IR value of LLVM type i32."
+            },
+            {
+              "type": "paragraph",
+              "text": "LLVM opaque pointers do not encode a pointee type as ptr<i32>. Supply the memory access type to CreateLoad and maintain correct size/alignment/address-space assumptions. See [LLVM opaque pointers](https://llvm.org/docs/OpaquePointers.html)."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Which pointer is dereferenced when the pass evaluates slot->getName(), and which is used when the target executes load i32, ptr %slot?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: For x=4, what is stored and what is returned? Which object is the pointer, which is the i32, and which is just C++ bookkeeping?"
         }
       ],
-      "words": 366,
+      "words": 505,
       "quiz": {
         "q": "Does the alloca result contain the saved integer directly?",
         "choices": [
@@ -1438,11 +1576,31 @@
           "text": "Inspect build/phi-demoted.ll after running the pass with verify. Trace condition=true through left and condition=false through right. The original branch structure should remain at this preparation checkpoint."
         },
         {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Loop PHIs describe parallel values, not sequential assignments",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Two PHIs can represent a swap: on a back edge, next a receives old b and next b receives old a. Naively emitting store b into a-slot and then loading a-slot for b loses old a. Correct lowering must preserve the incoming-edge values as a group. LLVM’s helper handles the relevant uses and placement; do not replace it with an unexamined hand-written pair of assignments."
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "; Conceptual loop fragment: both right-hand sides use the old iteration.\n%a = phi i32 [ 1, %entry ], [ %b, %latch ]\n%b = phi i32 [ 2, %entry ], [ %a, %latch ]\n; This is a fragment, not a complete runnable function."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Trace the first two swaps by hand. What temporary values would a correct sequential implementation need?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Why does each path load the right value? Why can PHI demotion still leave a new load result used outside its defining block, as in loop.ll?"
         }
       ],
-      "words": 344,
+      "words": 504,
       "quiz": {
         "q": "What replaces the PHI’s incoming-edge selection in the simple diamond?",
         "choices": [
@@ -1583,7 +1741,7 @@
           "text": "Checkpoint: Why are a vector and a map both useful? Why does entry not get a state? Why can state zero be an incorrect universal initialization value for a conditional entry?"
         }
       ],
-      "words": 405,
+      "words": 420,
       "quiz": {
         "q": "Why preserve the existing entry as setup?",
         "choices": [
@@ -1693,11 +1851,35 @@
           "text": "Rebuild and compare the phi.ll state order with lesson 12. lookup returns a default zero for a missing key; in this prototype all original destination blocks must already be mapped, so do not treat lookup as validation that a key exists. Use find() when validating membership."
         },
         {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "DenseMap lookup, accidental insertion, and iterator lifetime",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "operator[] inserts a missing key with a default value. For unsigned, that value is zero, which is also a legitimate state ID. lookup returns a default value for a missing key without inserting, but still cannot distinguish “missing” from “state zero.” Use find and check end() when absence means an invariant failure."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "auto position = stateIDs.find(target);\nif (position == stateIDs.end()) {\n    // Handle an internal invariant failure; do not silently select state 0.\n}\n// Use position->second only after proving position != end()."
+            },
+            {
+              "type": "paragraph",
+              "text": "DenseMap can rehash when entries are added, invalidating references/iterators into its storage. It does not move the BasicBlock objects whose pointer values are stored as keys. Finish constructing the map before relying on its iterators during rewriting."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why can stateIDs[target] make a broken target lookup appear to work?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Why is copying a pointer element okay here even though for (auto BB : F) would try to copy a noncopyable block?"
         }
       ],
-      "words": 342,
+      "words": 474,
       "quiz": {
         "q": "Which value belongs in a DenseMap<BasicBlock*, unsigned> key?",
         "choices": [
@@ -1838,11 +2020,30 @@
           "text": "Expect a state slot, a dispatcher load and switch with 0→left, 1→right, 2→join, and an invalid block ending in unreachable. ms.dispatch has no predecessors at this checkpoint. Its load is not executed, so no initialization store is needed yet."
         },
         {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "IRBuilder is a template whose methods can return different value kinds",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "IRBuilder<> uses default template parameters for folding and insertion behavior. A method such as CreateSelect can fold constant operands and return a Constant rather than a newly inserted SelectInst. auto* preserves the method’s declared pointer result type; it does not promise a particular concrete instruction subclass."
+            },
+            {
+              "type": "paragraph",
+              "text": "Use the common Value* interface when either a constant or instruction is legal. Use dyn_cast<Instruction> only when you need to test whether a runtime instruction was inserted. Constant folding can change printed instruction counts without changing semantics."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why is “every Create... call adds exactly one instruction” an unsafe testing assumption?"
+            }
+          ]
+        },
+        {
           "type": "checkpoint",
           "text": "Checkpoint: Which block executes the allocation? Why is a switch destination not a substitute for that destination block’s own terminator? Why must new blocks not enter stateBlocks?"
         }
       ],
-      "words": 606,
+      "words": 703,
       "quiz": {
         "q": "Does CreateSwitch(..., 3) create three cases?",
         "choices": [
@@ -2087,7 +2288,7 @@
           "text": "Checkpoint: Why must the old branch stay alive until replacements are emitted? Why does a conditional entry require more than storing the first state ID?"
         }
       ],
-      "words": 884,
+      "words": 869,
       "quiz": {
         "q": "At this checkpoint, which original branches have been redirected?",
         "choices": [
@@ -2100,9 +2301,1243 @@
       }
     },
     {
+      "id": 45,
+      "number": 17,
+      "day": 2,
+      "title": "Define the supported input before mutation",
+      "originalTitle": "Define the supported input before mutation",
+      "summary": "Tighten the Day 1 guard before turning the prototype into a complete dispatcher. Scope is a correctness decision.",
+      "takeaway": "Reject unsupported input before the first edit.",
+      "source": "day2",
+      "group": "complete",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: expand FunctionEligibility before enabling the complete rewrite below. These chapters are a book draft; your working implementation has not been updated for you."
+        },
+        {
+          "type": "heading",
+          "text": "Why the old guard is not enough"
+        },
+        {
+          "type": "paragraph",
+          "text": "The earlier guard supported inspection and a limited prototype. A new dispatcher edge can bypass a non-entry alloca, making its pointer fail dominance. Some LLVM instruction results cannot be spilled as ordinary scalars. Special call semantics can forbid the control-flow changes we are proposing."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "EligibilityResult FunctionEligibility::check(const llvm::Function &F) {\n    // Keep the existing declaration, coroutine, EH, and block-address checks.\n    // TODO: reject unsupported allocations, result types, and call semantics.\n    // No IRBuilder, erasure, or demotion belongs in this function.\n    return {true, \"\"};\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — State a narrow contract"
+        },
+        {
+          "type": "paragraph",
+          "text": "This teaching implementation accepts valid, ordinary scalar LLVM IR: integers, floating-point values, pointers, supported branch terminators, and static entry allocations. It is conservative. It rejects explicit intrinsic calls for now rather than assuming every llvm.* operation is safe. This is narrower than “all C++ functions.”"
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Reject non-static allocation"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (const auto *A = llvm::dyn_cast<llvm::AllocaInst>(&I)) {\n    if (!A->isStaticAlloca())\n        return {false, \"only static entry allocas are supported\"};\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "isStaticAlloca() encodes LLVM’s entry/constant-size rule, including restrictions such as inalloca. Do not simply move a loop’s alloca into entry: changing how often storage is allocated may change behavior."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Reject exceptional result and call forms"
+        },
+        {
+          "type": "paragraph",
+          "text": "The full reference rejects non-scalar instruction results, naked functions, inline assembly calls, convergent calls, operand bundles, returns_twice, musttail, and intrinsic calls. Explain the reason for each before relaxing it; rejection is a defined limitation, not a bug to hide."
+        },
+        {
+          "type": "heading",
+          "text": "The full eligibility reference"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/FunctionEligibility.h\"\n#include \"llvm/IR/Attributes.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/Support/Casting.h\"\nnamespace minishield {\nEligibilityResult FunctionEligibility::check(const llvm::Function &F) {\n    if (F.isDeclaration()) return {false, \"function has no body\"};\n    if (F.isPresplitCoroutine()) return {false, \"presplit coroutine is unsupported\"};\n    if (F.hasPersonalityFn()) return {false, \"exception handling is unsupported\"};\n    if (F.hasFnAttribute(llvm::Attribute::Naked)) return {false, \"naked function is unsupported\"};\n    for (const auto &BB : F) {\n        if (BB.hasAddressTaken()) return {false, \"address-taken block is unsupported\"};\n        if (BB.isEHPad()) return {false, \"EH pad is unsupported\"};\n        switch (BB.getTerminator()->getOpcode()) {\n        case llvm::Instruction::UncondBr:\n        case llvm::Instruction::CondBr:\n        case llvm::Instruction::Switch:\n        case llvm::Instruction::Ret:\n        case llvm::Instruction::Unreachable: break;\n        default: return {false, \"unsupported terminator\"};\n        }\n        for (const auto &I : BB) {\n            if (const auto *A = llvm::dyn_cast<llvm::AllocaInst>(&I)) {\n                if (!A->isStaticAlloca()) return {false, \"only static entry allocas are supported\"};\n            }\n            if (const auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {\n                const auto *callee = CB->getCalledFunction();\n                if (callee && callee->isIntrinsic()) return {false, \"intrinsic calls are outside this prototype's scope\"};\n                if (CB->isInlineAsm() || CB->isConvergent() || CB->getNumOperandBundles() ||\n                    CB->hasFnAttr(llvm::Attribute::ReturnsTwice))\n                    return {false, \"special call semantics are unsupported\"};\n                if (const auto *call = llvm::dyn_cast<llvm::CallInst>(CB))\n                    if (call->isMustTailCall()) return {false, \"musttail is unsupported\"};\n            }\n            auto *type = I.getType();\n            if (!type->isVoidTy() && !type->isIntegerTy() &&\n                !type->isFloatingPointTy() && !type->isPointerTy())\n                return {false, \"only scalar instruction results are supported\"};\n        }\n    }\n    return {true, \"\"};\n}\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Add a fixture with an alloca outside entry, one with a variable-size alloca, and one producing an unsupported aggregate result.",
+            "Validate each fixture with opt -passes=verify before testing the plugin. Invalid input is not a useful eligibility test.",
+            "Expect a named rejection, valid output, and an empty canonical before/after diff. Keep the existing accept fixtures as positive controls."
+          ]
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Dominance applies to allocation pointers too",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Demoting arithmetic removes direct cross-block data uses, but the alloca result is itself an SSA pointer. If a dispatcher reaches a use without passing through that allocation, the IR is still invalid. Preserving entry storage and rejecting non-entry allocations are separate pieces of the design."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why does putting values in memory not eliminate every SSA dominance requirement?"
+            }
+          ]
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Why special call semantics constrain CFG rewriting",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "An ordinary call is not the whole story. musttail requires strict call/return structure; inserting a spill reload or transition between the call and return can violate its contract. returns_twice marks calls that can return more than once, so an apparently single forward path does not capture their control effects. A convergent operation has additional constraints on how control flow may be transformed around participating operations. Operand bundles carry semantic information beyond ordinary operands, such as deoptimization or funclet context."
+            },
+            {
+              "type": "paragraph",
+              "text": "These features are not inherently untransformable. This small pass lacks a feature-specific proof and implementation, so preflight rejects them before editing. In contrast, a normal recursive scalar call can remain in place if its result is prepared correctly. “Do not modify calls” is not enough: moving surrounding control flow or inserting value transport can still change a call contract."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why can a musttail call become invalid even when its opcode and callee are unchanged?"
+            },
+            {
+              "type": "paragraph",
+              "text": "See the [LLVM call instruction reference](https://llvm.org/docs/LangRef.html#call-instruction) and the specific attributes/bundles involved before relaxing a rejection."
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Name a source feature rejected by this prototype and the invariant the rejection protects. Why must every rejection happen before the first demotion?"
+        }
+      ],
+      "words": 784,
+      "quiz": {
+        "q": "Can you safely hoist every non-entry alloca into entry?",
+        "choices": [
+          "No; allocation frequency and lifetime can affect behavior",
+          "Yes; all pointers are equivalent",
+          "Yes, if verify passes"
+        ],
+        "answer": 0,
+        "why": "Hoisting can change program semantics. The prototype rejects these allocations until a sound handling strategy is designed."
+      }
+    },
+    {
+      "id": 46,
+      "number": 18,
+      "day": 2,
+      "title": "Give state-machine construction its own class",
+      "originalTitle": "Give state-machine construction its own class",
+      "summary": "Extract the builder from the orchestrating pass and make its preconditions explicit.",
+      "takeaway": "A small interface separates policy, preparation, and construction.",
+      "source": "day2",
+      "group": "complete",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: declare StateMachineBuilder and move dispatcher construction into it. Keep eligibility and value preparation in FlatteningPass."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#pragma once\n#include \"llvm/IR/Function.h\"\nnamespace minishield {\nclass StateMachineBuilder {\npublic:\n    // TODO: declare static bool build(llvm::Function &F).\n};\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Define the contract"
+        },
+        {
+          "type": "paragraph",
+          "text": "build receives a mutable function with valid IR that passed the strict guard and has already had PHIs and cross-block results prepared. It returns whether it changed the CFG. It does not own the function and must not be called on rejected input."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Snapshot only original blocks and terminators"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "std::vector<llvm::BasicBlock *> states;\nstd::vector<llvm::Instruction *> terminators;\nllvm::DenseMap<llvm::BasicBlock *, unsigned> ids;\nfor (auto &BB : F) {\n    terminators.push_back(BB.getTerminator());\n    if (&BB != &entry) {\n        ids[&BB] = static_cast<unsigned>(states.size());\n        states.push_back(&BB);\n    }\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Capture the entry terminator too: it must choose the first state. Snapshot before creating dispatch/invalid so the later rewrite does not accidentally rewrite the dispatcher’s own switch."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Skip functions with no dispatchable entry path"
+        },
+        {
+          "type": "paragraph",
+          "text": "For this design, build returns false if there is only one block or entry has no successors. Do not construct an unused state machine just to satisfy a block-count expectation."
+        },
+        {
+          "type": "heading",
+          "text": "The full header"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#pragma once\n#include \"llvm/IR/Function.h\"\nnamespace minishield {\nclass StateMachineBuilder {\npublic:\n    // Precondition: valid IR, accepted input, PHIs/cross-block values prepared.\n    static bool build(llvm::Function &F);\n};\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Implementation scaffold"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/StateMachineBuilder.h\"\nnamespace minishield {\nbool StateMachineBuilder::build(llvm::Function &F) {\n    auto &entry = F.getEntryBlock();\n    if (F.size() < 2 || entry.getTerminator()->getNumSuccessors() == 0)\n        return false;\n    // TODO: snapshot originals, allocate state, create dispatch and invalid.\n    // TODO: rewrite the original terminators using the next three lessons.\n    return true;\n}\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Add the implementation source to the existing CMake target after writing it. A helper header alone does not link a definition. Until the next lessons fill in rewriting, do not replace your working pass with an incomplete scaffold."
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Static member functions and borrowed references",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "static here means the method needs no StateMachineBuilder instance or this pointer. It does not mean the function owns global state or that F is immutable. The Function& parameter borrows an object owned by LLVM; the bool reports mutation, not a newly allocated function."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why is a non-owning Function& preferable to new Function(...) for this interface?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which responsibilities remain in the pass, which in eligibility, and which in the builder?"
+        }
+      ],
+      "words": 386,
+      "quiz": {
+        "q": "Why snapshot terminators before creating new blocks?",
+        "choices": [
+          "To avoid including newly created dispatcher control flow in the original-block rewrite",
+          "Because pointers automatically delete instructions",
+          "To make the entry unreachable"
+        ],
+        "answer": 0,
+        "why": "Rewriting the dispatcher’s own switch as though it were an original switch would break the machine."
+      }
+    },
+    {
+      "id": 47,
+      "number": 19,
+      "day": 2,
+      "title": "Choose states for conditional branches",
+      "originalTitle": "Choose states for conditional branches",
+      "summary": "Use select to compute the next state without introducing another conditional branch.",
+      "takeaway": "Condition, true destination, false destination: preserve their order.",
+      "source": "day2",
+      "group": "complete",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: replace a conditional original branch with a selected state, a store, and a branch to dispatch. This applies to conditional entries and conditional state blocks."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "case llvm::Instruction::CondBr: {\n    auto *branch = llvm::cast<llvm::CondBrInst>(T);\n    // TODO: next = select(condition, true-state, false-state).\n    break;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Read the original operands before erasing"
+        },
+        {
+          "type": "paragraph",
+          "text": "getCondition() gives an i1 LLVM value. getSuccessor(0) is the true destination; getSuccessor(1) is the false destination. Use the pointer-to-state mapping built from original blocks."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Build an i32 state choice"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "next = b.CreateSelect(branch->getCondition(),\n                      stateOf(branch->getSuccessor(0)),\n                      stateOf(branch->getSuccessor(1)), \"ms.next\");"
+        },
+        {
+          "type": "paragraph",
+          "text": "CreateSelect produces an LLVM value, not a host C++ decision. Both alternatives are i32 state constants; the condition chooses which value will be stored when the target program executes."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Share the store-and-branch tail"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "b.CreateStore(next, slot);\nb.CreateBr(dispatch);\nT->eraseFromParent();"
+        },
+        {
+          "type": "paragraph",
+          "text": "Do this once after the opcode switch. ret and unreachable use continue to skip the shared tail. A plain break in those cases would reach the tail with next still null."
+        },
+        {
+          "type": "heading",
+          "text": "The full conditional case"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "case llvm::Instruction::CondBr: {\n    auto *branch = llvm::cast<llvm::CondBrInst>(T);\n    next = b.CreateSelect(branch->getCondition(),\n                          stateOf(branch->getSuccessor(0)),\n                          stateOf(branch->getSuccessor(1)), \"ms.next\");\n    break;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "For phi.ll, true must select left’s state and false right’s state. Inspect a select before the entry’s store/dispatch branch. Test both conditions with a wrapper calling merge; a verifier-only check cannot catch swapped destinations."
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Switch scopes, break, and continue",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Braces around a case introduce a C++ scope for local declarations. break exits the switch and proceeds to its shared tail. continue inside that switch applies to the surrounding terminator loop, skipping the tail. Confusing them can emit an invalid null store or accidentally rewrite a return."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Trace execution after break and after continue in the complete helper."
+            }
+          ]
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "A select is an IR value, not a C++ if",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "The C++ builder runs while transforming the module. It constructs a target-program select; it does not know a runtime condition such as the input argument. Select chooses values, not which operand instructions execute. Here its operands are constants, so we are not speculatively executing side-effecting operations."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why would replacing arbitrary control-dependent operations with eager computations plus select require more care?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: How would a true/false state swap pass verify and still compute the wrong answer?"
+        }
+      ],
+      "words": 356,
+      "quiz": {
+        "q": "What does CreateSelect return here?",
+        "choices": [
+          "An LLVM value representing a runtime choice",
+          "A bool telling the C++ pass which branch was taken",
+          "A new executable BasicBlock"
+        ],
+        "answer": 0,
+        "why": "The builder constructs IR. The target program evaluates the condition later."
+      }
+    },
+    {
+      "id": 48,
+      "number": 20,
+      "day": 2,
+      "title": "Lower original switches to state selection",
+      "originalTitle": "Lower original switches to state selection",
+      "summary": "Preserve default behavior and each integer case while replacing the original multi-way terminator.",
+      "takeaway": "Start from the default state, then override it on matching cases.",
+      "source": "day2",
+      "group": "complete",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: handle original SwitchInst terminators, not the newly created dispatcher switch."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "case llvm::Instruction::Switch: {\n    auto *sw = llvm::cast<llvm::SwitchInst>(T);\n    // TODO: initialize next from default destination.\n    for (auto oneCase : sw->cases()) {\n        // TODO: compare original condition with this case value.\n        // TODO: select this case state or retain the previous next.\n    }\n    break;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Make default explicit"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "next = stateOf(sw->getDefaultDest());"
+        },
+        {
+          "type": "paragraph",
+          "text": "An input not matching any listed case must retain the original default destination. Initializing next to zero would silently change this behavior."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Compare using the original condition type"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());"
+        },
+        {
+          "type": "paragraph",
+          "text": "The switch’s integer condition is not necessarily i32. Its case constants already have the matching type. The generated comparison yields i1, while destination state constants remain i32."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Chain value selections"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()), next, \"ms.next\");"
+        },
+        {
+          "type": "paragraph",
+          "text": "Valid switch case values are unique, so at most one case comparison is true for a defined condition. Several case values may share a destination. Keep all those matches; do not confuse unique values with unique destinations."
+        },
+        {
+          "type": "heading",
+          "text": "The full switch case"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "case llvm::Instruction::Switch: {\n    auto *sw = llvm::cast<llvm::SwitchInst>(T);\n    next = stateOf(sw->getDefaultDest());\n    for (auto oneCase : sw->cases()) {\n        auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());\n        next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()),\n                              next, \"ms.next\");\n    }\n    break;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Test switch.ll with every explicit case and at least one default input. Add a switch with an i64 condition and one with two case values targeting the same block. Check generated IR and observable results."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Value* may identify a constant, not an instruction",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "IRBuilder<> uses a constant folder by default. If a comparison or select can be folded, a Create* helper can return a Constant rather than insert an Instruction. This is why next is llvm::Value*, not Instruction*. Never blindly cast every builder result to Instruction just because the method starts with Create."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "llvm::Value *v = b.CreateAdd(b.getInt32(1), b.getInt32(2));\n// With the default folder, v can be the constant i32 3.\n// cast<Instruction>(v) is not a valid assumption."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: How is a host C++ integer 3 different from an LLVM ConstantInt representing target value 3?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why must default be initialized first? Why must the compare operands use the original switch type?"
+        }
+      ],
+      "words": 360,
+      "quiz": {
+        "q": "Can two different switch case constants map to the same state?",
+        "choices": [
+          "Yes, if they originally target the same block",
+          "No, every destination must be unique",
+          "Only if the condition is i32"
+        ],
+        "answer": 0,
+        "why": "Case values must be unique. Destinations may be shared, and the transformation must preserve that mapping."
+      }
+    },
+    {
+      "id": 49,
+      "number": 21,
+      "day": 2,
+      "title": "Rewrite every original terminator",
+      "originalTitle": "Rewrite every original terminator",
+      "summary": "Combine the branch forms into one complete, carefully bounded state-machine builder.",
+      "takeaway": "Rewrite the snapshot, never the dispatcher’s new switch.",
+      "source": "day2",
+      "group": "complete",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: complete StateMachineBuilder.cpp using the previous branch cases. This reference assumes the strict preflight and value-preparation stages."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto *T : terminators) {\n    llvm::IRBuilder<> b(T);\n    llvm::Value *next = nullptr;\n    switch (T->getOpcode()) {\n    // TODO: UncondBr, CondBr, Switch assign next.\n    // TODO: Ret and Unreachable skip the rewrite tail.\n    // TODO: an unsupported opcode is an internal preflight-contract failure.\n    }\n    // TODO: store next, branch to dispatch, erase T.\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Handle terminal paths"
+        },
+        {
+          "type": "paragraph",
+          "text": "Return and unreachable terminate the current function path. Leave those instructions unchanged and continue the outer loop. Do not set a state and dispatch again after a return."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Validate state membership"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use find() rather than silently interpreting lookup’s default zero as a real state. Missing IDs here mean a bug in the snapshot/preflight contract for valid input. Unsupported user input should have been cleanly rejected before mutation."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Finish each replacement before verifying"
+        },
+        {
+          "type": "paragraph",
+          "text": "Insert comparisons/selects, then the state store, then the dispatch branch, and erase the old terminator. Do not use an erased pointer or a builder insertion point that still refers to the erased instruction."
+        },
+        {
+          "type": "heading",
+          "text": "The full builder implementation"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/StateMachineBuilder.h\"\n#include \"llvm/ADT/DenseMap.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/Support/ErrorHandling.h\"\n#include <vector>\n\nnamespace minishield {\nbool StateMachineBuilder::build(llvm::Function &F) {\n    auto &entry = F.getEntryBlock();\n    if (F.size() < 2 || entry.getTerminator()->getNumSuccessors() == 0)\n        return false;\n\n    std::vector<llvm::BasicBlock *> states;\n    std::vector<llvm::Instruction *> terminators;\n    llvm::DenseMap<llvm::BasicBlock *, unsigned> ids;\n    for (auto &BB : F) {\n        terminators.push_back(BB.getTerminator());\n        if (&BB != &entry) {\n            ids[&BB] = static_cast<unsigned>(states.size());\n            states.push_back(&BB);\n        }\n    }\n    llvm::IRBuilder<> setup(&*entry.getFirstInsertionPt());\n    auto *slot = setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\");\n    auto *dispatch = llvm::BasicBlock::Create(F.getContext(), \"ms.dispatch\", &F);\n    auto *invalid = llvm::BasicBlock::Create(F.getContext(), \"ms.invalid\", &F);\n    llvm::IRBuilder<> invalidBuilder(invalid);\n    invalidBuilder.CreateUnreachable();\n    llvm::IRBuilder<> db(dispatch);\n    auto *current = db.CreateLoad(db.getInt32Ty(), slot, \"ms.current\");\n    auto *stateSwitch = db.CreateSwitch(current, invalid,\n                                      static_cast<unsigned>(states.size()));\n    auto stateOf = [&](llvm::BasicBlock *BB) -> llvm::ConstantInt * {\n        auto it = ids.find(BB);\n        if (it == ids.end())\n            llvm::report_fatal_error(\"state destination missing after valid-input preflight\");\n        return db.getInt32(it->second);\n    };\n    for (auto *BB : states)\n        stateSwitch->addCase(stateOf(BB), BB);\n\n    for (auto *T : terminators) {\n        llvm::IRBuilder<> b(T);\n        b.SetCurrentDebugLocation(T->getDebugLoc());\n        llvm::Value *next = nullptr;\n        switch (T->getOpcode()) {\n        case llvm::Instruction::UncondBr:\n            next = stateOf(T->getSuccessor(0));\n            break;\n        case llvm::Instruction::CondBr: {\n            auto *branch = llvm::cast<llvm::CondBrInst>(T);\n            next = b.CreateSelect(branch->getCondition(),\n                                  stateOf(branch->getSuccessor(0)),\n                                  stateOf(branch->getSuccessor(1)), \"ms.next\");\n            break;\n        }\n        case llvm::Instruction::Switch: {\n            auto *sw = llvm::cast<llvm::SwitchInst>(T);\n            next = stateOf(sw->getDefaultDest());\n            for (auto oneCase : sw->cases()) {\n                auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());\n                next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()),\n                                      next, \"ms.next\");\n            }\n            break;\n        }\n        case llvm::Instruction::Ret:\n        case llvm::Instruction::Unreachable:\n            continue;\n        default:\n            llvm::report_fatal_error(\"unsupported terminator escaped preflight\");\n        }\n        b.CreateStore(next, slot);\n        b.CreateBr(dispatch);\n        T->eraseFromParent();\n    }\n    return true;\n}\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Build only after you have added the new helper source to CMake. Run the pass followed by verify over every positive fixture. At this final builder stage, each original nonterminal block—including entry—should store a destination state and branch to dispatch. The dispatcher still has its switch; terminal blocks still return or end in unreachable."
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Property",
+              "Expected for this design"
+            ],
+            [
+              "Original setup",
+              "Preserved first; not assigned a state."
+            ],
+            [
+              "New blocks",
+              "Two: dispatch and invalid."
+            ],
+            [
+              "Switch cases",
+              "One per non-entry block in the post-preparation snapshot."
+            ],
+            [
+              "Original return/unreachable",
+              "Remain terminal."
+            ],
+            [
+              "Other original terminators",
+              "Replaced by state selection/store/dispatch branch."
+            ]
+          ]
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "A structural invariant is measured at a particular stage",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Count N immediately before building the dispatcher, after SSA preparation. This helper adds two blocks, so its result has N+2 blocks. Do not blindly assert input N+1 from the old roadmap: a different design or earlier preparation can change that count. A test must describe this algorithm, not a remembered number."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Which stage’s block count does your test record?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which terminator is intentionally never in the snapshot? Why does the helper use a fatal internal-contract error rather than partially returning success?"
+        }
+      ],
+      "words": 594,
+      "quiz": {
+        "q": "Which switch must remain after rewriting original switches?",
+        "choices": [
+          "The newly created dispatcher switch",
+          "Every original switch",
+          "No switch can remain in a flattener"
+        ],
+        "answer": 0,
+        "why": "Original switches become state selection. The dispatcher switch implements the state machine itself."
+      }
+    },
+    {
+      "id": 50,
+      "number": 22,
+      "day": 2,
+      "title": "Orchestrate policy, preparation, and construction",
+      "originalTitle": "Orchestrate policy, preparation, and construction",
+      "summary": "Finish the pass as an ordered pipeline and account for every mutation in analysis invalidation.",
+      "takeaway": "One pass coordinates; each helper has a focused job.",
+      "source": "day2",
+      "group": "complete",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: replace the prototype’s inline construction with the strict guard, preparation stage, and StateMachineBuilder call."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// 1. Skip declarations.\n// 2. Check strict eligibility; reject without mutation.\n// 3. Skip entry-only/no-successor functions.\n// 4. Collect and demote PHIs.\n// 5. Collect and demote suitable cross-block values.\n// 6. Build the state machine.\n// 7. Return the preservation set for all changes."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Keep rejection before modification"
+        },
+        {
+          "type": "paragraph",
+          "text": "No demotion or state allocation should precede the decision. Rejection after a partial transformation violates the unchanged-input contract."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Combine change information without skipping work"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "bool changed = !phis.empty() || !escaping.empty();\nchanged |= StateMachineBuilder::build(F);"
+        },
+        {
+          "type": "paragraph",
+          "text": "Here |= is boolean accumulation that evaluates the builder call even if changed was already true. Writing changed = changed || build(F) would short-circuit and skip construction whenever demotion changed the function. Alternatively call build first into a separate bool, then combine the results."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Preserve conservatively"
+        },
+        {
+          "type": "paragraph",
+          "text": "Return none() after any mutation in this teaching implementation. Preserving a particular analysis is a claim you must justify and, for dependent cached analyses, implement correctly. “The graph still looks similar” is not enough."
+        },
+        {
+          "type": "heading",
+          "text": "The full pass reference"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/FlatteningPass.h\"\n#include \"minishield/FunctionEligibility.h\"\n#include \"minishield/StateMachineBuilder.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/Support/Casting.h\"\n#include \"llvm/Support/raw_ostream.h\"\n#include \"llvm/Transforms/Utils/Local.h\"\n#include <vector>\nnamespace minishield {\nllvm::PreservedAnalyses FlatteningPass::run(llvm::Function &F,\n                                           llvm::FunctionAnalysisManager &) {\n    if (F.isDeclaration()) return llvm::PreservedAnalyses::all();\n    const auto decision = FunctionEligibility::check(F);\n    if (!decision.eligible) {\n        llvm::errs() << \"[MiniShield] rejected: \" << F.getName() << \": \" << decision.reason << \"\\n\";\n        return llvm::PreservedAnalyses::all();\n    }\n    if (F.size() < 2 || F.getEntryBlock().getTerminator()->getNumSuccessors() == 0)\n        return llvm::PreservedAnalyses::all();\n    std::vector<llvm::PHINode *> phis;\n    for (auto &BB : F)\n        for (auto &I : BB)\n            if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) phis.push_back(phi);\n    for (auto *phi : phis) llvm::DemotePHIToStack(phi);\n    std::vector<llvm::Instruction *> escaping;\n    for (auto &BB : F)\n        for (auto &I : BB)\n            if (!I.getType()->isVoidTy() && !llvm::isa<llvm::AllocaInst>(I) &&\n                I.isUsedOutsideOfBlock(&BB)) escaping.push_back(&I);\n    for (auto *I : escaping) llvm::DemoteRegToStack(*I);\n    bool changed = !phis.empty() || !escaping.empty();\n    changed |= StateMachineBuilder::build(F);\n    return changed ? llvm::PreservedAnalyses::none() : llvm::PreservedAnalyses::all();\n}\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Run stats before and after flattening in the same pipeline so cached analysis invalidation is exercised. Expect the second stats pass to observe the new blocks and edges, not the original cached CFG."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "opt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-stats,minishield-flatten,minishield-stats),verify' \\\n  -disable-output tests/ir/loop.ll"
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Short-circuiting can silently skip a transformation",
+          "blocks": [
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "bool alreadyChanged = true;\n// Bad orchestration: RHS is not evaluated.\nalreadyChanged = alreadyChanged || build(F);\n// Clear alternative:\nbool built = build(F);\nalreadyChanged = alreadyChanged || built;"
+            },
+            {
+              "type": "paragraph",
+              "text": "This is C++ evaluation behavior, not an LLVM pass-manager feature. A change flag should summarize work, not accidentally control whether required work runs."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: How would you test that the builder runs when a PHI was already demoted?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which helper owns policy? Which phase changes data flow? Which creates CFG edges? What exactly does the final bool summarize?"
+        }
+      ],
+      "words": 458,
+      "quiz": {
+        "q": "Why can changed = changed || build(F) be wrong?",
+        "choices": [
+          "It may not call build when changed is already true",
+          "It always calls build twice",
+          "It turns a bool into an LLVM i1"
+        ],
+        "answer": 0,
+        "why": "C++ || short-circuits. Use a separate result or an accumulation form that still evaluates the builder."
+      }
+    },
+    {
+      "id": 51,
+      "number": 23,
+      "day": 2,
+      "title": "Inspect the final shape with LLVM tools",
+      "originalTitle": "Inspect the final shape with LLVM tools",
+      "summary": "Learn to diagnose a transformation from IR, pass traces, and verifier errors before relying on runtime comparisons.",
+      "takeaway": "The verifier catches structure; inspection explains how it was built.",
+      "source": "day2",
+      "group": "verify",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: establish structural evidence for the complete rewrite before measuring performance."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "opt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/loop.ll -o build/loop-flat.ll\n# TODO: inspect setup, dispatch, state stores, and terminal paths."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Inspect invariants, not exact names"
+        },
+        {
+          "type": "paragraph",
+          "text": "LLVM may uniquify names such as ms.dispatch. Use opcode/edge relationships for assertions. Text dumps remain useful for understanding, but a test that only greps for a name can pass with a dead or malformed intended structure."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Read an SSA dominance error"
+        },
+        {
+          "type": "paragraph",
+          "text": "If a definition no longer dominates a use, locate both blocks and draw the new incoming edges. Do not hide the error by deleting verify. Check that a slot was allocated in preserved entry and that the use refers to a local reload, not an old cross-block definition."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Trace passes"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "opt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -debug-pass-manager -disable-output tests/ir/loop.ll"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use the pass-manager trace to distinguish “loaded,” “scheduled,” “skipped,” and “ran.” Optional passes can be skipped on optnone functions; a missing diagnostic is not always a broken plugin."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Preserve a failing artifact"
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep the smallest failing input, the command, the compiler version, and stderr. Save generated IR under build/. Record which stage first breaks rather than changing several phases at once."
+        },
+        {
+          "type": "heading",
+          "text": "The full inspection checklist"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Setup remains the first block and has no predecessors.",
+            "State allocation dominates every load/store using its pointer.",
+            "Every generated block has a terminator.",
+            "Dispatch cases reference the intended state blocks.",
+            "Original state transitions store a valid ID before dispatch.",
+            "The default invalid path must be unreachable under valid state transitions."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Repeat with the branch, switch, recursion, loop, and PHI fixtures. Structural checks must pass before behavior comparisons are useful."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: What would a correct-looking but unreachable dispatcher prove? Why must instructions and edges both be inspected?"
+        }
+      ],
+      "words": 305,
+      "quiz": {
+        "q": "Does finding the text ms.dispatch prove flattening is active?",
+        "choices": [
+          "No; the block could be unreachable or incorrectly wired",
+          "Yes; that name is reserved by LLVM",
+          "Only when the name appears twice"
+        ],
+        "answer": 0,
+        "why": "A block name is a display aid. Reachability and transition behavior establish whether it is actually part of execution."
+      }
+    },
+    {
+      "id": 52,
+      "number": 24,
+      "day": 2,
+      "title": "Compare observable behavior on a defined domain",
+      "originalTitle": "Compare observable behavior on a defined domain",
+      "summary": "Build original and transformed functions from the same front-end IR, then compare outputs for bounded inputs.",
+      "takeaway": "Equivalent behavior is stronger than valid IR, but testing is still finite evidence.",
+      "source": "day2",
+      "group": "verify",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: write a C input function and a separate driver. Transform the function’s IR, not the driver that parses arguments and prints results."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "int calculate_discount(int amount, int level) {\n    // TODO: reject negative amounts with 0.\n    // TODO: choose a percentage by level, then return discounted amount.\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Bound the test domain"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use amounts from -1000 through 10000 and levels 0 through 5. The arithmetic below cannot overflow int on that domain. Comparing two programs that both have source undefined behavior is not a meaningful correctness test."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Write the function and driver"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "int calculate_discount(int amount, int level) {\n    if (amount < 0) return 0;\n    int rate;\n    switch (level) {\n    case 0: rate = 0; break;\n    case 1: rate = 5; break;\n    case 2: rate = 10; break;\n    default: rate = 15; break;\n    }\n    return amount - amount * rate / 100;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Save that as tests/cases/discount.c and the following as tests/cases/discount_driver.c. The command-line guard keeps executions inside the documented domain."
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n#include <stdlib.h>\nextern int calculate_discount(int amount, int level);\nint main(int argc, char **argv) {\n    if (argc != 3) return 2;\n    char *end1, *end2;\n    long amount = strtol(argv[1], &end1, 10);\n    long level = strtol(argv[2], &end2, 10);\n    if (*end1 || *end2 || amount < -1000 || amount > 10000 || level < 0 || level > 5)\n        return 2;\n    printf(\"%d\\n\", calculate_discount((int)amount, (int)level));\n    return 0;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Create one common IR input"
+        },
+        {
+          "type": "paragraph",
+          "text": "The front end emits unoptimized IR without the O0 optnone attribute so the optional pass will run. Both variants then use the same -O2 backend. This separates the tested transformation from accidental differences in front-end settings."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "mkdir -p build/differential\nclang -O0 -Xclang -disable-O0-optnone -S -emit-llvm \\\n  tests/cases/discount.c -o build/differential/common.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S build/differential/common.ll -o build/differential/protected.ll\nclang -O2 tests/cases/discount_driver.c build/differential/common.ll \\\n  -o build/differential/original\nclang -O2 tests/cases/discount_driver.c build/differential/protected.ll \\\n  -o build/differential/protected"
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Compare boundary and representative inputs"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "build/differential/original 1000 2\nbuild/differential/protected 1000 2\n# Expected stdout from each: 900\nbuild/differential/original -1 0\nbuild/differential/protected -1 0\n# Expected stdout from each: 0"
+        },
+        {
+          "type": "heading",
+          "text": "The full comparison contract"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Same common input IR, driver, backend flags, toolchain, and inputs.",
+            "Both processes exit normally; compare exit status and stdout. Treat crashes/timeouts as failures.",
+            "Inspect transformed IR to ensure a transformation actually happened; equality is trivial if the pass skipped everything.",
+            "Passing examples provide evidence for this test domain, not a universal proof."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Start with amounts -1, 0, 1, 99, 100, 1000, 10000 and every level. Day 3 adds seeded randomized cases, CTest wiring, and diagnostics for the first mismatch."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why is -disable-O0-optnone present? Why transform the function module and link a common driver afterward?"
+        }
+      ],
+      "words": 450,
+      "quiz": {
+        "q": "Why use the same common IR for both builds?",
+        "choices": [
+          "To isolate the transformation instead of changing front-end input as well",
+          "To avoid linking either executable",
+          "To prove all inputs correct mathematically"
+        ],
+        "answer": 0,
+        "why": "A fair comparison holds unrelated pipeline choices constant. It still needs defined inputs and does not become a proof."
+      }
+    },
+    {
+      "id": 53,
+      "number": 25,
+      "day": 2,
+      "title": "Add difficult CFG fixtures deliberately",
+      "originalTitle": "Add difficult CFG fixtures deliberately",
+      "summary": "Exercise nested loops, PHI cycles, multiple returns, shared switch destinations, and the unchanged rejection contract.",
+      "takeaway": "One fixture should isolate one failure mode.",
+      "source": "day2",
+      "group": "verify",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: grow the fixture corpus before claiming the transformer handles general control flow."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "; For each new fixture, write down before coding:\n; 1. the original nodes and edges;\n; 2. PHIs and values used in another block;\n; 3. expected terminal outcomes on a finite input set;\n; 4. whether the support contract accepts or rejects it."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Test parallel PHI selection"
+        },
+        {
+          "type": "paragraph",
+          "text": "Two loop PHIs can exchange old values. Their incoming values are conceptually selected together. A naive hand-written sequence of stores and loads can overwrite an old value before the other PHI uses it; do not replace LLVM’s helper with that shortcut."
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "header:\n  %x = phi i32 [ 0, %entry ], [ %y, %body ]\n  %y = phi i32 [ 1, %entry ], [ %x, %body ]\n  ; Complete the loop with a bounded induction counter before running it."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Test several shapes"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Fixture",
+              "What it isolates"
+            ],
+            [
+              "Nested bounded loops",
+              "Repeated state transitions and multiple loop headers."
+            ],
+            [
+              "One loop with two latches",
+              "Loop count need not equal back-edge count."
+            ],
+            [
+              "Several returns",
+              "Terminal states must not dispatch again."
+            ],
+            [
+              "Switch cases sharing a destination",
+              "Distinct values may map to one state."
+            ],
+            [
+              "No PHIs, one escaping add",
+              "The second preparation stage must run."
+            ],
+            [
+              "Non-entry or dynamic alloca",
+              "Reject before any mutation."
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Make a test oracle"
+        },
+        {
+          "type": "paragraph",
+          "text": "For each accepted fixture, use a bounded harness with known or original results. For rejected fixtures, compare canonical IR and the intended reason. Do not count an arbitrary early rejection as evidence that a later check works."
+        },
+        {
+          "type": "heading",
+          "text": "The full review procedure"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Verify the input independently.",
+            "Predict accept/reject and expected outputs by hand.",
+            "Run the transform with verify.",
+            "Inspect structural relationships.",
+            "Execute both versions in the defined domain.",
+            "Keep a failing case as a regression test before attempting a fix."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not paste the partial PHI fragment above as a complete module; the loop counter and terminating path are an exercise. Finish it, validate it, then compare several iteration counts including zero and one."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why can preserving SSA validity still produce a wrong value when a hand-written PHI lowering overwrites an old incoming value?"
+        }
+      ],
+      "words": 363,
+      "quiz": {
+        "q": "What does a two-latch fixture test?",
+        "choices": [
+          "That one loop can have more than one back edge",
+          "That every function needs two dispatchers",
+          "That the verifier executes both loop paths"
+        ],
+        "answer": 0,
+        "why": "Back-edge count and natural-loop count are different metrics."
+      }
+    },
+    {
+      "id": 54,
+      "number": 26,
+      "day": 2,
+      "title": "Account for optimizers, debug data, and limitations",
+      "originalTitle": "Account for optimizers, debug data, and limitations",
+      "summary": "Understand where the transformation sits in a compilation pipeline and what the prototype does not guarantee.",
+      "takeaway": "Measure the artifact you actually ship, not the intermediate picture you like.",
+      "source": "day2",
+      "group": "verify",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: record the transformation’s placement relative to optimization and inspect both intermediate and final artifacts."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "common IR → [optional optimization] → MiniShield → [backend optimization] → executable\n# TODO: choose and record the exact pipeline for each experiment."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Expect simplification"
+        },
+        {
+          "type": "paragraph",
+          "text": "An optimizer can simplify state dispatch or replace a branch-heavy function with straight-line code. A successful build or matching output does not prove that a dispatcher remains in the emitted binary. Inspect optimized IR and disassembly; report when a candidate fixture no longer demonstrates flattening."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Keep comparisons fair"
+        },
+        {
+          "type": "paragraph",
+          "text": "Hold source, compiler, target, optimization level, driver, and input domain constant when comparing original and protected variants. Changing the transformation stage is an experiment to label, not an invisible adjustment to improve a result."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Treat metadata by meaning"
+        },
+        {
+          "type": "paragraph",
+          "text": "Set the builder’s debug location from the original terminator for new transition instructions. Do not blindly copy branch-weight metadata to edges with a different meaning. The prototype does not promise fully preserved debug-variable locations or profile quality."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Describe invalid-state behavior accurately"
+        },
+        {
+          "type": "paragraph",
+          "text": "The unreachable default is an internal invariant, not input validation. Loading an uninitialized state is not automatically zero, and executing unreachable is undefined behavior. A real robustness feature would require deliberate initialization and a defined failure policy, separately designed and tested."
+        },
+        {
+          "type": "heading",
+          "text": "The full limitations note to adapt"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Prototype scope: ordinary scalar valid IR and static entry allocas.\nRejected: EH/personality, coroutines, block addresses, unsupported terminators,\n          special call forms, explicit intrinsics, non-static allocas,\n          non-scalar instruction results, and naked functions.\nNot promised: formal behavior proof, arbitrary C++ support, anti-reversing\n              guarantees, unchanged debug/profile quality, or immunity to\n              later optimization simplifying the dispatcher."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Compare pre- and post-optimization IR for at least one fixture. Confirm the reported size/runtime refer to the final executable under the stated pipeline. Record both supported and rejected function counts."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why can stronger optimization improve runtime while weakening the intended obfuscation structure?"
+        }
+      ],
+      "words": 328,
+      "quiz": {
+        "q": "Does an unreachable default provide safe error recovery?",
+        "choices": [
+          "No; executing it is undefined behavior",
+          "Yes; it returns zero",
+          "Yes; it automatically throws a C++ exception"
+        ],
+        "answer": 0,
+        "why": "unreachable states an invariant to the optimizer. It is not a recovery routine or a runtime bounds check."
+      }
+    },
+    {
+      "id": 55,
+      "number": 27,
+      "day": 2,
+      "title": "Close Day 2 with an evidence checklist",
+      "originalTitle": "Close Day 2 with an evidence checklist",
+      "summary": "Separate a completed book draft from a completed learner implementation, then prepare the handoff to the test-and-measurement work.",
+      "takeaway": "A checklist is a claim only after its evidence exists.",
+      "source": "day2",
+      "group": "verify",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: review the implementation and evidence before beginning Day 3. The chapters describe work to do; they do not mark it done for you."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "[ ] Strict preflight rejects unsupported input before edits.\n[ ] PHIs and suitable escaping values are prepared.\n[ ] Entry is preserved as one-time setup.\n[ ] Conditional/unconditional/switch transitions choose correct states.\n[ ] Returns and unreachable remain terminal.\n[ ] verify succeeds on the complete fixture set.\n[ ] Accepted fixtures match original behavior on the defined test domain.\n[ ] Rejected fixtures have intended reasons and unchanged canonical IR.\n[ ] Limitations and optimizer placement are documented."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Name the unfinished item"
+        },
+        {
+          "type": "paragraph",
+          "text": "If any box lacks evidence, keep it open and identify a smallest failing fixture or missing test. “The code compiles” does not fill the behavior boxes."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Save only source and reproducible fixtures"
+        },
+        {
+          "type": "paragraph",
+          "text": "Commit the code, build configuration, documentation, and intentional test inputs. Keep build products and before/after generated IR in build/. The local table script remains excluded unless you explicitly decide to track it later."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Move into test infrastructure"
+        },
+        {
+          "type": "paragraph",
+          "text": "Day 3 turns manual observations into repeatable unit, integration, and differential checks, then measures final artifacts. It adds evidence rather than assuming that many successful printouts are a test suite."
+        },
+        {
+          "type": "heading",
+          "text": "The full handoff record"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Toolchain/version:\nCommit tested:\nSupported input contract:\nCommands used:\nPositive/negative fixtures:\nDifferential domain and seed:\nKnown limitations:\nOpen failures:"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Have a reader reproduce one accepted case and one rejection from a fresh build directory using the recorded commands. Do not replace missing measurements with plausible-looking numbers."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which unchecked item currently limits your confidence most, and what concrete experiment would address it?"
+        }
+      ],
+      "words": 289,
+      "quiz": {
+        "q": "When should a Day 2 exit box be checked?",
+        "choices": [
+          "When the corresponding implementation and evidence exist",
+          "When a chapter has been read",
+          "When its expected output looks plausible"
+        ],
+        "answer": 0,
+        "why": "Reading and planning are not execution evidence. Keep those states distinct."
+      }
+    },
+    {
       "id": 44,
       "day": 2,
-      "number": 17,
+      "number": 28,
       "title": "Look up a Day 2 term",
       "originalTitle": "Look up a Day 2 term",
       "summary": "A compact reference for the new SSA, memory, C++ API, and dispatcher vocabulary used in Day 2.",
@@ -2253,9 +3688,62 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition."
+        },
+        {
+          "type": "heading",
+          "text": "Additional terms for the complete rewrite"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Term",
+              "Meaning"
+            ],
+            [
+              "Support contract",
+              "The explicitly documented subset accepted before any mutation."
+            ],
+            [
+              "Convergent call",
+              "A call with additional control-flow constraints; conservatively rejected here."
+            ],
+            [
+              "Operand bundle",
+              "Extra semantic information attached to a call; not ordinary argument data."
+            ],
+            [
+              "musttail / returns_twice",
+              "Special calling/control-flow requirements that ordinary rewriting must not silently violate."
+            ],
+            [
+              "select",
+              "An IR instruction/value choosing between alternatives from an i1 condition; not a host C++ branch."
+            ],
+            [
+              "Constant folding",
+              "Compute a known result during IR construction or optimization rather than inserting a runtime operation."
+            ],
+            [
+              "Short-circuit evaluation",
+              "C++ || and && may skip the right operand; important when it performs a transformation."
+            ],
+            [
+              "Differential test",
+              "Run two implementations on the same defined input and compare observable results."
+            ],
+            [
+              "Undefined behavior",
+              "Execution outside the language/IR contract; it invalidates naive equivalence arguments."
+            ],
+            [
+              "Prototype scope",
+              "A deliberate limited support domain, not a claim to handle every valid LLVM program."
+            ]
+          ]
         }
       ],
-      "words": 97,
+      "words": 719,
       "quiz": {
         "q": "Which pair denotes a type and a value, respectively?",
         "choices": [

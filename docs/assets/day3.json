@@ -1,0 +1,1867 @@
+{
+  "day": 3,
+  "title": "Day 3 — Evidence, tests, and measurement",
+  "status": "Complete teaching draft. These are future exercises, not a report of completed tests or measured performance. Write and run the examples after finishing the Day 2 implementation.",
+  "groups": [
+    {
+      "name": "Plan the evidence",
+      "label": "DESIGN",
+      "key": "design",
+      "ids": [
+        56,
+        57
+      ],
+      "description": "Define claims and factor a testable core without duplicating LLVM."
+    },
+    {
+      "name": "Test the C++ APIs",
+      "label": "UNIT TESTS",
+      "key": "unit",
+      "ids": [
+        58,
+        59,
+        60,
+        61
+      ],
+      "description": "Parse tiny IR, respect object lifetimes, and assert graph/rejection invariants."
+    },
+    {
+      "name": "Exercise the whole pipeline",
+      "label": "INTEGRATION",
+      "key": "integration",
+      "ids": [
+        62,
+        63,
+        64
+      ],
+      "description": "Compare defined behavior, register the suite, and prove failures are detected."
+    },
+    {
+      "name": "Measure actual costs",
+      "label": "MEASURE",
+      "key": "measure",
+      "ids": [
+        65,
+        66
+      ],
+      "description": "Control the pipeline and collect repeatable runtime and size evidence."
+    },
+    {
+      "name": "Make the result reproducible",
+      "label": "DELIVER",
+      "key": "finish",
+      "ids": [
+        67,
+        68,
+        69
+      ],
+      "description": "Write an honest report, build a clean demo, and investigate a simulated bug."
+    },
+    {
+      "name": "Day 3 reference",
+      "label": "GLOSSARY",
+      "key": "reference",
+      "ids": [
+        70
+      ],
+      "description": "Definitions for C++, LLVM, tests, and measurement."
+    }
+  ],
+  "lessons": [
+    {
+      "id": 56,
+      "number": 0,
+      "day": 3,
+      "title": "What evidence will make the pass trustworthy?",
+      "originalTitle": "What evidence will make the pass trustworthy?",
+      "summary": "Turn the Day 2 implementation into a set of independently checkable claims before measuring it.",
+      "takeaway": "Each kind of test answers a different question.",
+      "source": "day3",
+      "group": "design",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: finish the Day 2 checklist, then build the evidence in this book. Reading this draft does not mean tests or benchmarks have run."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Claim",
+              "Independent check",
+              "What it cannot establish"
+            ],
+            [
+              "Input is supported",
+              "Focused eligibility unit tests",
+              "All accepted programs are safe"
+            ],
+            [
+              "IR is well formed",
+              "verifyModule and opt verify",
+              "Equivalent behavior"
+            ],
+            [
+              "Dispatcher has intended shape",
+              "C++ block/edge/state assertions",
+              "Every runtime trace is correct"
+            ],
+            [
+              "Results agree on tested inputs",
+              "Original/protected differential runner",
+              "All possible inputs agree"
+            ],
+            [
+              "Cost is acceptable",
+              "Controlled final-artifact measurements",
+              "Security strength or semantic correctness"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Separate the subjects"
+        },
+        {
+          "type": "paragraph",
+          "text": "A unit test calls a small C++ API in-process. An integration test launches opt and checks plugin loading, registration, scheduling, and output. A differential test compares program observations. A benchmark measures cost after correctness checks. A table of statistics alone is none of these assertions."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Make failures local"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "One negative fixture should isolate one rejection reason; avoid adding EH and block addresses to the same reason test.",
+            "One branch test should exercise both destinations. One switch test should include every case and default.",
+            "Store intentional source fixtures under tests/. Keep generated IR, executables, reports, and temporary logs under build/."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Keep a support matrix"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Feature                  Expected decision        Evidence to add\nordinary conditional     accept                   both outcomes\nloop-carried PHI         accept after preparation zero/one/many iterations\nswitch/shared targets    accept                   cases + default\nnon-static alloca        reject before mutation   reason + unchanged IR\nEH/coroutine/blockaddr   reject before mutation   isolated valid fixtures"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "For each row, write down the expected outcome before running the implementation. An expectation generated by the same broken algorithm is not an independent oracle."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Well-formedness and refinement are different claims",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "A verifier checks LLVM structural rules such as type agreement, terminator placement, and dominance. A true/false destination swap can satisfy all those rules and still change a result. Equivalence work must also account for the defined input domain and observable effects; undefined behavior can make a naive comparison meaningless."
+            },
+            {
+              "type": "paragraph",
+              "text": "Read the [LLVM testing guide](https://llvm.org/docs/TestingGuide.html) for the distinction between regression infrastructure and tests of behavior."
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which test would catch a wrong state constant that still names an existing block?"
+        }
+      ],
+      "words": 355,
+      "quiz": {
+        "q": "What does a successful verifier establish?",
+        "choices": [
+          "The IR satisfies checked structural rules",
+          "The pass preserves every behavior",
+          "The program is faster"
+        ],
+        "answer": 0,
+        "why": "Behavior and performance require their own evidence."
+      }
+    },
+    {
+      "id": 57,
+      "number": 1,
+      "day": 3,
+      "title": "Build one core that the plugin and tests can use",
+      "originalTitle": "Build one core that the plugin and tests can use",
+      "summary": "Factor your own implementation into a position-independent static library while keeping one shared LLVM in the process.",
+      "takeaway": "A MODULE is loaded by opt; a test executable links a reusable core.",
+      "source": "day3",
+      "group": "design",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: after writing the Day 2 builder, refactor CMake. This chapter supplies a proposed file; it does not modify your current build configuration."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "add_library(MiniShieldCore STATIC # TODO: implementation sources)\nadd_library(MiniShield MODULE lib/Plugin.cpp)\n# TODO: PIC, usage requirements, LLVM linkage, and tests."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Move only your implementation sources"
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep Plugin.cpp in the MODULE target. Put the pass, analysis, eligibility, and completed builder implementations in MiniShieldCore. This archive contains your object files; it is not a second static build of LLVM."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Propagate required headers and linkage"
+        },
+        {
+          "type": "paragraph",
+          "text": "The core headers expose LLVM types, so clients need the include paths and definitions. PUBLIC propagates those usage requirements to the plugin and tests. Link the imported shared LLVM target. Set POSITION_INDEPENDENT_CODE on the static core because its objects will enter a shared module."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Register GoogleTest with CTest"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use the installed package, not a network download. GTest::gtest_main supplies main(). include(CTest) enables BUILD_TESTING; discovery turns TEST macros into individually selectable CTest entries. This draft raises the minimum to CMake 3.20 for the later ctest --test-dir examples."
+        },
+        {
+          "type": "heading",
+          "text": "The full CMake reference"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "cmake_minimum_required(VERSION 3.20)\nproject(MiniShield CXX)\nset(CMAKE_CXX_STANDARD 20)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_EXPORT_COMPILE_COMMANDS ON)\nset(LLVM_LINK_LLVM_DYLIB ON)\nfind_package(LLVM REQUIRED CONFIG)\nseparate_arguments(MS_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})\n\nadd_library(MiniShieldCore STATIC\n    lib/FlatteningPass.cpp lib/StatsPass.cpp lib/CFGAnalyzer.cpp\n    lib/FunctionEligibility.cpp lib/StateMachineBuilder.cpp)\nset_target_properties(MiniShieldCore PROPERTIES POSITION_INDEPENDENT_CODE ON)\ntarget_compile_definitions(MiniShieldCore PUBLIC ${MS_LLVM_DEFS})\ntarget_include_directories(MiniShieldCore PUBLIC\n    ${LLVM_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/include)\ntarget_link_libraries(MiniShieldCore PUBLIC LLVM)\n\nadd_library(MiniShield MODULE lib/Plugin.cpp)\ntarget_link_libraries(MiniShield PRIVATE MiniShieldCore)\nset_target_properties(MiniShield PROPERTIES\n    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})\n\ninclude(CTest)\nif(BUILD_TESTING)\n    find_package(GTest CONFIG REQUIRED)\n    add_executable(minishield-unit tests/unit/CoreTest.cpp)\n    target_link_libraries(minishield-unit PRIVATE MiniShieldCore GTest::gtest_main)\n    set_target_properties(minishield-unit PROPERTIES BUILD_RPATH\n        \"$<TARGET_FILE_DIR:GTest::gtest_main>;$<TARGET_FILE_DIR:GTest::gtest>;$<TARGET_FILE_DIR:LLVM>\")\n    include(GoogleTest)\n    gtest_discover_tests(minishield-unit)\nendif()"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake -G Ninja -S . -B build -DBUILD_TESTING=ON \\\n  -DCMAKE_CXX_COMPILER=\"$CONDA_PREFIX/bin/clang++-23\" \\\n  -DLLVM_DIR=\"$CONDA_PREFIX/lib/cmake/llvm\"\ncmake --build build\nctest --test-dir build -N\nctest --test-dir build --output-on-failure"
+        },
+        {
+          "type": "paragraph",
+          "text": "CoreTest.cpp is written in the following chapters. Missing source files cause configure failures; write them before adopting this full CMake reference. Build first: test registration is not a request to compile stale objects."
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Translation units, archives, and one definition",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Each .cpp becomes a translation unit and then an object file. A static archive packages those objects for the linker. Avoid also listing the same implementation .cpp directly in every consuming target: duplicated definitions, especially a second AnalysisKey definition in one linked image, can break linkage or identity assumptions. A header declaration does not replace the single out-of-line definition."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Which target supplies the plugin entry point, and which supplies CFGAnalyzer::Key?"
+            }
+          ]
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Link-time lookup and runtime lookup are different",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "LIBRARY_PATH helps the compiler driver locate libraries while linking. It does not tell the Linux loader where to find a shared GoogleTest at execution time. The reference gives the unit executable a BUILD_RPATH using imported target directories so gtest discovery can execute it during the build. This is a build-tree setting; installation/relocation needs its own policy. A loader failure before any TEST executes is an infrastructure failure, not an LLVM assertion."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why can linking succeed while gtest_discover_tests fails to launch the executable?"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "References: [CMake GoogleTest integration](https://cmake.org/cmake/help/latest/module/GoogleTest.html) and [add_test](https://cmake.org/cmake/help/latest/command/add_test.html)."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why does PIC belong on the static core even though that target is not itself a shared library?"
+        }
+      ],
+      "words": 491,
+      "quiz": {
+        "q": "Should the test executable link the MiniShield MODULE directly?",
+        "choices": [
+          "No; link the reusable core and shared LLVM",
+          "Yes; MODULE is an ordinary executable library",
+          "Only if you copy Plugin.cpp into the test"
+        ],
+        "answer": 0,
+        "why": "The MODULE exists for runtime loading by opt. The core provides the directly callable implementation."
+      }
+    },
+    {
+      "id": 58,
+      "number": 2,
+      "day": 3,
+      "title": "Parse tiny IR in a C++ unit test",
+      "originalTitle": "Parse tiny IR in a C++ unit test",
+      "summary": "Learn ownership and lifetime while creating the smallest useful eligibility test.",
+      "takeaway": "The context outlives the module; borrowed functions outlive neither.",
+      "source": "day3",
+      "group": "unit",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: create tests/unit/CoreTest.cpp. Start with the helper definitions and one accept test below, then append the next chapters’ TEST blocks."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "TEST(Eligibility, AcceptsSimpleDiamond) {\n    llvm::LLVMContext context;\n    // TODO: parse valid IR, assert success, verify, check eligibility.\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Separate parsing failure from test failure"
+        },
+        {
+          "type": "paragraph",
+          "text": "parseAssemblyString returns a unique_ptr<Module> or null. Print SMDiagnostic on failure. ASSERT_NE stops this test before any dereference; EXPECT_NE records a failure and continues, which would be unsafe before dereferencing null."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Verify the fixture before testing your code"
+        },
+        {
+          "type": "paragraph",
+          "text": "LLVM’s verifier returns true for broken IR. ASSERT_FALSE(verifyModule(...)) means “this input is valid.” Otherwise a test might appear to reject an unsupported feature when it actually supplied malformed IR."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Call the eligibility API"
+        },
+        {
+          "type": "paragraph",
+          "text": "Get the named Function from the module and inspect both the decision and reason when relevant. For acceptance, stream the reason into the failure message so an unexpected restriction is visible."
+        },
+        {
+          "type": "heading",
+          "text": "The full helper section"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/CFGAnalyzer.h\"\n#include \"minishield/FlatteningPass.h\"\n#include \"minishield/FunctionEligibility.h\"\n#include \"minishield/StateMachineBuilder.h\"\n#include \"llvm/AsmParser/Parser.h\"\n#include \"llvm/IR/CFG.h\"\n#include \"llvm/IR/Dominators.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/IR/LLVMContext.h\"\n#include \"llvm/IR/Module.h\"\n#include \"llvm/IR/Verifier.h\"\n#include \"llvm/Passes/PassBuilder.h\"\n#include \"llvm/Support/SourceMgr.h\"\n#include \"llvm/Support/raw_ostream.h\"\n#include <gtest/gtest.h>\n#include <memory>\n#include <string>\n\nstatic std::unique_ptr<llvm::Module>\nparse(llvm::LLVMContext &context, llvm::StringRef ir) {\n    llvm::SMDiagnostic diagnostic;\n    auto module = llvm::parseAssemblyString(ir, diagnostic, context);\n    if (!module) diagnostic.print(\"minishield-unit\", llvm::errs());\n    return module;\n}\nstatic std::string dump(const llvm::Module &module) {\n    std::string text;\n    llvm::raw_string_ostream out(text);\n    module.print(out, nullptr);\n    return out.str();\n}\nstatic constexpr const char *diamond = R\"ir(\ndefine i32 @choose(i1 %c) {\nentry:\n  br i1 %c, label %left, label %right\nleft:\n  br label %join\nright:\n  br label %join\njoin:\n  ret i32 7\n}\n)ir\";"
+        },
+        {
+          "type": "heading",
+          "text": "The full first test"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "TEST(Eligibility, AcceptsSimpleDiamond) {\n    llvm::LLVMContext context;\n    auto module = parse(context, diamond);\n    ASSERT_NE(module, nullptr);\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    auto *function = module->getFunction(\"choose\");\n    ASSERT_NE(function, nullptr);\n    auto decision = minishield::FunctionEligibility::check(*function);\n    EXPECT_TRUE(decision.eligible) << decision.reason;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nctest --test-dir build -R '^Eligibility\\.' --output-on-failure"
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "RAII, unique_ptr, and reverse destruction order",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "RAII binds cleanup to object lifetime. module owns its Module through unique_ptr; getFunction returns a borrowed pointer, not a second owner. Local objects are destroyed in reverse construction order: declaring context first and module second makes the module die before its context. Returning a module tied to a context created inside parse would leave a dangling dependency."
+            },
+            {
+              "type": "code",
+              "language": "cpp",
+              "text": "llvm::LLVMContext context;       // created first, destroyed last\nauto module = parse(context, diamond); // owns Module\nauto *function = module->getFunction(\"choose\"); // borrows Function\n// Do not delete function or wrap it in an owning unique_ptr."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why can moving a unique_ptr transfer module ownership without extending the context lifetime?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Explain the difference between ASSERT_FALSE(verifyModule(...)) and EXPECT_TRUE(decision.eligible)."
+        }
+      ],
+      "words": 423,
+      "quiz": {
+        "q": "Why declare the LLVMContext before the Module owner?",
+        "choices": [
+          "The context must outlive objects that use it",
+          "The context owns the test executable",
+          "unique_ptr copies both objects"
+        ],
+        "answer": 0,
+        "why": "Reverse local destruction order destroys the module first. Its LLVMContext must remain alive during that lifetime."
+      }
+    },
+    {
+      "id": 59,
+      "number": 3,
+      "day": 3,
+      "title": "Test the graph and the analysis manager",
+      "originalTitle": "Test the graph and the analysis manager",
+      "summary": "Assert edges and dominance through LLVM APIs rather than relying on diagnostic order.",
+      "takeaway": "Register dependencies before requesting cached analysis results.",
+      "source": "day3",
+      "group": "unit",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: append the graph test to CoreTest.cpp. Follow the same parse → verify → run → assert pattern."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::FunctionAnalysisManager fam;\nllvm::PassBuilder pb;\n// TODO: register standard function analyses and CFGAnalyzer.\n// TODO: request CFGAnalyzer, then assert hand-counted properties."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Register the dependencies"
+        },
+        {
+          "type": "paragraph",
+          "text": "CFGAnalyzer asks FAM for dominator and loop analyses. PassBuilder::registerFunctionAnalyses installs standard function analyses; registerPass adds your custom one. This test requests function analyses directly. A module pipeline needs the corresponding outer managers and proxy registration; do not blindly transplant this minimal harness into a module pipeline."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Predict the graph"
+        },
+        {
+          "type": "paragraph",
+          "text": "The diamond has four blocks, four edges, no natural loop, and no back edge. Entry dominates all its reachable blocks. Predecessor enumeration order is not an invariant; compare sets/counts when order is irrelevant."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Check relationships, not labels"
+        },
+        {
+          "type": "paragraph",
+          "text": "Name-based lookup is acceptable for a hand-written input fixture, but a transformation test should usually discover its new dispatcher from edges and instruction kinds. LLVM can suffix names to avoid collisions."
+        },
+        {
+          "type": "heading",
+          "text": "The full graph test"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "TEST(CFG, DiamondEdgesAndDominance) {\n    llvm::LLVMContext context;\n    auto module = parse(context, diamond);\n    ASSERT_NE(module, nullptr);\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    auto &function = *module->getFunction(\"choose\");\n    llvm::FunctionAnalysisManager fam;\n    llvm::PassBuilder pb;\n    pb.registerFunctionAnalyses(fam);\n    fam.registerPass([] { return minishield::CFGAnalyzer(); });\n    const auto &cfg = fam.getResult<minishield::CFGAnalyzer>(function);\n    EXPECT_EQ(cfg.blocks.size(), 4u);\n    EXPECT_EQ(cfg.loopCount, 0u);\n    EXPECT_TRUE(cfg.backEdges.empty());\n    unsigned edges = 0;\n    for (const auto &block : cfg.blocks) edges += block.successors.size();\n    EXPECT_EQ(edges, 4u);\n    const auto &dt = fam.getResult<llvm::DominatorTreeAnalysis>(function);\n    for (const auto &block : function)\n        EXPECT_TRUE(dt.dominates(&function.getEntryBlock(), &block));\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Extend it"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Add a natural loop fixture and identify the header/latch pointers. Check that the header dominates the latch and that the recorded edge is latch → header.",
+            "Add an unreachable cycle to ensure the reachable-back-edge rule does not count it as an entry-reachable natural loop.",
+            "Keep loop count separate from back-edge count: several latches may belong to one loop."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "ctest --test-dir build -R '^CFG\\.' --output-on-failure"
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Analysis caching and borrowed result lifetimes",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "getResult returns a reference to a cached result owned by the manager. const auto& avoids copying that result but does not freeze the IR. After a transform, invalidation may destroy or replace the cache. Do not retain the old CFG reference across mutation and then assume it describes the new graph. Returning PreservedAnalyses::all() after rewriting would falsely claim such caches remain valid."
+            },
+            {
+              "type": "paragraph",
+              "text": "See [Using the New Pass Manager](https://llvm.org/docs/NewPassManager.html) for manager registration and invalidation."
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why can an arbitrary cyclic edge fail the natural-loop back-edge definition?"
+        }
+      ],
+      "words": 397,
+      "quiz": {
+        "q": "What must happen before CFGAnalyzer can request DominatorTreeAnalysis?",
+        "choices": [
+          "Register the required analyses with FAM",
+          "Create a second LLVMContext for every block",
+          "Count loop labels by spelling"
+        ],
+        "answer": 0,
+        "why": "The manager can compute only analyses it knows how to construct."
+      }
+    },
+    {
+      "id": 60,
+      "number": 4,
+      "day": 3,
+      "title": "Assert that the dispatcher really controls the function",
+      "originalTitle": "Assert that the dispatcher really controls the function",
+      "summary": "Turn the complete builder’s design into structural assertions independent of temporary names.",
+      "takeaway": "A switch merely existing is weaker than every transition using it.",
+      "source": "day3",
+      "group": "unit",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: append a builder test only after the complete Day 2 StateMachineBuilder exists. The fixture below is already prepared because it contains no PHIs or escaping instruction results."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// Snapshot original block pointers and the count after preparation.\n// TODO: call builder, verify, discover dispatcher via entry successor.\n// TODO: compare switch destinations against original non-entry blocks."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Snapshot at the right checkpoint"
+        },
+        {
+          "type": "paragraph",
+          "text": "Value demotion may split edges. Record the block count immediately before builder construction, after preparation. This design appends dispatch and invalid: the count increases by two, not one block per state. The switch contains one case per prepared non-entry block."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Follow the live entry edge"
+        },
+        {
+          "type": "paragraph",
+          "text": "Get entry’s unconditional successor, then inspect its terminator. This catches a completely disconnected fake dispatcher. Verify every expected state appears once and the default is terminal unreachable."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Preserve terminal behavior"
+        },
+        {
+          "type": "paragraph",
+          "text": "Count or identify the original return terminators. More complete tests should inspect every original branch transition’s state store and final edge, along with both conditional outcomes in behavioral tests. The unit test below is a starting structural assertion, not complete coverage."
+        },
+        {
+          "type": "heading",
+          "text": "The full structural test"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include <vector>\nTEST(Builder, DispatchesOriginalStates) {\n    llvm::LLVMContext context;\n    auto module = parse(context, diamond);\n    ASSERT_NE(module, nullptr);\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    auto &function = *module->getFunction(\"choose\");\n    auto decision = minishield::FunctionEligibility::check(function);\n    ASSERT_TRUE(decision.eligible) << decision.reason;\n    // This fixture has no PHIs or escaping instruction results: already prepared.\n    auto *entry = &function.getEntryBlock();\n    std::vector<llvm::BasicBlock *> original;\n    for (auto &block : function) original.push_back(&block);\n    const auto preparedCount = function.size();\n    ASSERT_TRUE(minishield::StateMachineBuilder::build(function));\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    EXPECT_EQ(&function.getEntryBlock(), entry);\n    EXPECT_EQ(function.size(), preparedCount + 2);\n    auto *entryBranch = llvm::dyn_cast<llvm::UncondBrInst>(entry->getTerminator());\n    ASSERT_NE(entryBranch, nullptr);\n    auto *dispatch = entryBranch->getSuccessor(0);\n    auto *stateSwitch = llvm::dyn_cast<llvm::SwitchInst>(dispatch->getTerminator());\n    ASSERT_NE(stateSwitch, nullptr);\n    EXPECT_EQ(stateSwitch->getNumCases(), original.size() - 1);\n    for (auto *block : original) {\n        if (block == entry) continue;\n        unsigned matches = 0;\n        for (auto oneCase : stateSwitch->cases())\n            matches += oneCase.getCaseSuccessor() == block;\n        EXPECT_EQ(matches, 1u);\n    }\n    EXPECT_TRUE(llvm::isa<llvm::UnreachableInst>(\n        stateSwitch->getDefaultDest()->getTerminator()));\n    unsigned returns = 0;\n    for (auto &block : function)\n        returns += llvm::isa<llvm::ReturnInst>(block.getTerminator());\n    EXPECT_EQ(returns, 1u);\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Exercise preparation and construction together"
+        },
+        {
+          "type": "paragraph",
+          "text": "The direct builder test deliberately starts with prepared IR. It cannot catch a missing DemotePHIToStack call in FlatteningPass. Append this complete pass test using a loop-carried PHI and an escaping increment. It asserts valid transformed IR, no remaining PHIs, a live switch shape, and a mutation preservation result. Add behavioral runs at limit 0, 1, and several positive values; this structural test alone does not establish the returned count."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "TEST(Flattening, PreparesLoopCarriedPhi) {\n    llvm::LLVMContext context;\n    auto module = parse(context, R\"ir(\n        define i32 @count_to(i32 %limit) {\n        entry:\n          br label %header\n        header:\n          %i = phi i32 [ 0, %entry ], [ %next, %body ]\n          %more = icmp slt i32 %i, %limit\n          br i1 %more, label %body, label %exit\n        body:\n          %next = add i32 %i, 1\n          br label %header\n        exit:\n          ret i32 %i\n        }\n    )ir\");\n    ASSERT_NE(module, nullptr);\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    auto &function = *module->getFunction(\"count_to\");\n    llvm::FunctionAnalysisManager fam;\n    llvm::PassBuilder pb;\n    pb.registerFunctionAnalyses(fam);\n    auto preserved = minishield::FlatteningPass().run(function, fam);\n    EXPECT_FALSE(preserved.areAllPreserved());\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    unsigned phis = 0, switches = 0;\n    for (const auto &block : function) {\n        switches += llvm::isa<llvm::SwitchInst>(block.getTerminator());\n        for (const auto &instruction : block)\n            phis += llvm::isa<llvm::PHINode>(instruction);\n    }\n    EXPECT_EQ(phis, 0u);\n    EXPECT_EQ(switches, 1u);\n    // Direct run() calls do not perform manager invalidation for you.\n    fam.invalidate(function, preserved);\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "ctest --test-dir build -R '^Builder\\.' --output-on-failure"
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Pointers as object identity, not ownership",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "The original vector stores addresses of existing BasicBlock objects. Comparing those pointers asks whether a case targets that same object, regardless of renaming. The vector owns only pointer values; it neither copies nor destroys blocks. This works because this builder appends blocks and erases terminators, not the original blocks. Erasing a block would invalidate the corresponding stored pointer."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Which snapshot survives renaming, and which snapshot does not survive deletion?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: How could a test that only searches for the text “switch” pass on a broken implementation?"
+        }
+      ],
+      "words": 628,
+      "quiz": {
+        "q": "When is the expected N + 2 block invariant measured?",
+        "choices": [
+          "N is the count after preparation, just before this builder",
+          "N is always the source-language statement count",
+          "N is the unprepared fixture count even if edges split"
+        ],
+        "answer": 0,
+        "why": "Preparation may add blocks. The builder invariant starts after that work."
+      }
+    },
+    {
+      "id": 61,
+      "number": 5,
+      "day": 3,
+      "title": "Make rejection tests prove that nothing changed",
+      "originalTitle": "Make rejection tests prove that nothing changed",
+      "summary": "Check the intended reason and canonical IR equality, with a valid unsupported fixture.",
+      "takeaway": "A rejection is useful only if it occurs before mutation.",
+      "source": "day3",
+      "group": "unit",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: add the dynamic-allocation rejection test. Then create isolated EH, coroutine, address-taken, intrinsic, and non-scalar-result cases."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "const auto before = dump(*module);\n// TODO: check eligibility decision and the specific reason.\n// TODO: run the pass, verify unchanged module and preserved analyses."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Isolate the unsupported feature"
+        },
+        {
+          "type": "paragraph",
+          "text": "A variable-sized entry alloca is valid IR but outside the strict Day 2 contract. The fixture has a real body and an ordinary branch so an earlier declaration/terminator rejection does not mask the allocation rule."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Compare parsed canonical output"
+        },
+        {
+          "type": "paragraph",
+          "text": "Printing the same module before and after avoids formatting differences between handwritten source and LLVM’s printer. Assert exact equality for rejection; accepted transformations require different structural and behavioral checks."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Distinguish direct calls from scheduled execution"
+        },
+        {
+          "type": "paragraph",
+          "text": "Calling pass.run directly exercises its logic without pass-manager optional-skipping rules. An opt integration test must independently show that the plugin runs on the intended function. A test on an optnone function may otherwise pass an unchanged check simply because LLVM skipped the pass."
+        },
+        {
+          "type": "heading",
+          "text": "The full negative test"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "TEST(Flattening, RejectsDynamicAllocaWithoutMutation) {\n    llvm::LLVMContext context;\n    auto module = parse(context, R\"ir(\n        define i32 @dynamic(i32 %n) {\n        entry:\n          %storage = alloca i8, i32 %n\n          br label %done\n        done:\n          ret i32 %n\n        }\n    )ir\");\n    ASSERT_NE(module, nullptr);\n    ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n    auto &function = *module->getFunction(\"dynamic\");\n    const auto before = dump(*module);\n    auto decision = minishield::FunctionEligibility::check(function);\n    EXPECT_FALSE(decision.eligible);\n    EXPECT_EQ(decision.reason, \"only static entry allocas are supported\");\n    llvm::FunctionAnalysisManager fam;\n    minishield::FlatteningPass pass;\n    auto preserved = pass.run(function, fam);\n    EXPECT_TRUE(preserved.areAllPreserved());\n    EXPECT_EQ(dump(*module), before);\n    EXPECT_FALSE(llvm::verifyModule(*module, &llvm::errs()));\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "ctest --test-dir build -R '^Flattening\\.' --output-on-failure"
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Preserved analyses are a promise, not a diagnostic",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "PreservedAnalyses::all() does not undo mutations. It tells the manager its caches remain valid. A rejected function can return all because it was not changed. A transformed function normally returns none in this prototype; a more selective preservation claim requires actually maintaining those analyses."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why would returning all after a broken partial edit make the failure harder to diagnose?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: How would a missing preflight check be caught even if the final module still verifies?"
+        }
+      ],
+      "words": 335,
+      "quiz": {
+        "q": "Why compare the exact rejection reason?",
+        "choices": [
+          "To ensure an earlier unrelated check is not masking the targeted rule",
+          "Because LLVM requires English reasons",
+          "Because any failure automatically proves the right rejection"
+        ],
+        "answer": 0,
+        "why": "A negative test should fail when the specific guard it targets is removed."
+      }
+    },
+    {
+      "id": 62,
+      "number": 6,
+      "day": 3,
+      "title": "Run differential cases with a reproducible seed",
+      "originalTitle": "Run differential cases with a reproducible seed",
+      "summary": "Compare actual process observations on a bounded, defined input domain and report the smallest useful failure record.",
+      "takeaway": "Equal nonzero exits or equal crashes are still failures here.",
+      "source": "day3",
+      "group": "integration",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: write tests/integration/differential.py yourself from this reference. First write the discount kernel and driver from Day 2 lesson 24, and build both executables using that common-IR pipeline."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "python",
+          "text": "# TODO: parse two executable paths, seed, sample count.\n# TODO: boundary cases + deterministic random cases within the domain.\n# TODO: run both with a timeout and compare exit/stdout/stderr."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Define what is observable"
+        },
+        {
+          "type": "paragraph",
+          "text": "This pure function driver prints a result and returns zero. Compare stdout bytes, stderr bytes, and exit status. Require zero success before accepting equality: two crashes or two usage errors must fail. Programs with files, time, randomness, or external side effects require a richer controlled oracle."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Fix the domain and seed"
+        },
+        {
+          "type": "paragraph",
+          "text": "amount is −1000 through 10000 and level is 0 through 5. The bounded multiplication stays within int range. Boundary cases ensure small inputs and default switch paths are always tested. A dedicated Random(seed) produces repeatable cases within this Python environment; persist the actual failing case as a regression rather than relying on cross-version PRNG guarantees."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Bound subprocess execution"
+        },
+        {
+          "type": "paragraph",
+          "text": "Pass an argument list without shell=True. A timeout is a failing observation, not proof of an infinite loop. Report seed, index, arguments, both observations, and tool versions. These known drivers produce small output; an untrusted or noisy workload would also need output limits."
+        },
+        {
+          "type": "heading",
+          "text": "The full runner reference"
+        },
+        {
+          "type": "code",
+          "language": "python",
+          "text": "#!/usr/bin/env python3\nimport argparse\nimport random\nimport subprocess\nfrom pathlib import Path\n\nparser = argparse.ArgumentParser()\nparser.add_argument(\"original\", type=Path)\nparser.add_argument(\"protected\", type=Path)\nparser.add_argument(\"--seed\", type=int, default=20261112)\nparser.add_argument(\"--samples\", type=int, default=100)\nargs = parser.parse_args()\nif args.samples < 0:\n    parser.error(\"--samples must be nonnegative\")\nprograms = [str(args.original.resolve()), str(args.protected.resolve())]\nrng = random.Random(args.seed)\ncases = [(a, level) for a in (-1000, -1, 0, 1, 99, 100, 10000)\n         for level in range(6)]\ncases += [(rng.randint(-1000, 10000), rng.randint(0, 5))\n          for _ in range(args.samples)]\n\ndef run(program, case):\n    result = subprocess.run([program, *map(str, case)],\n                            capture_output=True, timeout=3, check=False)\n    return result.returncode, result.stdout, result.stderr\n\nfor index, case in enumerate(cases):\n    try:\n        left, right = (run(program, case) for program in programs)\n    except (subprocess.TimeoutExpired, OSError) as error:\n        raise SystemExit(f\"FAIL seed={args.seed} index={index} case={case}: {error}\")\n    if left[0] != 0 or right[0] != 0 or left != right:\n        raise SystemExit(f\"FAIL seed={args.seed} index={index} case={case}\\n\"\n                         f\"original={left!r}\\nprotected={right!r}\")\nprint(f\"PASS {len(cases)} cases; seed={args.seed}\")"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "python3 tests/integration/differential.py \\\n  build/differential/original build/differential/protected \\\n  --seed 20261112 --samples 100"
+        },
+        {
+          "type": "paragraph",
+          "text": "Expect 42 boundary cases plus 100 generated cases only after those binaries exist. Then deliberately point one path at a program returning 1: the runner must fail. This verifies the checker, not just the pass."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Undefined behavior can invalidate your oracle",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Signed C overflow, reading uninitialized storage, and executing LLVM unreachable are outside the promised behavior. A mismatch on an invalid test input cannot by itself establish a transformation bug. Conversely, a pass must not introduce undefined behavior on an originally defined execution. Keep the domain explicit and validate fixture assumptions before interpreting failures."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why is a huge factorial input a poor first differential fixture for signed i32 arithmetic?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: What additional observations would a function that writes to a file require?"
+        }
+      ],
+      "words": 495,
+      "quiz": {
+        "q": "If both programs exit with status 2 and print nothing, should this runner pass?",
+        "choices": [
+          "No; the driver promises successful exit on every generated input",
+          "Yes; any equality counts",
+          "Only if the seed is even"
+        ],
+        "answer": 0,
+        "why": "Equality without successful execution can hide a broken test setup."
+      }
+    },
+    {
+      "id": 63,
+      "number": 7,
+      "day": 3,
+      "title": "Run the whole suite through CTest",
+      "originalTitle": "Run the whole suite through CTest",
+      "summary": "Connect unit discovery and plugin verification to one command without hiding stale builds or absent tests.",
+      "takeaway": "CTest runs registered tests; it does not replace configuration and compilation.",
+      "source": "day3",
+      "group": "integration",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: add integration registration inside the CMake BUILD_TESTING block after your unit tests work."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "# TODO: locate opt from the configured LLVM installation.\n# TODO: one plugin verification test per tracked tests/ir/*.ll fixture.\n# TODO: Python runner registration only once its artifacts are buildable."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Use the configured plugin target path"
+        },
+        {
+          "type": "paragraph",
+          "text": "$<TARGET_FILE:MiniShield> is evaluated by CMake for the actual output library. It avoids hardcoding a .so name or guessing an output directory. Find opt in LLVM_TOOLS_BINARY_DIR so the tests do not silently load the plugin into another LLVM release."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Register all tracked fixtures"
+        },
+        {
+          "type": "paragraph",
+          "text": "The following tests launch opt and require successful parsing, loading, pipeline execution, and verification. They do not assert every rejection reason or behavioral result; those remain separate tests. CONFIGURE_DEPENDS lets CMake notice added fixtures when checking the build system."
+        },
+        {
+          "type": "heading",
+          "text": "The full integration registration"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "find_program(MS_OPT NAMES opt HINTS \"${LLVM_TOOLS_BINARY_DIR}\"\n             NO_DEFAULT_PATH REQUIRED)\nfile(GLOB MS_IR_INPUTS CONFIGURE_DEPENDS\n     \"${CMAKE_CURRENT_SOURCE_DIR}/tests/ir/*.ll\")\nforeach(input IN LISTS MS_IR_INPUTS)\n    get_filename_component(stem \"${input}\" NAME_WE)\n    add_test(NAME \"IR.${stem}\" COMMAND \"${MS_OPT}\"\n        \"-load-pass-plugin=$<TARGET_FILE:MiniShield>\"\n        \"-passes=function(minishield-flatten),verify\"\n        -disable-output \"${input}\")\n    set_tests_properties(\"IR.${stem}\" PROPERTIES TIMEOUT 10)\nendforeach()"
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Build the differential artifacts explicitly"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "find_program(MS_CLANG NAMES clang HINTS \"${LLVM_TOOLS_BINARY_DIR}\"\n             NO_DEFAULT_PATH REQUIRED)\nset(MS_DIFF \"${CMAKE_BINARY_DIR}/differential\")\nset(MS_KERNEL \"${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/discount.c\")\nset(MS_DRIVER \"${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/discount_driver.c\")\nadd_custom_command(\n    OUTPUT \"${MS_DIFF}/original\" \"${MS_DIFF}/protected\"\n    BYPRODUCTS \"${MS_DIFF}/common.ll\" \"${MS_DIFF}/protected.ll\"\n    COMMAND \"${CMAKE_COMMAND}\" -E make_directory \"${MS_DIFF}\"\n    COMMAND \"${MS_CLANG}\" -O0 -Xclang -disable-O0-optnone -S -emit-llvm\n        \"${MS_KERNEL}\" -o \"${MS_DIFF}/common.ll\"\n    COMMAND \"${MS_OPT}\" \"-load-pass-plugin=$<TARGET_FILE:MiniShield>\"\n        \"-passes=function(minishield-flatten),verify\" -S\n        \"${MS_DIFF}/common.ll\" -o \"${MS_DIFF}/protected.ll\"\n    COMMAND \"${MS_CLANG}\" -O2 \"${MS_DRIVER}\" \"${MS_DIFF}/common.ll\"\n        -o \"${MS_DIFF}/original\"\n    COMMAND \"${MS_CLANG}\" -O2 \"${MS_DRIVER}\" \"${MS_DIFF}/protected.ll\"\n        -o \"${MS_DIFF}/protected\"\n    DEPENDS MiniShield \"${MS_KERNEL}\" \"${MS_DRIVER}\"\n    VERBATIM)\nadd_custom_target(minishield-differential-artifacts ALL\n    DEPENDS \"${MS_DIFF}/original\" \"${MS_DIFF}/protected\")"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "find_package(Python3 REQUIRED COMPONENTS Interpreter)\nadd_test(NAME Differential.discount\n    COMMAND \"${Python3_EXECUTABLE}\"\n        \"${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/differential.py\"\n        \"${CMAKE_BINARY_DIR}/differential/original\"\n        \"${CMAKE_BINARY_DIR}/differential/protected\"\n        --seed 20261112 --samples 100)\nset_tests_properties(Differential.discount PROPERTIES TIMEOUT 900)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The custom command below generates both variants from one common IR input and depends on the current plugin plus the two tracked C fixtures. The ALL target makes a normal build produce them before CTest runs. When the plugin or fixture source changes, the outputs rebuild. add_test then runs the Python checker; it does not create those artifacts by itself."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nctest --test-dir build -N\nctest --test-dir build --output-on-failure\nctest --test-dir build -R '^IR\\.' --output-on-failure\nctest --test-dir build -R '^Differential\\.' --output-on-failure"
+        },
+        {
+          "type": "paragraph",
+          "text": "Check the listed count before trusting a green result: zero discovered tests can exit successfully. Parallel tests need independent output paths. These IR tests use -disable-output, so they do not race to write a shared file."
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Shell quoting and CMake argument boundaries",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "CMake COMMAND arguments are not a shell command string. Quoting the pipeline as one CMake argument preserves its parentheses and comma without a shell interpreting them. Generator expressions are CMake syntax, not C++ templates or shell substitutions. Keep paths as distinct arguments instead of concatenating a command and invoking bash -c."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Which layer interprets $<TARGET_FILE:MiniShield>?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: What can pass in CTest even while an optional transform was skipped? Which test proves live rewriting?"
+        }
+      ],
+      "words": 467,
+      "quiz": {
+        "q": "Does add_test create the differential executables?",
+        "choices": [
+          "No; build/setup must produce them separately",
+          "Yes; CTest infers source files",
+          "Only when their names end in .so"
+        ],
+        "answer": 0,
+        "why": "Registration describes a command. Artifact production requires an explicit build or setup step."
+      }
+    },
+    {
+      "id": 64,
+      "number": 8,
+      "day": 3,
+      "title": "Prove the tests can fail, then minimize a failure",
+      "originalTitle": "Prove the tests can fail, then minimize a failure",
+      "summary": "Practice fault injection and reduction on a disposable reference, preserving the failing property.",
+      "takeaway": "A regression fixture records a specific bug, not a large accidental context.",
+      "source": "day3",
+      "group": "integration",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: use a disposable branch or copied reference to inject one mistake. Do not alter the main working implementation merely to produce screenshots."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Failure record\ncommit / toolchain:\ninput fixture / arguments:\nexpected observation:\nactual observation:\nsmallest command that fails:\nassertion that should catch it:\nroot cause / fixed regression:"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Predict the failing test"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Injected mistake",
+              "Expected detector"
+            ],
+            [
+              "Swap conditional true/false state IDs",
+              "Differential test exercising both outcomes"
+            ],
+            [
+              "Return all after a CFG rewrite",
+              "Analysis invalidation regression; verify alone may miss it"
+            ],
+            [
+              "Construct switch but leave entry unchanged",
+              "Structural test following entry successor"
+            ],
+            [
+              "Demote before eligibility rejects",
+              "Negative exact before/after equality"
+            ],
+            [
+              "Runner accepts identical nonzero exits",
+              "Checker self-test with failing executable"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Reproduce before reducing"
+        },
+        {
+          "type": "paragraph",
+          "text": "Save exact arguments, stderr, the original input IR, and pipeline. First verify the original input. Then verify immediately after your pass, before the optimization that exposes the problem. Distinguish invalid output from valid-but-wrong output."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Shrink while preserving meaning"
+        },
+        {
+          "type": "paragraph",
+          "text": "Remove unrelated functions, blocks, and instructions while keeping valid IR and the same failure. For wrong-code reduction, retain defined execution and the mismatch; a smaller fixture that merely crashes from undefined behavior is not the same bug."
+        },
+        {
+          "type": "heading",
+          "text": "The full minimal debugging command sequence"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "opt -passes=verify -disable-output build/repro/input.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S build/repro/input.ll -o build/repro/after-pass.ll\nopt -passes='default<O2>,verify' -S build/repro/after-pass.ll \\\n  -o build/repro/after-o2.ll"
+        },
+        {
+          "type": "paragraph",
+          "text": "Create build/repro and place your actual reproducer there first. These paths are an example workspace, not files already generated by the book."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "After fixing the mistake, the narrow regression must turn green, and the existing relevant suite must remain green. Remove the fault injection. Keep an assertion on the root cause as well as the behavioral case when practical."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Why optimization exposes earlier mistakes",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "A dominance violation or false preservation claim may survive a simple code path and fail only when another pass consumes the bad information. The last pass before a crash is not automatically responsible. Find the earliest broken invariant and reduce to that boundary rather than disabling optimization as the final fix."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why should the regression check output immediately after your pass as well as the final executable?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: What property must a reduced wrong-code reproducer preserve besides syntactic validity?"
+        }
+      ],
+      "words": 371,
+      "quiz": {
+        "q": "If deleting an instruction turns a mismatch into uninitialized-memory behavior, is that a useful reduction?",
+        "choices": [
+          "No; it no longer preserves the defined wrong-code failure",
+          "Yes; shorter is always better",
+          "Only at O0"
+        ],
+        "answer": 0,
+        "why": "Reduction must preserve the failure and the assumptions that make it evidence."
+      }
+    },
+    {
+      "id": 65,
+      "number": 9,
+      "day": 3,
+      "title": "Design measurements before writing a timing loop",
+      "originalTitle": "Design measurements before writing a timing loop",
+      "summary": "Choose workloads, artifact boundaries, and a fair comparison that answer an actual question.",
+      "takeaway": "Measure final artifacts under a recorded pipeline; do not invent expected numbers.",
+      "source": "day3",
+      "group": "measure",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: design a small benchmark matrix after correctness checks pass. No performance measurements have been supplied by this draft."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Workload",
+              "Purpose",
+              "Defined domain",
+              "Status"
+            ],
+            [
+              "if/else kernel",
+              "Conditional transition cost",
+              "Bounded signed inputs",
+              "Not measured"
+            ],
+            [
+              "switch kernel",
+              "Cases/default and shared destinations",
+              "Bounded integers",
+              "Not measured"
+            ],
+            [
+              "loop kernel",
+              "Repeated dispatcher transitions",
+              "Bounded iteration count",
+              "Not measured"
+            ],
+            [
+              "small C workload",
+              "End-to-end example",
+              "Documented safe inputs",
+              "Not measured"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Freeze the comparison"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use identical source, common frontend IR, target, backend optimization, driver, and input sequence. Transform only the selected kernel module. Record tool versions, commit, CPU, OS, build flags, and exact pass placement. Comparing an O0 original to an O2 protected executable is not the intended experiment."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Choose metrics with units"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Runtime: median elapsed seconds or nanoseconds per call from a repeated in-process workload, with repeat count and dispersion.",
+            "Code size: total file bytes and, when available, .text bytes; keep these separate from total process memory.",
+            "IR shape: block/instruction counts before flattening, immediately after, and after final optimization. Static counts do not equal executed operations."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Inspect what survived optimization"
+        },
+        {
+          "type": "paragraph",
+          "text": "Later LLVM passes may simplify the dispatcher, alter spill loads/stores, or inline a kernel under LTO. Inspect final optimized IR/disassembly. Report that the structure was removed when it was; matching behavior alone does not establish persistent obfuscation."
+        },
+        {
+          "type": "heading",
+          "text": "The full measurement record template"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "commit:\ncompiler/LLVM/CMake versions:\nCPU / OS / power policy / load:\nsource + input seed/domain:\nfrontend command:\nflatten command:\nbackend command:\ncorrectness evidence:\nwarmups / repeats / iteration count:\nraw timings / median / spread:\nexecutable bytes / .text bytes:\nfinal dispatcher present? evidence:\nlimitations:"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Review the plan before collecting data. Keep raw trials even when a result is slower or noisy. A missing metric remains “not measured”; a zero runtime or guessed percentage is misleading."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Pass placement changes the experiment",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Flattening before optimization measures both the rewrite and the optimizer’s reaction. Flattening optimized IR can encounter intrinsics, vectors, or other forms the strict prototype rejects. Neither placement is automatically right for every goal. Define the accepted workload and report the actual accepted/transformed count rather than timing a silently skipped pass."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: What would a very fast protected result mean if every function was rejected?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why are executable file size, .text size, and IR instruction count three different metrics?"
+        }
+      ],
+      "words": 388,
+      "quiz": {
+        "q": "What should a report show before measurements exist?",
+        "choices": [
+          "Not measured, with a reproducible plan",
+          "Plausible example percentages as actual results",
+          "Zero overhead"
+        ],
+        "answer": 0,
+        "why": "A draft plan is valuable, but it is not performance evidence."
+      }
+    },
+    {
+      "id": 66,
+      "number": 10,
+      "day": 3,
+      "title": "Time useful work, not process startup",
+      "originalTitle": "Time useful work, not process startup",
+      "summary": "Use a common driver, defined modular arithmetic, observable checksums, warmups, and repeated paired trials.",
+      "takeaway": "A checksum guards the workload; a timing distribution describes its cost.",
+      "source": "day3",
+      "group": "measure",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: write benchmarks/kernel.c, driver.cpp, and benchmark.py from these references. The listed iteration count is a starting workload, not a measured calibration."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// TODO: bounded pure kernel with well-defined arithmetic.\n// TODO: common driver times many calls using steady_clock.\n// TODO: print checksum plus seconds; compare checksums before reporting cost."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Make arithmetic and work explicit"
+        },
+        {
+          "type": "paragraph",
+          "text": "uint32_t arithmetic wraps modulo 2^32. All shift counts here are within 0..31, and rounds is fixed at 100. A changing state and printed checksum make computed results observable. This is a small synthetic workload, not a general predictor of application performance."
+        },
+        {
+          "type": "heading",
+          "text": "The full kernel reference"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdint.h>\nuint32_t benchmark_kernel(uint32_t x, uint32_t rounds) {\n    uint32_t value = x;\n    for (uint32_t i = 0; i < rounds; ++i) {\n        switch (value & 3u) {\n        case 0: value = value * 1664525u + 1013904223u; break;\n        case 1: value ^= value >> 7; break;\n        case 2: value += i ^ 0x9e3779b9u; break;\n        default: value = (value << 5) | (value >> 27); break;\n        }\n    }\n    return value;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Keep the driver outside the transformed module"
+        },
+        {
+          "type": "paragraph",
+          "text": "Compile the C kernel alone to common IR. Link the same separately compiled C++ driver with original and protected kernels, without LTO. The driver’s chrono calls and library behavior are outside the prototype’s support scope. Separate compilation without LTO also prevents ordinary cross-module inlining into the timing loop."
+        },
+        {
+          "type": "heading",
+          "text": "The full driver reference"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include <chrono>\n#include <cstdint>\n#include <cstdlib>\n#include <iostream>\nextern \"C\" std::uint32_t benchmark_kernel(std::uint32_t, std::uint32_t);\nint main() {\n    constexpr std::uint32_t calls = 20000, rounds = 100;\n    std::uint32_t state = 0x12345678u;\n    const auto begin = std::chrono::steady_clock::now();\n    for (std::uint32_t i = 0; i < calls; ++i)\n        state = benchmark_kernel(state ^ i, rounds);\n    const auto end = std::chrono::steady_clock::now();\n    const double seconds = std::chrono::duration<double>(end - begin).count();\n    std::cout << state << \" \" << seconds << \"\\n\";\n    return seconds > 0.0 ? EXIT_SUCCESS : EXIT_FAILURE;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "The build reference"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "mkdir -p build/benchmark\nclang -O0 -Xclang -disable-O0-optnone -S -emit-llvm \\\n  benchmarks/kernel.c -o build/benchmark/common.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S build/benchmark/common.ll -o build/benchmark/protected.ll\nclang -O2 -c build/benchmark/common.ll -o build/benchmark/original.o\nclang -O2 -c build/benchmark/protected.ll -o build/benchmark/protected.o\nclang++-23 -O2 -c benchmarks/driver.cpp -o build/benchmark/driver.o\nclang++-23 build/benchmark/driver.o build/benchmark/original.o \\\n  -o build/benchmark/original\nclang++-23 build/benchmark/driver.o build/benchmark/protected.o \\\n  -o build/benchmark/protected"
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Warm up, alternate, repeat, retain raw data"
+        },
+        {
+          "type": "paragraph",
+          "text": "The Python harness measures the time reported from inside each process, not subprocess startup. It does one warmup for each executable, alternates trial order, checks every checksum, and reports all nine times plus median/min/max. Checksums detect many mistakes, not all; keep the differential suite. Increase calls if timings are too short relative to noise, using the same count in both binaries."
+        },
+        {
+          "type": "heading",
+          "text": "The full runner reference"
+        },
+        {
+          "type": "code",
+          "language": "python",
+          "text": "#!/usr/bin/env python3\nimport statistics\nimport subprocess\nimport sys\nfrom pathlib import Path\nprograms = [str(Path(p).resolve()) for p in sys.argv[1:]]\nif len(programs) != 2:\n    raise SystemExit(\"usage: benchmark.py ORIGINAL PROTECTED\")\n\ndef trial(program):\n    result = subprocess.run([program], text=True, capture_output=True,\n                            timeout=30, check=True)\n    if result.stderr:\n        raise SystemExit(f\"unexpected stderr: {result.stderr}\")\n    checksum, seconds = result.stdout.split()\n    seconds = float(seconds)\n    if not (0 < seconds < float('inf')):\n        raise SystemExit(\"invalid duration\")\n    return int(checksum), seconds\n\nexpected = trial(programs[0])[0]\nfor program in programs:\n    if trial(program)[0] != expected:\n        raise SystemExit(\"checksum mismatch during warmup\")\nvalues = [[], []]\nfor repeat in range(9):\n    for which in ((0, 1) if repeat % 2 == 0 else (1, 0)):\n        checksum, seconds = trial(programs[which])\n        if checksum != expected:\n            raise SystemExit(f\"checksum mismatch repeat={repeat} program={which}\")\n        values[which].append(seconds)\nmedians = [statistics.median(v) for v in values]\nfor name, v, median in zip(('original', 'protected'), values, medians):\n    print(f\"{name}: raw={v}; median={median:.9f}s; \"\n          f\"min={min(v):.9f}s; max={max(v):.9f}s\")\nprint(f\"runtime change={(medians[1] / medians[0] - 1) * 100:.2f}%\")"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "python3 benchmarks/benchmark.py \\\n  build/benchmark/original build/benchmark/protected\nwc -c build/benchmark/original build/benchmark/protected\nllvm-size build/benchmark/original build/benchmark/protected"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use the installed llvm-size or document a different size tool. Record its output format: the traditional text column can include read-only data in addition to executable sections. Inspect sections explicitly if reporting exact .text bytes. Do not publish timings until checksums agree and final code has been inspected."
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "extern C, duration types, and dead-code elimination",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "extern \"C\" makes the C++ declaration use C language linkage so it matches the C kernel symbol; it is not a request to compile the whole driver as C. steady_clock measures monotonic elapsed time. duration<double>(end - begin).count() converts the duration to seconds. A printed result makes the computation observable, but the optimizer may still simplify how that result is computed, so inspect the final kernel."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Why would adding volatile to every variable change the experiment rather than simply make it “more accurate”?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which part of elapsed time does the Python subprocess wrapper exclude by reading the driver’s internal duration?"
+        }
+      ],
+      "words": 756,
+      "quiz": {
+        "q": "Why use the same untransformed driver object in both binaries?",
+        "choices": [
+          "To hold timing and input machinery constant",
+          "To hide incorrect results",
+          "To disable all compiler optimization"
+        ],
+        "answer": 0,
+        "why": "The intended variable is the kernel transformation under an otherwise matched build."
+      }
+    },
+    {
+      "id": 67,
+      "number": 11,
+      "day": 3,
+      "title": "Write a report whose claims match the evidence",
+      "originalTitle": "Write a report whose claims match the evidence",
+      "summary": "Connect raw observations to limits, architecture, and reproducible commands.",
+      "takeaway": "Report measured costs and observed structure without claiming security proof.",
+      "source": "day3",
+      "group": "finish",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: write a benchmark report only after collecting actual data. Keep pending fields visibly pending in the meantime."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Workload / pipeline",
+              "Behavior cases",
+              "Original median",
+              "Protected median",
+              "Change",
+              "Final .text"
+            ],
+            [
+              "discount / common IR → flatten → O2",
+              "Pending",
+              "Not measured",
+              "Not measured",
+              "Not measured",
+              "Not measured"
+            ],
+            [
+              "loop kernel / same pipeline",
+              "Pending",
+              "Not measured",
+              "Not measured",
+              "Not measured",
+              "Not measured"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Explain the architecture briefly"
+        },
+        {
+          "type": "paragraph",
+          "text": "Eligibility defines the accepted subset. Preparation demotes PHIs and escaping values. The builder preserves entry setup and maps non-entry blocks to i32 states. Original branches choose/store a state then jump to dispatch; returns remain terminal. The switch’s invalid default is unreachable under the maintained invariant."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Attach enough evidence"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Commit/toolchain, hardware, exact commands, domain/seed, supported/rejected function counts.",
+            "Correctness outcomes with fixture names and differential counts.",
+            "Raw timings, summaries, file/section sizes, final code inspection, and measurement caveats.",
+            "Known unsupported forms, debug/profile limitations, and optimizations that remove dispatch."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Calculate with labeled units"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "runtime_change_percent = 100 * (protected_seconds / original_seconds - 1)\nsize_change_percent = 100 * (protected_bytes / original_bytes - 1)\n# Positive means larger/slower for these formulas; zero baseline is invalid."
+        },
+        {
+          "type": "heading",
+          "text": "The full report outline"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Question and scope\nImplementation and supported subset\nToolchain, commit, machine, and pipeline\nCorrectness checks and their limits\nWorkload/domain definitions\nRaw results and summary table\nFinal IR / disassembly observations\nInterpretation and sources of noise\nUnsupported cases and next experiments\nExact reproduction commands"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "A second reader should be able to tell which numbers were measured, which claims were checked, and which questions remain open. Do not equate a larger CFG with stronger security, or a green test suite with a formal proof."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Flattening changes representation, not the test obligation",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "A dispatcher can make the visible CFG more uniform while retaining observable computation. That is a structural claim. Resistance to an adversary requires a threat model and separate evaluation. Runtime/size measurements alone do not establish obfuscation quality."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: What evidence would be missing from a report saying only “blocks doubled, therefore secure”?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Can a correct, fast result still be a poor demonstration of flattening? Explain using final optimization."
+        }
+      ],
+      "words": 354,
+      "quiz": {
+        "q": "Can synthetic timing numbers be published as measured results to fill the table?",
+        "choices": [
+          "No; leave pending fields explicit",
+          "Yes if labeled expected in a footnote",
+          "Yes if the ratio looks reasonable"
+        ],
+        "answer": 0,
+        "why": "The report must distinguish the plan from observations."
+      }
+    },
+    {
+      "id": 68,
+      "number": 12,
+      "day": 3,
+      "title": "Build a reproducible demo from a fresh directory",
+      "originalTitle": "Build a reproducible demo from a fresh directory",
+      "summary": "Make the setup, generation, comparison, and evidence visible enough for someone else to repeat.",
+      "takeaway": "A demo should fail at the first broken prerequisite.",
+      "source": "day3",
+      "group": "finish",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: write scripts/demo.sh yourself. This reference assumes the future Day 3 CMake/tests and discount fixtures have been written. It does not alter or replace your local test_all.sh."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "#!/usr/bin/env bash\nset -euo pipefail\n# TODO: check activated environment, configure/build a fresh directory.\n# TODO: emit common IR, transform kernel only, compile matched variants.\n# TODO: run differential checker and CTest; print artifact paths."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — State prerequisites instead of guessing"
+        },
+        {
+          "type": "paragraph",
+          "text": "Run from the repository root in the minishield environment. The demo uses build/demo, leaving the normal build directory intact. It intentionally overwrites generated files in its own artifact directory when rerun; input fixtures remain source-controlled."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Keep the generated pipeline explicit"
+        },
+        {
+          "type": "paragraph",
+          "text": "A successful run shows configure, build, plugin loading, verifier checks, output equality on the stated domain, and tests. Benchmarking remains a separate command so measurement noise and correctness failures do not become confused. The Day 3 build rule also generates the registered differential artifacts; the explicit commands here demonstrate those same stages for inspection."
+        },
+        {
+          "type": "heading",
+          "text": "The full demo reference"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "#!/usr/bin/env bash\nset -euo pipefail\n: \"${CONDA_PREFIX:?Activate the minishield Conda environment first}\"\ntest -f CMakeLists.txt\ntest -f tests/cases/discount.c\ntest -f tests/cases/discount_driver.c\nexport LIBRARY_PATH=\"$CONDA_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"\nartifact_dir=\"$PWD/build/demo\"\ncmake -G Ninja -S . -B \"$artifact_dir\" -DBUILD_TESTING=ON \\\n  -DCMAKE_CXX_COMPILER=\"$CONDA_PREFIX/bin/clang++-23\" \\\n  -DLLVM_DIR=\"$CONDA_PREFIX/lib/cmake/llvm\"\ncmake --build \"$artifact_dir\"\nmkdir -p \"$artifact_dir/differential\"\nclang -O0 -Xclang -disable-O0-optnone -S -emit-llvm \\\n  tests/cases/discount.c -o \"$artifact_dir/differential/common.ll\"\nopt -load-pass-plugin=\"$artifact_dir/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S \"$artifact_dir/differential/common.ll\" \\\n  -o \"$artifact_dir/differential/protected.ll\"\nclang -O2 tests/cases/discount_driver.c \"$artifact_dir/differential/common.ll\" \\\n  -o \"$artifact_dir/differential/original\"\nclang -O2 tests/cases/discount_driver.c \"$artifact_dir/differential/protected.ll\" \\\n  -o \"$artifact_dir/differential/protected\"\nctest --test-dir \"$artifact_dir\" --output-on-failure\nprintf 'Demo artifacts: %s\\n' \"$artifact_dir\""
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Reproduce without a hidden working tree"
+        },
+        {
+          "type": "paragraph",
+          "text": "Test from a clean checkout or detached worktree containing your future committed implementation and fixtures. Do not delete an existing build tree to simulate freshness. Record the commit and environment. Missing tracked files are a reproducibility failure, even if your personal directory happens to contain them."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Once written, run bash -n scripts/demo.sh, then bash scripts/demo.sh. Ensure the differential test is actually listed and executed by CTest. Inspect transformed IR for a live dispatcher, because an unchanged/stub pass can still produce matching outputs."
+        },
+        {
+          "type": "deep",
+          "lens": "cpp",
+          "title": "Failure propagation is part of a test tool’s interface",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "A demo is a program too: success must mean its required checks passed. set -euo pipefail is a useful shell baseline, not a complete substitute for understanding every command’s exit behavior. An expected negative case belongs in an explicit assertion; do not append || true to the whole suite."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: How could a script exit zero after printing a failing test result?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why does output equality alone fail to establish that a demo actually exercised flattening?"
+        }
+      ],
+      "words": 432,
+      "quiz": {
+        "q": "What should the demo do if opt fails verification?",
+        "choices": [
+          "Exit unsuccessfully before compiling protected output",
+          "Continue with an older protected.ll",
+          "Print a warning and report success"
+        ],
+        "answer": 0,
+        "why": "Stale artifacts must not masquerade as a successful current transformation."
+      }
+    },
+    {
+      "id": 69,
+      "number": 13,
+      "day": 3,
+      "title": "Handle the simulated O2 bug and close Day 3",
+      "originalTitle": "Handle the simulated O2 bug and close Day 3",
+      "summary": "Practice a support workflow, then audit the evidence before claiming completion.",
+      "takeaway": "The book can be finished while its exercises remain unfinished.",
+      "source": "day3",
+      "group": "finish",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Future exercise: the “protected application fails only at O2” scenario is simulated. It is a debugging exercise, not a report of a current MiniShield incident."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "Customer observation:\nExact version/commit/pipeline:\nSmall defined failing input:\nEarliest broken invariant:\nRoot cause:\nFix and reasoning:\nRegression assertions:\nBehavior and performance rerun:\nRemaining limitations:"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Classify the symptom"
+        },
+        {
+          "type": "paragraph",
+          "text": "Ask whether the failure is an opt crash, verifier error, target crash, timeout, or wrong result. Capture the original/protected commands and confirm the original execution is defined. Reproduce on the pinned toolchain before assuming the customer’s last optimizer pass caused the defect."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Check likely boundaries"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Did every state slot get initialized before dispatch?",
+            "Did any non-entry allocation or unsupported special instruction escape preflight?",
+            "Does every remaining cross-block SSA use dominate its use after restructuring?",
+            "Was cached analysis falsely preserved after mutation?",
+            "Did PHI demotion preserve loop-carried values and incoming-edge meaning?",
+            "Does the failure survive reduction with the same defined input?"
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Add a durable regression"
+        },
+        {
+          "type": "paragraph",
+          "text": "Retain the minimized fixture and observable mismatch, assert the earliest relevant invariant, and rerun related tests. Re-measure after a correctness fix if it changes code or the accepted workload. Do not “fix” a reproducible bug solely by forcing O0."
+        },
+        {
+          "type": "heading",
+          "text": "The full Day 3 exit checklist"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "[ ] Unit tests exercise eligibility, graph analysis, and live state construction.\n[ ] Negative cases assert intended reasons and unchanged canonical IR.\n[ ] Plugin integration tests load the current target and verify all fixtures.\n[ ] Differential runner checks success + observations with recorded domains/seeds.\n[ ] Checker self-tests show failures are detected.\n[ ] A clean build/demo reproduces the evidence from tracked inputs.\n[ ] Benchmark correctness checks precede real repeated measurements.\n[ ] Raw data, final code inspection, toolchain and limitations are recorded.\n[ ] Any simulated support bug has a minimized reproducer and regression.\n[ ] No pending exercise or invented measurement is labeled complete."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Review the checklist with evidence links or commands next to each checked box. The book is now a complete study draft; mark the project milestones complete only when your own implementation and runs satisfy them."
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "A conservative rejection is a valid product behavior",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Expanding support is a new semantic commitment. A narrowly supported, well-tested prototype is more informative than silently flattening constructs it does not understand. Future work can add one feature at a time with explicit invariants, fixtures, and behavioral evidence."
+            },
+            {
+              "type": "checkpoint",
+              "text": "Checkpoint: Which rejected feature would you support next, and what new proof obligation would it introduce?"
+            }
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Explain the pass architecture and its evidence in five minutes without reading the implementation."
+        }
+      ],
+      "words": 432,
+      "quiz": {
+        "q": "What is the final evidence for a fixed O2-only wrong-code bug?",
+        "choices": [
+          "A defined minimized reproducer, explained fix, and passing regressions",
+          "A build that succeeds at O0",
+          "Removing the failing input"
+        ],
+        "answer": 0,
+        "why": "The fix must address the underlying invariant and retain a test that would catch its return."
+      }
+    },
+    {
+      "id": 70,
+      "number": 14,
+      "day": 3,
+      "title": "Day 3 glossary",
+      "originalTitle": "Day 3 glossary",
+      "summary": "A reference for ownership, test design, reproducibility, and performance vocabulary.",
+      "takeaway": "Use a precise term to name the claim you are checking.",
+      "source": "day3",
+      "group": "reference",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "C++ and build concepts"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Term",
+              "Meaning"
+            ],
+            [
+              "RAII",
+              "Tie cleanup to object lifetime; local destruction runs in reverse construction order."
+            ],
+            [
+              "unique_ptr",
+              "An exclusive owner that can move but does not copy ownership."
+            ],
+            [
+              "Borrowed pointer/reference",
+              "Access to an object whose lifetime is controlled elsewhere."
+            ],
+            [
+              "Translation unit",
+              "A source file after preprocessing and inclusion, compiled as one unit."
+            ],
+            [
+              "ODR",
+              "One Definition Rule: constraints on declarations/definitions across translation units."
+            ],
+            [
+              "PIC",
+              "Position-independent machine code suitable for placement in a shared object."
+            ],
+            [
+              "Usage requirement",
+              "Build information propagated to consumers through a CMake target."
+            ],
+            [
+              "extern C",
+              "C language linkage for a declaration in C++; useful at C/C++ boundaries."
+            ],
+            [
+              "LTO",
+              "Link-time optimization; can optimize across separately compiled module boundaries."
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Test and LLVM concepts"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Term",
+              "Meaning"
+            ],
+            [
+              "Oracle",
+              "An independent rule for deciding whether a result is correct."
+            ],
+            [
+              "Unit test",
+              "An in-process check of a focused API or behavior."
+            ],
+            [
+              "Integration test",
+              "A check spanning components, such as opt loading the plugin."
+            ],
+            [
+              "Differential test",
+              "Compare original and transformed observations on the same inputs."
+            ],
+            [
+              "Property/invariant",
+              "A relation expected to hold across a family of cases."
+            ],
+            [
+              "Canonical IR",
+              "IR printed through LLVM’s parser/printer for stable comparison in a controlled setup."
+            ],
+            [
+              "Seed",
+              "Initial value controlling a reproducible generated input sequence."
+            ],
+            [
+              "Timeout",
+              "A bound on waiting, reported as failure rather than proof of nontermination."
+            ],
+            [
+              "Regression",
+              "A retained test for a known bug or behavior that must not return."
+            ],
+            [
+              "Minimization",
+              "Reduce a failing case while preserving validity, assumptions, and failure."
+            ],
+            [
+              "CTest / GoogleTest",
+              "CTest orchestrates commands; GoogleTest defines C++ test cases/assertions."
+            ],
+            [
+              "Analysis invalidation",
+              "Discard/recompute cached results that mutation made stale."
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Measurement concepts"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Term",
+              "Meaning"
+            ],
+            [
+              "Warmup",
+              "Untimed preliminary execution to reduce some first-use effects."
+            ],
+            [
+              "Median",
+              "Middle of sorted trial values; report alongside raw data/spread."
+            ],
+            [
+              "Runtime change",
+              "Here: 100 × (protected/original − 1), with matched units."
+            ],
+            [
+              "Checksum",
+              "A compact observable summary of work; useful but not a full correctness oracle."
+            ],
+            [
+              "Noise/variance",
+              "Timing variation from environment and workload effects."
+            ],
+            [
+              "Process startup",
+              "Launching/loading cost excluded by timing inside the workload driver."
+            ],
+            [
+              "Dead-code elimination",
+              "Removal of computations whose effects are not observable."
+            ],
+            [
+              "Final artifact",
+              "The optimized executable/object actually measured, not only pre-optimization IR."
+            ],
+            [
+              "Threat model",
+              "Explicit assumptions about an adversary; performance is not evidence of resistance."
+            ]
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Pick one term from each table and explain how using it precisely prevents a misleading completion claim."
+        }
+      ],
+      "words": 373,
+      "quiz": {
+        "q": "Does a checksum match replace differential testing?",
+        "choices": [
+          "No; it is a useful workload guard with limited coverage",
+          "Yes; collisions are impossible",
+          "Only when results are fast"
+        ],
+        "answer": 0,
+        "why": "A checksum can miss differences and covers only its chosen workload."
+      }
+    }
+  ]
+}

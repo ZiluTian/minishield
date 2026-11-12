@@ -1,17 +1,15 @@
 MiniShield — Day 2: the step-by-step teaching guide
-Recorded from the study session on 2026-11-12
+Study notes and future exercises · expanded 2026-11-12
 
 Read the chapter-based book at https://zilutian.github.io/minishield/#day2.
 
-This guide follows the revised Day 1 teaching style: beginner context, a
-template to start with, numbered fill-in steps, a full reference, verification,
-and a checkpoint. The learner writes the C++ and test scripts. The book’s
-reference snippets do not edit or complete the learner’s implementation.
+Complete Day 2 teaching draft. Lessons 0–16 document our study checkpoints and exercises; lessons 17–27 extend through complete rewriting and correctness checks. The remaining learner implementation is still pending.
 
-Current boundary: PHI and cross-block value preparation, state mapping,
-dispatcher construction, and an unconditional entry-to-dispatcher connection.
-Conditional entries and original state-block branch rewriting come next.
-This is not yet a complete general-purpose control-flow flattener.
+The learner writes the implementation and scripts. Templates, numbered steps,
+full reference examples, verification commands, deeper C++/LLVM explanations,
+and checkpoints support that work. Reference snippets are teaching content;
+they do not change the learner's source files. Future files mentioned in an
+exercise must be written before running commands that depend on them.
 
 0. Before changing the IR
 =========================
@@ -80,6 +78,7 @@ llvm::PreservedAnalyses FlatteningPass::run(
 - A template containing TODOs is an exercise scaffold, not a claim that the transformation is finished.
 
 Checkpoint: Why must eligibility run before mutation? Why is a successful verifier run weaker than proving that a transformation preserves behavior?
+
 ### Check your understanding
 
 Why prepare SSA values before adding dispatcher edges?
@@ -89,7 +88,6 @@ B. The verifier requires every function to use memory
 C. PHIs are forbidden in all LLVM programs
 
 Answer: A. PHIs are valid LLVM IR. It is our planned CFG restructuring that can invalidate existing SSA relationships.
-
 
 1. Collect PHIs without changing them
 =====================================
@@ -171,6 +169,7 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 | minishield-input.ll | 0 |
 
 Checkpoint: What does the vector own? Why do we retain pointers rather than copies? What changes when a later utility deletes a PHI?
+
 ### Check your understanding
 
 What does phis.push_back(phi) copy?
@@ -180,7 +179,6 @@ B. Only the pointer value
 C. The function containing the PHI
 
 Answer: B. LLVM owns the instruction. The vector keeps its address so a later pass stage can find it.
-
 
 2. Keep the typed pointer from dyn_cast
 =======================================
@@ -239,7 +237,26 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 
 Compilation should succeed and the phi.ll count should still be 1. We have changed C++ bookkeeping, not LLVM IR.
 
+<details>
+<summary>C++ — LLVM casts refine a borrowed pointer’s static type</summary>
+
+A PHINode inherits from Instruction, but a vector<PHINode*> cannot accept an arbitrary Instruction*. dyn_cast<PHINode>(&I) asks LLVM’s class hierarchy whether the existing instruction is a PHI. Success returns a PHINode* to that same object; failure returns nullptr. No PHI is allocated or copied.
+
+```cpp
+llvm::Instruction *base = &I;
+if (auto *phi = llvm::dyn_cast<llvm::PHINode>(base)) {
+    phis.push_back(phi); // stores the address, not a PHINode copy
+}
+```
+
+This is LLVM’s classof-based casting machinery, not C++ dynamic_cast and not a request to enable compiler RTTI. cast<T> asserts that the type is appropriate; dyn_cast<T> handles a possible mismatch. Use isa<T> when you only need a yes/no answer. See [LLVM casting](https://llvm.org/docs/ProgrammersManual.html#the-isa-cast-and-dyn-cast-templates).
+
+Checkpoint: After a successful cast, do base and phi refer to two instructions or one? Who owns that instruction?
+
+</details>
+
 Checkpoint: Why is &I later valid for a vector<Instruction*> but invalid here? Explain the difference between a runtime type test and the static type of an expression.
+
 ### Check your understanding
 
 Does a successful dyn_cast used only as an if condition retype I?
@@ -249,7 +266,6 @@ B. No; keep the returned PHINode pointer
 C. Yes, but only inside the if body
 
 Answer: B. I keeps its declared type. The returned pointer is the value with the more specific type.
-
 
 3. Demote PHIs after collection
 ===============================
@@ -333,7 +349,26 @@ Expect no PHI instruction, one slot for this PHI, stores in left and right, and 
 
 Observed error: Do not delete PHIs while using an ordinary loop over the same instruction list. Collecting first avoids using an invalidated iterator.
 
+<details>
+<summary>C++ — A worklist survives erasure; its pointed-to objects may not</summary>
+
+Collecting pointers separates traversal from mutation. vector<PHINode*> retains pointer values when LLVM erases a PHI, but that erased pointer becomes dangling. Iterating to the next vector element is safe; calling a method through the erased pointer is not. size() counts stored elements, including dangling pointer values, rather than querying the deleted instructions.
+
+```cpp
+const auto count = phis.size();
+for (auto *phi : phis) {
+    llvm::DemotePHIToStack(phi);
+    // Do not call phi->getName() here: the helper erased that PHI.
+}
+// count records how many were collected, not how many PHIs remain.
+```
+
+Checkpoint: Why is reserving vector capacity unrelated to preventing an erased instruction pointer from dangling?
+
+</details>
+
 Checkpoint: Trace both outcomes of the condition. Which store executes? What does join load? Why must changing IR invalidate cached analyses?
+
 ### Check your understanding
 
 Why collect PHIs before demoting them?
@@ -343,7 +378,6 @@ B. A vector is required by the LLVM API
 C. PHIs have no operands until put into a vector
 
 Answer: A. Demotion mutates the instruction list. A worklist separates discovery from deletion.
-
 
 4. Find values that cross block boundaries
 ==========================================
@@ -433,7 +467,19 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 
 After PHI demotion in the current loop fixture, expect i.reload in the worklist. Merely creating the new collection changes no IR; PHI demotion may already have changed it.
 
+<details>
+<summary>LLVM IR — SSA dominance is a graph property, not your expected runtime path</summary>
+
+For an ordinary use, a definition must dominate that use: every entry-to-use path passes through the definition. A dispatcher adds graph paths even when a state variable is intended to make some paths infeasible. LLVM’s SSA verifier does not infer your entire state-machine invariant to excuse missing dominance. Demotion changes value transport to memory, but the allocation pointer still has to dominate its uses.
+
+A PHI incoming operand is special: its use occurs on the corresponding incoming edge. That is why “used in another block” is not the complete story for repairing PHIs; use the PHI-specific helper before ordinary escaping-result demotion. See [LLVM IR dominance and PHIs](https://llvm.org/docs/LangRef.html#phi-instruction).
+
+Checkpoint: Why does “we never choose that state first” fail to repair a direct SSA use that no longer dominates?
+
+</details>
+
 Checkpoint: Find the defining instruction and a use in a different block. Why does a fresh traversal have to happen after PHI demotion rather than before it?
+
 ### Check your understanding
 
 Why can a PHI-free function still need preparation?
@@ -443,7 +489,6 @@ B. All PHI-free functions contain invalid IR
 C. A PHI-free function cannot contain loads
 
 Answer: A. SSA dependencies are not limited to PHIs. A load or add defined in one block can be consumed in another.
-
 
 5. Ask whether an instruction produces a value
 ==============================================
@@ -509,6 +554,7 @@ if (I.getType()->isVoidTy())
 Rebuild and inspect loop.ll’s collection. Its stores, branches, and return should not enter escapingValues. Its load can still be a candidate. The alloca is not void, so it needs the next lesson’s separate filter.
 
 Checkpoint: Why does ret i32 %x have void instruction type? Why does checking I.getOperand(0)->getType() answer a different question?
+
 ### Check your understanding
 
 What is the result type of the instruction ret i32 %x?
@@ -518,7 +564,6 @@ B. void, because the instruction produces no SSA result
 C. ptr, because it transfers control
 
 Answer: B. The returned operand has type i32. The ret instruction itself has no result.
-
 
 6. Recognize the stack allocation itself
 ========================================
@@ -573,6 +618,7 @@ Keep stack slots in the actual entry/setup block when designing the dispatcher. 
 Rebuild and inspect the cross-block worklist for the demoted loop. The slot pointer crosses blocks, but the allocation should not appear in escapingValues. The i.reload instruction result should.
 
 Checkpoint: Why would skipping only void instructions leave alloca in consideration? When would you choose dyn_cast instead of isa?
+
 ### Check your understanding
 
 Why does the alloca instruction need a separate filter?
@@ -582,7 +628,6 @@ B. It is a function declaration
 C. It is never represented as an LLVM instruction
 
 Answer: A. The allocated element is i32, but the allocation instruction’s result is a pointer to that storage.
-
 
 7. Finish collection without a premature return
 ===============================================
@@ -666,6 +711,7 @@ exit:
 Run the flattening pass with verify. Expect zero PHIs but sum in escapingValues. The fixture is an exercise to write; a reference snippet in this book does not create the file for you.
 
 Checkpoint: Why is &I the right type for this vector but not the PHI vector? Why must success in the eligibility checker and preservation information remain separate decisions?
+
 ### Check your understanding
 
 At the collection-only checkpoint, does a nonempty escapingValues list itself mean IR changed?
@@ -675,7 +721,6 @@ B. No; only transformations, such as the PHI demotion already performed, change 
 C. Yes, but only for named instructions
 
 Answer: B. The worklist is C++ bookkeeping. Update changed when a transformation runs, not merely because a candidate was found.
-
 
 8. Read the demotion helper signatures
 ======================================
@@ -724,7 +769,25 @@ for (auto *value : escapingValues) {
 
 Read the actual declarations in the installed LLVM headers. DemoteRegToStack also has optional parameters, including whether loads are volatile and an allocation insertion point. The study fixtures use the defaults; do not invent a runOnFunction method.
 
+<details>
+<summary>C++ — A declaration tells you which conversions are legal</summary>
+
+Read DemoteRegToStack’s Instruction& and DemotePHIToStack’s PHINode* as distinct C++ contracts. Given Instruction *I, *I is an lvalue naming the existing instruction and binds to Instruction&. Given PHINode *phi, phi already has the required pointer type. Neither expression copies an LLVM instruction.
+
+```cpp
+llvm::DemoteRegToStack(*I); // pointer → existing object, binds reference
+llvm::DemotePHIToStack(phi); // pointer already matches parameter
+// Extra defaulted parameters are supplied at the call site by the declaration.
+```
+
+Default arguments do not create overloads with fewer parameters. They provide omitted argument expressions where the declaration is visible. Check the installed LLVM 23 Local.h rather than copying a signature from an older tutorial.
+
+Checkpoint: What would happen if you passed &I when I is already an Instruction*? Name the resulting type.
+
+</details>
+
 Checkpoint: Explain what *value does here, why phi previously needed no dereference, and why the vector is a worklist rather than an owner of LLVM instructions.
+
 ### Check your understanding
 
 escapingValues stores Instruction*. What does the first DemoteRegToStack parameter require?
@@ -734,7 +797,6 @@ B. An Instruction**, supplied by &value
 C. A copy of the whole Function
 
 Answer: A. Dereferencing the stored pointer supplies the existing instruction as a reference, matching the signature.
-
 
 9. Demote the escaping values
 =============================
@@ -821,6 +883,7 @@ Expect no PHIs and additional stack operations. The header stores the former i.r
 Run the same command on the cross-block.ll exercise from lesson 07. Even with zero PHIs, sum should be stored into a slot and exit should return a load from it. Keep generated IR under build/.
 
 Checkpoint: Which transformation ran if phis is empty but escapingValues is not? Why must the final preservation result be none() in that case?
+
 ### Check your understanding
 
 What happens to the original add instruction after DemoteRegToStack?
@@ -830,7 +893,6 @@ B. It remains; its result is stored and uses become loads
 C. It moves into the C++ vector
 
 Answer: B. Ordinary-value demotion keeps the computation and changes how its result reaches users.
-
 
 10. Trace ordinary-value demotion
 =================================
@@ -907,7 +969,27 @@ escapingValues is a C++ worklist of instruction pointers. DemoteRegToStack rewri
 
 Generate cross-block.ll’s output with the pass followed by verify. Locate the add, its store, the slot allocation, and the load used by the return. A valid result alone is not proof that every future dispatcher preserves the store-before-load order.
 
+<details>
+<summary>LLVM IR — A host C++ pointer and an IR pointer live in different worlds</summary>
+
+AllocaInst *slot is an address in the compiler process pointing to an IR object. That IR object represents a target-program instruction whose result type is ptr. When the generated program runs, the alloca result denotes its stack storage. Calling slot->getType() inspects a type in the compiler; it does not load the program’s stack slot.
+
+```cpp
+auto *slot = builder.CreateAlloca(builder.getInt32Ty());
+// slot: C++ AllocaInst*; slot->getType(): LLVM ptr type
+// slot->getAllocatedType(): LLVM i32 type
+auto *loaded = builder.CreateLoad(builder.getInt32Ty(), slot);
+// loaded is a C++ handle to an IR value of LLVM type i32.
+```
+
+LLVM opaque pointers do not encode a pointee type as ptr<i32>. Supply the memory access type to CreateLoad and maintain correct size/alignment/address-space assumptions. See [LLVM opaque pointers](https://llvm.org/docs/OpaquePointers.html).
+
+Checkpoint: Which pointer is dereferenced when the pass evaluates slot->getName(), and which is used when the target executes load i32, ptr %slot?
+
+</details>
+
 Checkpoint: For x=4, what is stored and what is returned? Which object is the pointer, which is the i32, and which is just C++ bookkeeping?
+
 ### Check your understanding
 
 Does the alloca result contain the saved integer directly?
@@ -917,7 +999,6 @@ B. Yes, alloca i32 returns an i32
 C. Only when it is stored in escapingValues
 
 Answer: A. The integer is written into the allocated memory. The SSA result of alloca is the address of that memory.
-
 
 11. Trace PHI demotion by predecessor
 =====================================
@@ -996,7 +1077,24 @@ join:
 
 Inspect build/phi-demoted.ll after running the pass with verify. Trace condition=true through left and condition=false through right. The original branch structure should remain at this preparation checkpoint.
 
+<details>
+<summary>LLVM IR — Loop PHIs describe parallel values, not sequential assignments</summary>
+
+Two PHIs can represent a swap: on a back edge, next a receives old b and next b receives old a. Naively emitting store b into a-slot and then loading a-slot for b loses old a. Correct lowering must preserve the incoming-edge values as a group. LLVM’s helper handles the relevant uses and placement; do not replace it with an unexamined hand-written pair of assignments.
+
+```llvm
+; Conceptual loop fragment: both right-hand sides use the old iteration.
+%a = phi i32 [ 1, %entry ], [ %b, %latch ]
+%b = phi i32 [ 2, %entry ], [ %a, %latch ]
+; This is a fragment, not a complete runnable function.
+```
+
+Checkpoint: Trace the first two swaps by hand. What temporary values would a correct sequential implementation need?
+
+</details>
+
 Checkpoint: Why does each path load the right value? Why can PHI demotion still leave a new load result used outside its defining block, as in loop.ll?
+
 ### Check your understanding
 
 What replaces the PHI’s incoming-edge selection in the simple diamond?
@@ -1006,7 +1104,6 @@ B. The taken path executes its store; join reads the slot
 C. The condition is deleted and every path returns zero
 
 Answer: B. Control flow selects which store executes. The load reads the value written on that path.
-
 
 12. Assign states before changing edges
 =======================================
@@ -1097,6 +1194,7 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 No entry state is assigned. Mapping IDs changes C++ bookkeeping only; it does not itself invalidate analyses. Keep the existing changed decision from demotion.
 
 Checkpoint: Why are a vector and a map both useful? Why does entry not get a state? Why can state zero be an incorrect universal initialization value for a conditional entry?
+
 ### Check your understanding
 
 Why preserve the existing entry as setup?
@@ -1106,7 +1204,6 @@ B. Because LLVM forbids branches in entry
 C. To give it the highest state ID
 
 Answer: A. Setup executes once. The dispatcher routes between the other blocks; entry is not one of its repeated states.
-
 
 13. Fix pointer keys and pair insertion
 =======================================
@@ -1179,7 +1276,27 @@ Observed error: const auto *BB would be a pointer to const BasicBlock and would 
 
 Rebuild and compare the phi.ll state order with lesson 12. lookup returns a default zero for a missing key; in this prototype all original destination blocks must already be mapped, so do not treat lookup as validation that a key exists. Use find() when validating membership.
 
+<details>
+<summary>C++ — DenseMap lookup, accidental insertion, and iterator lifetime</summary>
+
+operator[] inserts a missing key with a default value. For unsigned, that value is zero, which is also a legitimate state ID. lookup returns a default value for a missing key without inserting, but still cannot distinguish “missing” from “state zero.” Use find and check end() when absence means an invariant failure.
+
+```cpp
+auto position = stateIDs.find(target);
+if (position == stateIDs.end()) {
+    // Handle an internal invariant failure; do not silently select state 0.
+}
+// Use position->second only after proving position != end().
+```
+
+DenseMap can rehash when entries are added, invalidating references/iterators into its storage. It does not move the BasicBlock objects whose pointer values are stored as keys. Finish constructing the map before relying on its iterators during rewriting.
+
+Checkpoint: Why can stateIDs[target] make a broken target lookup appear to work?
+
+</details>
+
 Checkpoint: Why is copying a pointer element okay here even though for (auto BB : F) would try to copy a noncopyable block?
+
 ### Check your understanding
 
 Which value belongs in a DenseMap<BasicBlock*, unsigned> key?
@@ -1189,7 +1306,6 @@ B. A copy of the BasicBlock object
 C. The block’s printed name string
 
 Answer: A. The map declaration requires a pointer. Take &BB when iterating block references, and use the pointer directly when iterating stateBlocks.
-
 
 14. Construct a complete dispatcher block
 =========================================
@@ -1318,7 +1434,19 @@ cat build/phi-dispatcher.ll
 
 Expect a state slot, a dispatcher load and switch with 0→left, 1→right, 2→join, and an invalid block ending in unreachable. ms.dispatch has no predecessors at this checkpoint. Its load is not executed, so no initialization store is needed yet.
 
+<details>
+<summary>C++ — IRBuilder is a template whose methods can return different value kinds</summary>
+
+IRBuilder<> uses default template parameters for folding and insertion behavior. A method such as CreateSelect can fold constant operands and return a Constant rather than a newly inserted SelectInst. auto* preserves the method’s declared pointer result type; it does not promise a particular concrete instruction subclass.
+
+Use the common Value* interface when either a constant or instruction is legal. Use dyn_cast<Instruction> only when you need to test whether a runtime instruction was inserted. Constant folding can change printed instruction counts without changing semantics.
+
+Checkpoint: Why is “every Create... call adds exactly one instruction” an unsafe testing assumption?
+
+</details>
+
 Checkpoint: Which block executes the allocation? Why is a switch destination not a substitute for that destination block’s own terminator? Why must new blocks not enter stateBlocks?
+
 ### Check your understanding
 
 Does CreateSwitch(..., 3) create three cases?
@@ -1328,7 +1456,6 @@ B. Yes, it automatically assigns IDs 0, 1, and 2
 C. Only if the function has exactly three blocks
 
 Answer: A. Capacity and contents are separate. Add each integer constant and destination explicitly.
-
 
 15. Separate block names from C++ variables
 ===========================================
@@ -1390,6 +1517,7 @@ Observed error: The build failed before producing a new plugin. An existing .so 
 Rebuild successfully, then rerun the phi.ll construction check from lesson 14. Do not proceed merely because an old shared library still loads.
 
 Checkpoint: Distinguish the pointer variable, the object it identifies, and its IR name. Which problem belongs to the C++ compiler and which to the LLVM verifier?
+
 ### Check your understanding
 
 What is "ms.dispatch" in BasicBlock::Create(..., "ms.dispatch", &F)?
@@ -1399,7 +1527,6 @@ B. A string naming the LLVM basic block
 C. A pointer to the current dispatcher
 
 Answer: B. The return value is the block pointer. The string argument supplies the IR name.
-
 
 16. Connect an unconditional entry branch
 =========================================
@@ -1609,6 +1736,7 @@ Reference check: this complete example was compiled separately from the learner�
 - Use behavior comparisons and regression fixtures in addition to verify. Preserve store-before-load ordering; the switch alone does not prove it.
 
 Checkpoint: Why must the old branch stay alive until replacements are emitted? Why does a conditional entry require more than storing the first state ID?
+
 ### Check your understanding
 
 At this checkpoint, which original branches have been redirected?
@@ -1619,8 +1747,1016 @@ C. Only return instructions
 
 Answer: B. This connects the first hop. Full flattening needs later successor-selection and state-transition rewriting.
 
+17. Define the supported input before mutation
+==============================================
 
-17. Look up a Day 2 term
+Task: Future exercise: expand FunctionEligibility before enabling the complete rewrite below. These chapters are a book draft; your working implementation has not been updated for you.
+
+### Why the old guard is not enough
+
+The earlier guard supported inspection and a limited prototype. A new dispatcher edge can bypass a non-entry alloca, making its pointer fail dominance. Some LLVM instruction results cannot be spilled as ordinary scalars. Special call semantics can forbid the control-flow changes we are proposing.
+
+### The template to start with
+
+```cpp
+EligibilityResult FunctionEligibility::check(const llvm::Function &F) {
+    // Keep the existing declaration, coroutine, EH, and block-address checks.
+    // TODO: reject unsupported allocations, result types, and call semantics.
+    // No IRBuilder, erasure, or demotion belongs in this function.
+    return {true, ""};
+}
+```
+
+### Step 1 — State a narrow contract
+
+This teaching implementation accepts valid, ordinary scalar LLVM IR: integers, floating-point values, pointers, supported branch terminators, and static entry allocations. It is conservative. It rejects explicit intrinsic calls for now rather than assuming every llvm.* operation is safe. This is narrower than “all C++ functions.”
+
+### Step 2 — Reject non-static allocation
+
+```cpp
+if (const auto *A = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
+    if (!A->isStaticAlloca())
+        return {false, "only static entry allocas are supported"};
+}
+```
+
+isStaticAlloca() encodes LLVM’s entry/constant-size rule, including restrictions such as inalloca. Do not simply move a loop’s alloca into entry: changing how often storage is allocated may change behavior.
+
+### Step 3 — Reject exceptional result and call forms
+
+The full reference rejects non-scalar instruction results, naked functions, inline assembly calls, convergent calls, operand bundles, returns_twice, musttail, and intrinsic calls. Explain the reason for each before relaxing it; rejection is a defined limitation, not a bug to hide.
+
+### The full eligibility reference
+
+```cpp
+#include "minishield/FunctionEligibility.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+namespace minishield {
+EligibilityResult FunctionEligibility::check(const llvm::Function &F) {
+    if (F.isDeclaration()) return {false, "function has no body"};
+    if (F.isPresplitCoroutine()) return {false, "presplit coroutine is unsupported"};
+    if (F.hasPersonalityFn()) return {false, "exception handling is unsupported"};
+    if (F.hasFnAttribute(llvm::Attribute::Naked)) return {false, "naked function is unsupported"};
+    for (const auto &BB : F) {
+        if (BB.hasAddressTaken()) return {false, "address-taken block is unsupported"};
+        if (BB.isEHPad()) return {false, "EH pad is unsupported"};
+        switch (BB.getTerminator()->getOpcode()) {
+        case llvm::Instruction::UncondBr:
+        case llvm::Instruction::CondBr:
+        case llvm::Instruction::Switch:
+        case llvm::Instruction::Ret:
+        case llvm::Instruction::Unreachable: break;
+        default: return {false, "unsupported terminator"};
+        }
+        for (const auto &I : BB) {
+            if (const auto *A = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
+                if (!A->isStaticAlloca()) return {false, "only static entry allocas are supported"};
+            }
+            if (const auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
+                const auto *callee = CB->getCalledFunction();
+                if (callee && callee->isIntrinsic()) return {false, "intrinsic calls are outside this prototype's scope"};
+                if (CB->isInlineAsm() || CB->isConvergent() || CB->getNumOperandBundles() ||
+                    CB->hasFnAttr(llvm::Attribute::ReturnsTwice))
+                    return {false, "special call semantics are unsupported"};
+                if (const auto *call = llvm::dyn_cast<llvm::CallInst>(CB))
+                    if (call->isMustTailCall()) return {false, "musttail is unsupported"};
+            }
+            auto *type = I.getType();
+            if (!type->isVoidTy() && !type->isIntegerTy() &&
+                !type->isFloatingPointTy() && !type->isPointerTy())
+                return {false, "only scalar instruction results are supported"};
+        }
+    }
+    return {true, ""};
+}
+}
+```
+
+### Verify
+
+- Add a fixture with an alloca outside entry, one with a variable-size alloca, and one producing an unsupported aggregate result.
+- Validate each fixture with opt -passes=verify before testing the plugin. Invalid input is not a useful eligibility test.
+- Expect a named rejection, valid output, and an empty canonical before/after diff. Keep the existing accept fixtures as positive controls.
+
+<details>
+<summary>LLVM IR — Dominance applies to allocation pointers too</summary>
+
+Demoting arithmetic removes direct cross-block data uses, but the alloca result is itself an SSA pointer. If a dispatcher reaches a use without passing through that allocation, the IR is still invalid. Preserving entry storage and rejecting non-entry allocations are separate pieces of the design.
+
+Checkpoint: Why does putting values in memory not eliminate every SSA dominance requirement?
+
+</details>
+
+<details>
+<summary>LLVM IR — Why special call semantics constrain CFG rewriting</summary>
+
+An ordinary call is not the whole story. musttail requires strict call/return structure; inserting a spill reload or transition between the call and return can violate its contract. returns_twice marks calls that can return more than once, so an apparently single forward path does not capture their control effects. A convergent operation has additional constraints on how control flow may be transformed around participating operations. Operand bundles carry semantic information beyond ordinary operands, such as deoptimization or funclet context.
+
+These features are not inherently untransformable. This small pass lacks a feature-specific proof and implementation, so preflight rejects them before editing. In contrast, a normal recursive scalar call can remain in place if its result is prepared correctly. “Do not modify calls” is not enough: moving surrounding control flow or inserting value transport can still change a call contract.
+
+Checkpoint: Why can a musttail call become invalid even when its opcode and callee are unchanged?
+
+See the [LLVM call instruction reference](https://llvm.org/docs/LangRef.html#call-instruction) and the specific attributes/bundles involved before relaxing a rejection.
+
+</details>
+
+Checkpoint: Name a source feature rejected by this prototype and the invariant the rejection protects. Why must every rejection happen before the first demotion?
+
+### Check your understanding
+
+Can you safely hoist every non-entry alloca into entry?
+
+A. No; allocation frequency and lifetime can affect behavior
+B. Yes; all pointers are equivalent
+C. Yes, if verify passes
+
+Answer: A. Hoisting can change program semantics. The prototype rejects these allocations until a sound handling strategy is designed.
+
+18. Give state-machine construction its own class
+=================================================
+
+Task: Future exercise: declare StateMachineBuilder and move dispatcher construction into it. Keep eligibility and value preparation in FlatteningPass.
+
+### The template to start with
+
+```cpp
+#pragma once
+#include "llvm/IR/Function.h"
+namespace minishield {
+class StateMachineBuilder {
+public:
+    // TODO: declare static bool build(llvm::Function &F).
+};
+}
+```
+
+### Step 1 — Define the contract
+
+build receives a mutable function with valid IR that passed the strict guard and has already had PHIs and cross-block results prepared. It returns whether it changed the CFG. It does not own the function and must not be called on rejected input.
+
+### Step 2 — Snapshot only original blocks and terminators
+
+```cpp
+std::vector<llvm::BasicBlock *> states;
+std::vector<llvm::Instruction *> terminators;
+llvm::DenseMap<llvm::BasicBlock *, unsigned> ids;
+for (auto &BB : F) {
+    terminators.push_back(BB.getTerminator());
+    if (&BB != &entry) {
+        ids[&BB] = static_cast<unsigned>(states.size());
+        states.push_back(&BB);
+    }
+}
+```
+
+Capture the entry terminator too: it must choose the first state. Snapshot before creating dispatch/invalid so the later rewrite does not accidentally rewrite the dispatcher’s own switch.
+
+### Step 3 — Skip functions with no dispatchable entry path
+
+For this design, build returns false if there is only one block or entry has no successors. Do not construct an unused state machine just to satisfy a block-count expectation.
+
+### The full header
+
+```cpp
+#pragma once
+#include "llvm/IR/Function.h"
+namespace minishield {
+class StateMachineBuilder {
+public:
+    // Precondition: valid IR, accepted input, PHIs/cross-block values prepared.
+    static bool build(llvm::Function &F);
+};
+}
+```
+
+### Implementation scaffold
+
+```cpp
+#include "minishield/StateMachineBuilder.h"
+namespace minishield {
+bool StateMachineBuilder::build(llvm::Function &F) {
+    auto &entry = F.getEntryBlock();
+    if (F.size() < 2 || entry.getTerminator()->getNumSuccessors() == 0)
+        return false;
+    // TODO: snapshot originals, allocate state, create dispatch and invalid.
+    // TODO: rewrite the original terminators using the next three lessons.
+    return true;
+}
+}
+```
+
+### Verify
+
+Add the implementation source to the existing CMake target after writing it. A helper header alone does not link a definition. Until the next lessons fill in rewriting, do not replace your working pass with an incomplete scaffold.
+
+<details>
+<summary>C++ — Static member functions and borrowed references</summary>
+
+static here means the method needs no StateMachineBuilder instance or this pointer. It does not mean the function owns global state or that F is immutable. The Function& parameter borrows an object owned by LLVM; the bool reports mutation, not a newly allocated function.
+
+Checkpoint: Why is a non-owning Function& preferable to new Function(...) for this interface?
+
+</details>
+
+Checkpoint: Which responsibilities remain in the pass, which in eligibility, and which in the builder?
+
+### Check your understanding
+
+Why snapshot terminators before creating new blocks?
+
+A. To avoid including newly created dispatcher control flow in the original-block rewrite
+B. Because pointers automatically delete instructions
+C. To make the entry unreachable
+
+Answer: A. Rewriting the dispatcher’s own switch as though it were an original switch would break the machine.
+
+19. Choose states for conditional branches
+==========================================
+
+Task: Future exercise: replace a conditional original branch with a selected state, a store, and a branch to dispatch. This applies to conditional entries and conditional state blocks.
+
+### The template to start with
+
+```cpp
+case llvm::Instruction::CondBr: {
+    auto *branch = llvm::cast<llvm::CondBrInst>(T);
+    // TODO: next = select(condition, true-state, false-state).
+    break;
+}
+```
+
+### Step 1 — Read the original operands before erasing
+
+getCondition() gives an i1 LLVM value. getSuccessor(0) is the true destination; getSuccessor(1) is the false destination. Use the pointer-to-state mapping built from original blocks.
+
+### Step 2 — Build an i32 state choice
+
+```cpp
+next = b.CreateSelect(branch->getCondition(),
+                      stateOf(branch->getSuccessor(0)),
+                      stateOf(branch->getSuccessor(1)), "ms.next");
+```
+
+CreateSelect produces an LLVM value, not a host C++ decision. Both alternatives are i32 state constants; the condition chooses which value will be stored when the target program executes.
+
+### Step 3 — Share the store-and-branch tail
+
+```cpp
+b.CreateStore(next, slot);
+b.CreateBr(dispatch);
+T->eraseFromParent();
+```
+
+Do this once after the opcode switch. ret and unreachable use continue to skip the shared tail. A plain break in those cases would reach the tail with next still null.
+
+### The full conditional case
+
+```cpp
+case llvm::Instruction::CondBr: {
+    auto *branch = llvm::cast<llvm::CondBrInst>(T);
+    next = b.CreateSelect(branch->getCondition(),
+                          stateOf(branch->getSuccessor(0)),
+                          stateOf(branch->getSuccessor(1)), "ms.next");
+    break;
+}
+```
+
+### Verify
+
+For phi.ll, true must select left’s state and false right’s state. Inspect a select before the entry’s store/dispatch branch. Test both conditions with a wrapper calling merge; a verifier-only check cannot catch swapped destinations.
+
+<details>
+<summary>C++ — Switch scopes, break, and continue</summary>
+
+Braces around a case introduce a C++ scope for local declarations. break exits the switch and proceeds to its shared tail. continue inside that switch applies to the surrounding terminator loop, skipping the tail. Confusing them can emit an invalid null store or accidentally rewrite a return.
+
+Checkpoint: Trace execution after break and after continue in the complete helper.
+
+</details>
+
+<details>
+<summary>LLVM IR — A select is an IR value, not a C++ if</summary>
+
+The C++ builder runs while transforming the module. It constructs a target-program select; it does not know a runtime condition such as the input argument. Select chooses values, not which operand instructions execute. Here its operands are constants, so we are not speculatively executing side-effecting operations.
+
+Checkpoint: Why would replacing arbitrary control-dependent operations with eager computations plus select require more care?
+
+</details>
+
+Checkpoint: How would a true/false state swap pass verify and still compute the wrong answer?
+
+### Check your understanding
+
+What does CreateSelect return here?
+
+A. An LLVM value representing a runtime choice
+B. A bool telling the C++ pass which branch was taken
+C. A new executable BasicBlock
+
+Answer: A. The builder constructs IR. The target program evaluates the condition later.
+
+20. Lower original switches to state selection
+==============================================
+
+Task: Future exercise: handle original SwitchInst terminators, not the newly created dispatcher switch.
+
+### The template to start with
+
+```cpp
+case llvm::Instruction::Switch: {
+    auto *sw = llvm::cast<llvm::SwitchInst>(T);
+    // TODO: initialize next from default destination.
+    for (auto oneCase : sw->cases()) {
+        // TODO: compare original condition with this case value.
+        // TODO: select this case state or retain the previous next.
+    }
+    break;
+}
+```
+
+### Step 1 — Make default explicit
+
+```cpp
+next = stateOf(sw->getDefaultDest());
+```
+
+An input not matching any listed case must retain the original default destination. Initializing next to zero would silently change this behavior.
+
+### Step 2 — Compare using the original condition type
+
+```cpp
+auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());
+```
+
+The switch’s integer condition is not necessarily i32. Its case constants already have the matching type. The generated comparison yields i1, while destination state constants remain i32.
+
+### Step 3 — Chain value selections
+
+```cpp
+next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()), next, "ms.next");
+```
+
+Valid switch case values are unique, so at most one case comparison is true for a defined condition. Several case values may share a destination. Keep all those matches; do not confuse unique values with unique destinations.
+
+### The full switch case
+
+```cpp
+case llvm::Instruction::Switch: {
+    auto *sw = llvm::cast<llvm::SwitchInst>(T);
+    next = stateOf(sw->getDefaultDest());
+    for (auto oneCase : sw->cases()) {
+        auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());
+        next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()),
+                              next, "ms.next");
+    }
+    break;
+}
+```
+
+### Verify
+
+Test switch.ll with every explicit case and at least one default input. Add a switch with an i64 condition and one with two case values targeting the same block. Check generated IR and observable results.
+
+<details>
+<summary>LLVM IR — Value* may identify a constant, not an instruction</summary>
+
+IRBuilder<> uses a constant folder by default. If a comparison or select can be folded, a Create* helper can return a Constant rather than insert an Instruction. This is why next is llvm::Value*, not Instruction*. Never blindly cast every builder result to Instruction just because the method starts with Create.
+
+```cpp
+llvm::Value *v = b.CreateAdd(b.getInt32(1), b.getInt32(2));
+// With the default folder, v can be the constant i32 3.
+// cast<Instruction>(v) is not a valid assumption.
+```
+
+Checkpoint: How is a host C++ integer 3 different from an LLVM ConstantInt representing target value 3?
+
+</details>
+
+Checkpoint: Why must default be initialized first? Why must the compare operands use the original switch type?
+
+### Check your understanding
+
+Can two different switch case constants map to the same state?
+
+A. Yes, if they originally target the same block
+B. No, every destination must be unique
+C. Only if the condition is i32
+
+Answer: A. Case values must be unique. Destinations may be shared, and the transformation must preserve that mapping.
+
+21. Rewrite every original terminator
+=====================================
+
+Task: Future exercise: complete StateMachineBuilder.cpp using the previous branch cases. This reference assumes the strict preflight and value-preparation stages.
+
+### The template to start with
+
+```cpp
+for (auto *T : terminators) {
+    llvm::IRBuilder<> b(T);
+    llvm::Value *next = nullptr;
+    switch (T->getOpcode()) {
+    // TODO: UncondBr, CondBr, Switch assign next.
+    // TODO: Ret and Unreachable skip the rewrite tail.
+    // TODO: an unsupported opcode is an internal preflight-contract failure.
+    }
+    // TODO: store next, branch to dispatch, erase T.
+}
+```
+
+### Step 1 — Handle terminal paths
+
+Return and unreachable terminate the current function path. Leave those instructions unchanged and continue the outer loop. Do not set a state and dispatch again after a return.
+
+### Step 2 — Validate state membership
+
+Use find() rather than silently interpreting lookup’s default zero as a real state. Missing IDs here mean a bug in the snapshot/preflight contract for valid input. Unsupported user input should have been cleanly rejected before mutation.
+
+### Step 3 — Finish each replacement before verifying
+
+Insert comparisons/selects, then the state store, then the dispatch branch, and erase the old terminator. Do not use an erased pointer or a builder insertion point that still refers to the erased instruction.
+
+### The full builder implementation
+
+```cpp
+#include "minishield/StateMachineBuilder.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <vector>
+
+namespace minishield {
+bool StateMachineBuilder::build(llvm::Function &F) {
+    auto &entry = F.getEntryBlock();
+    if (F.size() < 2 || entry.getTerminator()->getNumSuccessors() == 0)
+        return false;
+
+    std::vector<llvm::BasicBlock *> states;
+    std::vector<llvm::Instruction *> terminators;
+    llvm::DenseMap<llvm::BasicBlock *, unsigned> ids;
+    for (auto &BB : F) {
+        terminators.push_back(BB.getTerminator());
+        if (&BB != &entry) {
+            ids[&BB] = static_cast<unsigned>(states.size());
+            states.push_back(&BB);
+        }
+    }
+    llvm::IRBuilder<> setup(&*entry.getFirstInsertionPt());
+    auto *slot = setup.CreateAlloca(setup.getInt32Ty(), nullptr, "ms.state");
+    auto *dispatch = llvm::BasicBlock::Create(F.getContext(), "ms.dispatch", &F);
+    auto *invalid = llvm::BasicBlock::Create(F.getContext(), "ms.invalid", &F);
+    llvm::IRBuilder<> invalidBuilder(invalid);
+    invalidBuilder.CreateUnreachable();
+    llvm::IRBuilder<> db(dispatch);
+    auto *current = db.CreateLoad(db.getInt32Ty(), slot, "ms.current");
+    auto *stateSwitch = db.CreateSwitch(current, invalid,
+                                      static_cast<unsigned>(states.size()));
+    auto stateOf = [&](llvm::BasicBlock *BB) -> llvm::ConstantInt * {
+        auto it = ids.find(BB);
+        if (it == ids.end())
+            llvm::report_fatal_error("state destination missing after valid-input preflight");
+        return db.getInt32(it->second);
+    };
+    for (auto *BB : states)
+        stateSwitch->addCase(stateOf(BB), BB);
+
+    for (auto *T : terminators) {
+        llvm::IRBuilder<> b(T);
+        b.SetCurrentDebugLocation(T->getDebugLoc());
+        llvm::Value *next = nullptr;
+        switch (T->getOpcode()) {
+        case llvm::Instruction::UncondBr:
+            next = stateOf(T->getSuccessor(0));
+            break;
+        case llvm::Instruction::CondBr: {
+            auto *branch = llvm::cast<llvm::CondBrInst>(T);
+            next = b.CreateSelect(branch->getCondition(),
+                                  stateOf(branch->getSuccessor(0)),
+                                  stateOf(branch->getSuccessor(1)), "ms.next");
+            break;
+        }
+        case llvm::Instruction::Switch: {
+            auto *sw = llvm::cast<llvm::SwitchInst>(T);
+            next = stateOf(sw->getDefaultDest());
+            for (auto oneCase : sw->cases()) {
+                auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());
+                next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()),
+                                      next, "ms.next");
+            }
+            break;
+        }
+        case llvm::Instruction::Ret:
+        case llvm::Instruction::Unreachable:
+            continue;
+        default:
+            llvm::report_fatal_error("unsupported terminator escaped preflight");
+        }
+        b.CreateStore(next, slot);
+        b.CreateBr(dispatch);
+        T->eraseFromParent();
+    }
+    return true;
+}
+}
+```
+
+### Verify
+
+Build only after you have added the new helper source to CMake. Run the pass followed by verify over every positive fixture. At this final builder stage, each original nonterminal block—including entry—should store a destination state and branch to dispatch. The dispatcher still has its switch; terminal blocks still return or end in unreachable.
+
+| Property | Expected for this design |
+| --- | --- |
+| Original setup | Preserved first; not assigned a state. |
+| New blocks | Two: dispatch and invalid. |
+| Switch cases | One per non-entry block in the post-preparation snapshot. |
+| Original return/unreachable | Remain terminal. |
+| Other original terminators | Replaced by state selection/store/dispatch branch. |
+
+<details>
+<summary>LLVM IR — A structural invariant is measured at a particular stage</summary>
+
+Count N immediately before building the dispatcher, after SSA preparation. This helper adds two blocks, so its result has N+2 blocks. Do not blindly assert input N+1 from the old roadmap: a different design or earlier preparation can change that count. A test must describe this algorithm, not a remembered number.
+
+Checkpoint: Which stage’s block count does your test record?
+
+</details>
+
+Checkpoint: Which terminator is intentionally never in the snapshot? Why does the helper use a fatal internal-contract error rather than partially returning success?
+
+### Check your understanding
+
+Which switch must remain after rewriting original switches?
+
+A. The newly created dispatcher switch
+B. Every original switch
+C. No switch can remain in a flattener
+
+Answer: A. Original switches become state selection. The dispatcher switch implements the state machine itself.
+
+22. Orchestrate policy, preparation, and construction
+=====================================================
+
+Task: Future exercise: replace the prototype’s inline construction with the strict guard, preparation stage, and StateMachineBuilder call.
+
+### The template to start with
+
+```cpp
+// 1. Skip declarations.
+// 2. Check strict eligibility; reject without mutation.
+// 3. Skip entry-only/no-successor functions.
+// 4. Collect and demote PHIs.
+// 5. Collect and demote suitable cross-block values.
+// 6. Build the state machine.
+// 7. Return the preservation set for all changes.
+```
+
+### Step 1 — Keep rejection before modification
+
+No demotion or state allocation should precede the decision. Rejection after a partial transformation violates the unchanged-input contract.
+
+### Step 2 — Combine change information without skipping work
+
+```cpp
+bool changed = !phis.empty() || !escaping.empty();
+changed |= StateMachineBuilder::build(F);
+```
+
+Here |= is boolean accumulation that evaluates the builder call even if changed was already true. Writing changed = changed || build(F) would short-circuit and skip construction whenever demotion changed the function. Alternatively call build first into a separate bool, then combine the results.
+
+### Step 3 — Preserve conservatively
+
+Return none() after any mutation in this teaching implementation. Preserving a particular analysis is a claim you must justify and, for dependent cached analyses, implement correctly. “The graph still looks similar” is not enough.
+
+### The full pass reference
+
+```cpp
+#include "minishield/FlatteningPass.h"
+#include "minishield/FunctionEligibility.h"
+#include "minishield/StateMachineBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/Local.h"
+#include <vector>
+namespace minishield {
+llvm::PreservedAnalyses FlatteningPass::run(llvm::Function &F,
+                                           llvm::FunctionAnalysisManager &) {
+    if (F.isDeclaration()) return llvm::PreservedAnalyses::all();
+    const auto decision = FunctionEligibility::check(F);
+    if (!decision.eligible) {
+        llvm::errs() << "[MiniShield] rejected: " << F.getName() << ": " << decision.reason << "\n";
+        return llvm::PreservedAnalyses::all();
+    }
+    if (F.size() < 2 || F.getEntryBlock().getTerminator()->getNumSuccessors() == 0)
+        return llvm::PreservedAnalyses::all();
+    std::vector<llvm::PHINode *> phis;
+    for (auto &BB : F)
+        for (auto &I : BB)
+            if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) phis.push_back(phi);
+    for (auto *phi : phis) llvm::DemotePHIToStack(phi);
+    std::vector<llvm::Instruction *> escaping;
+    for (auto &BB : F)
+        for (auto &I : BB)
+            if (!I.getType()->isVoidTy() && !llvm::isa<llvm::AllocaInst>(I) &&
+                I.isUsedOutsideOfBlock(&BB)) escaping.push_back(&I);
+    for (auto *I : escaping) llvm::DemoteRegToStack(*I);
+    bool changed = !phis.empty() || !escaping.empty();
+    changed |= StateMachineBuilder::build(F);
+    return changed ? llvm::PreservedAnalyses::none() : llvm::PreservedAnalyses::all();
+}
+}
+```
+
+### Verify
+
+Run stats before and after flattening in the same pipeline so cached analysis invalidation is exercised. Expect the second stats pass to observe the new blocks and edges, not the original cached CFG.
+
+```bash
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-stats,minishield-flatten,minishield-stats),verify' \
+  -disable-output tests/ir/loop.ll
+```
+
+<details>
+<summary>C++ — Short-circuiting can silently skip a transformation</summary>
+
+```cpp
+bool alreadyChanged = true;
+// Bad orchestration: RHS is not evaluated.
+alreadyChanged = alreadyChanged || build(F);
+// Clear alternative:
+bool built = build(F);
+alreadyChanged = alreadyChanged || built;
+```
+
+This is C++ evaluation behavior, not an LLVM pass-manager feature. A change flag should summarize work, not accidentally control whether required work runs.
+
+Checkpoint: How would you test that the builder runs when a PHI was already demoted?
+
+</details>
+
+Checkpoint: Which helper owns policy? Which phase changes data flow? Which creates CFG edges? What exactly does the final bool summarize?
+
+### Check your understanding
+
+Why can changed = changed || build(F) be wrong?
+
+A. It may not call build when changed is already true
+B. It always calls build twice
+C. It turns a bool into an LLVM i1
+
+Answer: A. C++ || short-circuits. Use a separate result or an accumulation form that still evaluates the builder.
+
+23. Inspect the final shape with LLVM tools
+===========================================
+
+Task: Future exercise: establish structural evidence for the complete rewrite before measuring performance.
+
+### The template to start with
+
+```bash
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/loop.ll -o build/loop-flat.ll
+# TODO: inspect setup, dispatch, state stores, and terminal paths.
+```
+
+### Step 1 — Inspect invariants, not exact names
+
+LLVM may uniquify names such as ms.dispatch. Use opcode/edge relationships for assertions. Text dumps remain useful for understanding, but a test that only greps for a name can pass with a dead or malformed intended structure.
+
+### Step 2 — Read an SSA dominance error
+
+If a definition no longer dominates a use, locate both blocks and draw the new incoming edges. Do not hide the error by deleting verify. Check that a slot was allocated in preserved entry and that the use refers to a local reload, not an old cross-block definition.
+
+### Step 3 — Trace passes
+
+```bash
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -debug-pass-manager -disable-output tests/ir/loop.ll
+```
+
+Use the pass-manager trace to distinguish “loaded,” “scheduled,” “skipped,” and “ran.” Optional passes can be skipped on optnone functions; a missing diagnostic is not always a broken plugin.
+
+### Step 4 — Preserve a failing artifact
+
+Keep the smallest failing input, the command, the compiler version, and stderr. Save generated IR under build/. Record which stage first breaks rather than changing several phases at once.
+
+### The full inspection checklist
+
+- Setup remains the first block and has no predecessors.
+- State allocation dominates every load/store using its pointer.
+- Every generated block has a terminator.
+- Dispatch cases reference the intended state blocks.
+- Original state transitions store a valid ID before dispatch.
+- The default invalid path must be unreachable under valid state transitions.
+
+### Verify
+
+Repeat with the branch, switch, recursion, loop, and PHI fixtures. Structural checks must pass before behavior comparisons are useful.
+
+Checkpoint: What would a correct-looking but unreachable dispatcher prove? Why must instructions and edges both be inspected?
+
+### Check your understanding
+
+Does finding the text ms.dispatch prove flattening is active?
+
+A. No; the block could be unreachable or incorrectly wired
+B. Yes; that name is reserved by LLVM
+C. Only when the name appears twice
+
+Answer: A. A block name is a display aid. Reachability and transition behavior establish whether it is actually part of execution.
+
+24. Compare observable behavior on a defined domain
+===================================================
+
+Task: Future exercise: write a C input function and a separate driver. Transform the function’s IR, not the driver that parses arguments and prints results.
+
+### The template to start with
+
+```c
+int calculate_discount(int amount, int level) {
+    // TODO: reject negative amounts with 0.
+    // TODO: choose a percentage by level, then return discounted amount.
+}
+```
+
+### Step 1 — Bound the test domain
+
+Use amounts from -1000 through 10000 and levels 0 through 5. The arithmetic below cannot overflow int on that domain. Comparing two programs that both have source undefined behavior is not a meaningful correctness test.
+
+### Step 2 — Write the function and driver
+
+```c
+int calculate_discount(int amount, int level) {
+    if (amount < 0) return 0;
+    int rate;
+    switch (level) {
+    case 0: rate = 0; break;
+    case 1: rate = 5; break;
+    case 2: rate = 10; break;
+    default: rate = 15; break;
+    }
+    return amount - amount * rate / 100;
+}
+```
+
+Save that as tests/cases/discount.c and the following as tests/cases/discount_driver.c. The command-line guard keeps executions inside the documented domain.
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+extern int calculate_discount(int amount, int level);
+int main(int argc, char **argv) {
+    if (argc != 3) return 2;
+    char *end1, *end2;
+    long amount = strtol(argv[1], &end1, 10);
+    long level = strtol(argv[2], &end2, 10);
+    if (*end1 || *end2 || amount < -1000 || amount > 10000 || level < 0 || level > 5)
+        return 2;
+    printf("%d\n", calculate_discount((int)amount, (int)level));
+    return 0;
+}
+```
+
+### Step 3 — Create one common IR input
+
+The front end emits unoptimized IR without the O0 optnone attribute so the optional pass will run. Both variants then use the same -O2 backend. This separates the tested transformation from accidental differences in front-end settings.
+
+```bash
+mkdir -p build/differential
+clang -O0 -Xclang -disable-O0-optnone -S -emit-llvm \
+  tests/cases/discount.c -o build/differential/common.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S build/differential/common.ll -o build/differential/protected.ll
+clang -O2 tests/cases/discount_driver.c build/differential/common.ll \
+  -o build/differential/original
+clang -O2 tests/cases/discount_driver.c build/differential/protected.ll \
+  -o build/differential/protected
+```
+
+### Step 4 — Compare boundary and representative inputs
+
+```bash
+build/differential/original 1000 2
+build/differential/protected 1000 2
+# Expected stdout from each: 900
+build/differential/original -1 0
+build/differential/protected -1 0
+# Expected stdout from each: 0
+```
+
+### The full comparison contract
+
+- Same common input IR, driver, backend flags, toolchain, and inputs.
+- Both processes exit normally; compare exit status and stdout. Treat crashes/timeouts as failures.
+- Inspect transformed IR to ensure a transformation actually happened; equality is trivial if the pass skipped everything.
+- Passing examples provide evidence for this test domain, not a universal proof.
+
+### Verify
+
+Start with amounts -1, 0, 1, 99, 100, 1000, 10000 and every level. Day 3 adds seeded randomized cases, CTest wiring, and diagnostics for the first mismatch.
+
+Checkpoint: Why is -disable-O0-optnone present? Why transform the function module and link a common driver afterward?
+
+### Check your understanding
+
+Why use the same common IR for both builds?
+
+A. To isolate the transformation instead of changing front-end input as well
+B. To avoid linking either executable
+C. To prove all inputs correct mathematically
+
+Answer: A. A fair comparison holds unrelated pipeline choices constant. It still needs defined inputs and does not become a proof.
+
+25. Add difficult CFG fixtures deliberately
+===========================================
+
+Task: Future exercise: grow the fixture corpus before claiming the transformer handles general control flow.
+
+### The template to start with
+
+```llvm
+; For each new fixture, write down before coding:
+; 1. the original nodes and edges;
+; 2. PHIs and values used in another block;
+; 3. expected terminal outcomes on a finite input set;
+; 4. whether the support contract accepts or rejects it.
+```
+
+### Step 1 — Test parallel PHI selection
+
+Two loop PHIs can exchange old values. Their incoming values are conceptually selected together. A naive hand-written sequence of stores and loads can overwrite an old value before the other PHI uses it; do not replace LLVM’s helper with that shortcut.
+
+```llvm
+header:
+  %x = phi i32 [ 0, %entry ], [ %y, %body ]
+  %y = phi i32 [ 1, %entry ], [ %x, %body ]
+  ; Complete the loop with a bounded induction counter before running it.
+```
+
+### Step 2 — Test several shapes
+
+| Fixture | What it isolates |
+| --- | --- |
+| Nested bounded loops | Repeated state transitions and multiple loop headers. |
+| One loop with two latches | Loop count need not equal back-edge count. |
+| Several returns | Terminal states must not dispatch again. |
+| Switch cases sharing a destination | Distinct values may map to one state. |
+| No PHIs, one escaping add | The second preparation stage must run. |
+| Non-entry or dynamic alloca | Reject before any mutation. |
+
+### Step 3 — Make a test oracle
+
+For each accepted fixture, use a bounded harness with known or original results. For rejected fixtures, compare canonical IR and the intended reason. Do not count an arbitrary early rejection as evidence that a later check works.
+
+### The full review procedure
+
+- Verify the input independently.
+- Predict accept/reject and expected outputs by hand.
+- Run the transform with verify.
+- Inspect structural relationships.
+- Execute both versions in the defined domain.
+- Keep a failing case as a regression test before attempting a fix.
+
+### Verify
+
+Do not paste the partial PHI fragment above as a complete module; the loop counter and terminating path are an exercise. Finish it, validate it, then compare several iteration counts including zero and one.
+
+Checkpoint: Why can preserving SSA validity still produce a wrong value when a hand-written PHI lowering overwrites an old incoming value?
+
+### Check your understanding
+
+What does a two-latch fixture test?
+
+A. That one loop can have more than one back edge
+B. That every function needs two dispatchers
+C. That the verifier executes both loop paths
+
+Answer: A. Back-edge count and natural-loop count are different metrics.
+
+26. Account for optimizers, debug data, and limitations
+=======================================================
+
+Task: Future exercise: record the transformation’s placement relative to optimization and inspect both intermediate and final artifacts.
+
+### The template to start with
+
+```text
+common IR → [optional optimization] → MiniShield → [backend optimization] → executable
+# TODO: choose and record the exact pipeline for each experiment.
+```
+
+### Step 1 — Expect simplification
+
+An optimizer can simplify state dispatch or replace a branch-heavy function with straight-line code. A successful build or matching output does not prove that a dispatcher remains in the emitted binary. Inspect optimized IR and disassembly; report when a candidate fixture no longer demonstrates flattening.
+
+### Step 2 — Keep comparisons fair
+
+Hold source, compiler, target, optimization level, driver, and input domain constant when comparing original and protected variants. Changing the transformation stage is an experiment to label, not an invisible adjustment to improve a result.
+
+### Step 3 — Treat metadata by meaning
+
+Set the builder’s debug location from the original terminator for new transition instructions. Do not blindly copy branch-weight metadata to edges with a different meaning. The prototype does not promise fully preserved debug-variable locations or profile quality.
+
+### Step 4 — Describe invalid-state behavior accurately
+
+The unreachable default is an internal invariant, not input validation. Loading an uninitialized state is not automatically zero, and executing unreachable is undefined behavior. A real robustness feature would require deliberate initialization and a defined failure policy, separately designed and tested.
+
+### The full limitations note to adapt
+
+```text
+Prototype scope: ordinary scalar valid IR and static entry allocas.
+Rejected: EH/personality, coroutines, block addresses, unsupported terminators,
+          special call forms, explicit intrinsics, non-static allocas,
+          non-scalar instruction results, and naked functions.
+Not promised: formal behavior proof, arbitrary C++ support, anti-reversing
+              guarantees, unchanged debug/profile quality, or immunity to
+              later optimization simplifying the dispatcher.
+```
+
+### Verify
+
+Compare pre- and post-optimization IR for at least one fixture. Confirm the reported size/runtime refer to the final executable under the stated pipeline. Record both supported and rejected function counts.
+
+Checkpoint: Why can stronger optimization improve runtime while weakening the intended obfuscation structure?
+
+### Check your understanding
+
+Does an unreachable default provide safe error recovery?
+
+A. No; executing it is undefined behavior
+B. Yes; it returns zero
+C. Yes; it automatically throws a C++ exception
+
+Answer: A. unreachable states an invariant to the optimizer. It is not a recovery routine or a runtime bounds check.
+
+27. Close Day 2 with an evidence checklist
+==========================================
+
+Task: Future exercise: review the implementation and evidence before beginning Day 3. The chapters describe work to do; they do not mark it done for you.
+
+### The template to start with
+
+```text
+[ ] Strict preflight rejects unsupported input before edits.
+[ ] PHIs and suitable escaping values are prepared.
+[ ] Entry is preserved as one-time setup.
+[ ] Conditional/unconditional/switch transitions choose correct states.
+[ ] Returns and unreachable remain terminal.
+[ ] verify succeeds on the complete fixture set.
+[ ] Accepted fixtures match original behavior on the defined test domain.
+[ ] Rejected fixtures have intended reasons and unchanged canonical IR.
+[ ] Limitations and optimizer placement are documented.
+```
+
+### Step 1 — Name the unfinished item
+
+If any box lacks evidence, keep it open and identify a smallest failing fixture or missing test. “The code compiles” does not fill the behavior boxes.
+
+### Step 2 — Save only source and reproducible fixtures
+
+Commit the code, build configuration, documentation, and intentional test inputs. Keep build products and before/after generated IR in build/. The local table script remains excluded unless you explicitly decide to track it later.
+
+### Step 3 — Move into test infrastructure
+
+Day 3 turns manual observations into repeatable unit, integration, and differential checks, then measures final artifacts. It adds evidence rather than assuming that many successful printouts are a test suite.
+
+### The full handoff record
+
+```text
+Toolchain/version:
+Commit tested:
+Supported input contract:
+Commands used:
+Positive/negative fixtures:
+Differential domain and seed:
+Known limitations:
+Open failures:
+```
+
+### Verify
+
+Have a reader reproduce one accepted case and one rejection from a fresh build directory using the recorded commands. Do not replace missing measurements with plausible-looking numbers.
+
+Checkpoint: Which unchecked item currently limits your confidence most, and what concrete experiment would address it?
+
+### Check your understanding
+
+When should a Day 2 exit box be checked?
+
+A. When the corresponding implementation and evidence exist
+B. When a chapter has been read
+C. When its expected output looks plausible
+
+Answer: A. Reading and planning are not execution evidence. Keep those states distinct.
+
+28. Look up a Day 2 term
 ========================
 
 Task: Use this reference when a term interrupts your progress. The Day 1 glossary remains available under the Day 1 tab.
@@ -1668,6 +2804,22 @@ SSA result → store into an entry-allocated slot → load at a use
 - State IDs, block creation, and first-hop connection: lessons 12–16.
 
 Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition.
+
+### Additional terms for the complete rewrite
+
+| Term | Meaning |
+| --- | --- |
+| Support contract | The explicitly documented subset accepted before any mutation. |
+| Convergent call | A call with additional control-flow constraints; conservatively rejected here. |
+| Operand bundle | Extra semantic information attached to a call; not ordinary argument data. |
+| musttail / returns_twice | Special calling/control-flow requirements that ordinary rewriting must not silently violate. |
+| select | An IR instruction/value choosing between alternatives from an i1 condition; not a host C++ branch. |
+| Constant folding | Compute a known result during IR construction or optimization rather than inserting a runtime operation. |
+| Short-circuit evaluation | C++ \|\| and && may skip the right operand; important when it performs a transformation. |
+| Differential test | Run two implementations on the same defined input and compare observable results. |
+| Undefined behavior | Execution outside the language/IR contract; it invalidates naive equivalence arguments. |
+| Prototype scope | A deliberate limited support domain, not a claim to handle every valid LLVM program. |
+
 ### Check your understanding
 
 Which pair denotes a type and a value, respectively?

@@ -1,8 +1,8 @@
 # MiniShield
 
-An LLVM pass-plugin study project for control-flow flattening. The current
-implementation inspects IR, reports CFGs and natural loops, and checks function
-eligibility. The flattening pass is still a diagnostic stub.
+An LLVM pass-plugin study project for control-flow flattening. The study covers IR inspection, CFG analysis, eligibility, and control-flow
+rewriting. The learner implementation is in progress; the books include future
+exercises and complete reference examples.
 
 **[Read the Day 1 book](https://zilutian.github.io/minishield/)** — step-by-step
 lessons, diagrams, code, explanations, and checkpoints. The editable teaching
@@ -15,6 +15,10 @@ The flattening rewrite itself is Day 2.
 [Day 2: transformations](https://zilutian.github.io/minishield/#day2) adds
 PHI and cross-block value demotion, then dispatcher construction. Its teaching
 notes are in [day2](day2).
+[Day 3: tests and measurement](https://zilutian.github.io/minishield/#day3)
+covers GoogleTest, CTest, differential checks, benchmarks, and a reproducible
+demo; its teaching source is [day3](day3). Both books are complete drafts,
+with implementation exercises and measurements still to be done.
 
 ## Set up the environment
 
@@ -28,7 +32,7 @@ export LIBRARY_PATH="$CONDA_PREFIX/lib"
 
 [environment.yml](environment.yml) specifies LLVM/Clang 23.1.5, CMake, Ninja,
 GoogleTest, and C++ development headers. In each new shell, activate the
-environment and export `LIBRARY_PATH` again. Book lesson 0 explains how the
+environment and export `LIBRARY_PATH` again. Day 1’s environment chapter explains how the
 original environment was created, what each package does, and how to verify it.
 
 ## Configure and build
@@ -54,7 +58,7 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -passes='function(minishield-stats),verify' \
   -disable-output tests/ir/phi.ll
 
-# Report eligibility; the current pass leaves IR unchanged.
+# Run the current flattening checkpoint and verify its output.
 opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -passes='function(minishield-flatten),verify' \
   -S tests/ir/phi.ll -o build/phi-output.ll
@@ -62,7 +66,7 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 
 Fixtures live in [tests/ir](tests/ir). `verify` checks IR structure; it does not
 prove equivalent program behavior. The book explains expected counts,
-rejection cases, and unchanged-IR checks.
+rejection cases, and unchanged-IR checks for rejected or read-only passes.
 
 ## Read the book locally
 

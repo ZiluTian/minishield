@@ -41,3 +41,9 @@
 @media print{.sidebar,.topbar,.site-footer,.lesson-pager,.copy-button,.lesson-completion,.quiz,.margin-notes{display:none!important}.workspace{margin:0}.lesson-layout{display:block;padding:0;max-width:none}.deep-dive:not([open])>.deep-content{display:block}.lesson-body{font-size:11pt}.code-block{break-inside:avoid}.home{padding:0}body{background:white;color:black}}
 
 .day-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:0 21px 17px;padding:4px;border:1px solid var(--line);border-radius:6px}.day-switch a{display:block;text-decoration:none;padding:8px 6px;text-align:center;border-radius:4px;color:var(--muted);font-size:11px;font-weight:600}.day-switch a.active{background:var(--green);color:var(--paper)}.day-switch small{display:block;font-size:8px;font-weight:400;margin-top:2px;opacity:.8}
+
+/* Three volumes keep independent chapter order and reading progress. */
+.day-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.day-switch a { min-width: 0; padding-inline: 4px; }
+.day-switch small { font-size: 9px; }
+.concept-lens { display: inline-block; margin-right: .65em; padding: .15em .5em; border: 1px solid var(--line); border-radius: 3px; font: 10px var(--mono); letter-spacing: .04em; vertical-align: middle; }

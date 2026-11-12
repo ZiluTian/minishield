@@ -4,21 +4,21 @@ LLVM-based control-flow-flattening pass plugin. Working environment is **ready**
 (see "Environment" below). You write the code; this file is the roadmap: tasks,
 pitfalls, and a verifiable *exit criteria* for every task.
 
-## Progress (2026-11-11)
+## Progress (2026-11-12)
 
 | Milestone | Status |
 |---|---|
-| Environment and CMake | Complete: plugin builds against LLVM 23.1.5 |
-| 1.1 Plugin skeleton | Complete: `minishield-flatten` loads and executes; remains a diagnostic stub |
-| 1.2 IR statistics | Ready to implement: requirements and fixtures are documented in README |
-| 1.3 CFG analysis | Not started; loop counting is deferred here |
-| 1.4 Function eligibility | Not started |
-| Day 2 flattening | Not started |
-| Day 3 tests, benchmarks, demo | Not started; smoke input and IR fixtures exist |
+| Environment and CMake | Plugin builds against LLVM 23.1.5 |
+| Day 1 foundations | Statistics, CFG/loop analysis, and eligibility implemented during study |
+| Day 2 flattening | Learner implementation in progress; complete book draft available |
+| Day 3 tests, benchmarks, demo | Complete book draft; learner exercises and measurements pending |
 
-**Current study task:** implement the statistics pass and its check scripts
-yourself, using the README instructions and supplied fixtures. Manually
-cross-check `phi.ll` against the expected counts before moving to 1.3.
+**Current priority:** finish the books before resuming hands-on lessons.
+[Day 2](https://zilutian.github.io/minishield/#day2) documents preparation,
+dispatcher construction, complete branch rewriting, and correctness checks.
+[Day 3](https://zilutian.github.io/minishield/#day3) supplies test/build/harness
+references and a measurement plan. Reading a chapter does not complete its
+implementation or establish its expected results.
 
 Target layout (create as you go):
 
@@ -262,7 +262,9 @@ Goal: reject-unsafe-inputs-loudly. For each function, decide eligible/rejected
   - coroutines (`isCoroutine`)
   - blocks whose address is taken (labels used as values) — check with
     `BlockAddress` / `blockaddress` uses
-  - (bonus, if easy) `musttail`/`nosync` subtleties can be deferred; document.
+  - The complete Day 2 prototype rejects special call semantics such as
+    `musttail`, `returns_twice`, convergence, and operand bundles before mutation.
+    See its stricter support contract; the Day 1 inspection guard is narrower.
 
 **Exit criteria:** each rejection case has a fixture `.ll`; running the pass
 prints the diagnostic, IR is byte-identical (or at least `opt -verify` passes
@@ -278,11 +280,14 @@ diagnostics all work via `opt`.
 (~9–10 h. This is the heart of the project. Go slow, verify constantly.)
 
 ### 2.1 PHI demotion — ~1.5 h
-- For each eligible function, call `DemotePHIToStack::runOnFunction(F)`
-  (`<Transforms/Utils/Local.h>`) **before** restructuring.
+- After strict preflight, collect `PHINode*` values, then call the free
+  function `llvm::DemotePHIToStack(phi)` for each (`llvm/Transforms/Utils/Local.h`).
+  The helper erases the PHI; do not dereference that pointer afterward.
+- Collect non-void, non-alloca instruction results used outside their blocks,
+  then call `llvm::DemoteRegToStack(*I)` before changing the CFG.
 - Understand *why* (be able to explain this in an interview): in SSA, a PHI
   merges values from its predecessors. After flattening, every block is
-  reached only from the dispatcher (one predecessor), so PHI incomming edges
+  reached only from the dispatcher (one predecessor), so PHI incoming edges
   no longer line up with control flow. Demoting to `alloca` + `store` (each
   predecessor stores) + `load` (block head) preserves the merged value
   regardless of entry path.
@@ -293,27 +298,20 @@ diagnostics all work via `opt`.
 produces no PHI nodes (`grep -c "phi" out.ll` → 0) and passes `verify`.
 
 ### 2.2 State assignment + dispatcher (`StateMachineBuilder`) — ~3 h
-- Assign each block a unique integer state (use the function's existing block
-  order → deterministic, easy to test).
-- Create the **dispatcher** as the new entry of the function:
-  - state variable: `alloca i32` at the top (before PHI allocas — first
-    instruction of entry), initialized to the state of the *original* entry
-    block, then `br dispatcher`.
-  - dispatcher body: `switch (load state) [default: <unreachable or the last
-    state>]` with one arm per state → `br` to that block.
-- **Chosen style: in-place flattening** (recommended over block-moving):
-  original blocks stay where they are; you only (a) insert the dispatcher,
-  (b) rewrite terminators (2.3). Block count goes N → N+1. Block-moving
-  (creating fresh blocks and `moveBefore`-ing every instruction) is a common
-  alternative — discuss the trade-off in the report, but implement in-place:
-  fewer IRBuilder calls, less chance of breaking operand ordering.
-
-**Pitfalls:**
-- Insert the dispatcher **before** the original entry block
-  (`EntryBlock->insertAfter(...)` / `BasicBlock::create` + insert at function
-  front), and make the *original* entry block become "state 0" content — its
-  instructions still execute exactly once, when state=0.
-- `switch` default arm: unreachable is legal; pick one and be consistent.
+- Preserve the original entry as one-time setup. Reject non-static allocas
+  and other unsupported constructs before any preparation or mutation.
+- Assign deterministic state IDs to the prepared non-entry blocks only.
+- Allocate `i32` state storage in entry; its original terminator chooses and
+  stores the initial successor state before branching to dispatch.
+- Append a dispatcher loading that slot and switching to each non-entry block.
+  Append a distinct invalid-state block ending in `unreachable`.
+- This in-place builder adds **two** blocks: N → N+2, where N is measured
+  **after preparation** (demotion may split edges). Snapshot original
+  terminators before adding either block.
+- Rewrite original transitions as in 2.3, including the entry transition.
+  Keep returns and unreachable terminal. Never rewrite the new dispatcher.
+- `unreachable` is an invariant, not error recovery; every actual dispatch
+  must follow a valid state store. Preserve entry storage dominance.
 
 **Exit criteria:** on the `calculate_discount` fixture, the transformed IR
 shows: entry→dispatcher→switch→{state blocks}, one `alloca i32` state
@@ -335,30 +333,30 @@ Use `IRBuilder` at the end of each block (`builder.SetInsertPoint(term)` then
 `ReplaceOpWith...` patterns consistently).
 
 **Pitfalls (the ones that actually bite):**
-- **Use-def chains:** the old terminator may be referenced (e.g. a PHI incoming
-  — but you demoted those already; a `br` is rarely used, a `switch`'s
-  condition is used by nothing after rewrite). If a terminator *is* used,
-  replace rather than erase.
-- **Iterator invalidation:** erase from the end backwards or collect-then-rewrite.
-- **Operand ordering:** a `select`/`icmp` you insert must come after the
-  values it uses (IRBuilder appends at insertion point — set it right).
-- **Multiple returns:** fine — each `ret` stays terminal. The dispatcher's
-  state space still covers them; they just never loop back.
-- Don't touch `call` instructions, debug intrinsics (`!dbg`), or metadata.
+- Collect original terminators before rewriting; erase each only after reading
+  its operands and constructing the replacement. Do not use an erased pointer.
+- Insert comparisons/selects after their operands and before the old terminator.
+- Preserve return/unreachable instructions. In a C++ opcode switch inside a
+  loop, use `continue` for terminal cases to skip a shared store/branch tail.
+- New transition instructions inherit the old terminator’s debug location.
+  Do not blindly copy metadata whose control-flow meaning changed. The strict
+  prototype rejects explicit intrinsic calls; full debug/profile preservation
+  is outside its support promise.
 
 **Exit criteria:** every fixture from Day 1 (if/else, nested, loop, switch,
 multiple returns, PHI-heavy, recursion) transforms, passes `verify`, and the
 rewritten terminators look like the table above in the dumped IR.
 
 ### 2.4 First real correctness check — ~1.5 h
-- Compile `calculate_discount` C source two ways:
-  1. original: `clang -O2 -o orig discount_test.c`
-  2. protected: `clang -S -emit-llvm -O2 discount_test.c` → `opt
-     -load-pass-plugin=... -passes=minishield-flatten -S` → `clang -O2` on the
-     `.ll` → `prot`.
-- Run both on a handful of inputs (levels 0..5 × amounts, negatives).
-  **Identical outputs or you stop and debug.** (Always compare against the
-  original at the *same* `-O` level — the spec's warning.)
+- Compile the kernel alone once to common IR with
+  `clang -O0 -Xclang -disable-O0-optnone -S -emit-llvm`.
+- Transform that IR, then compile original and protected variants with the
+  same `-O2` backend and the same untransformed driver. See Day 2 lesson 24
+  for full source and commands.
+- Compare successful exit, stdout, and stderr over the documented defined
+  domain. Include every branch/switch outcome and record the failing input.
+- Inspect final optimized code: later optimization may simplify dispatch.
+  A behavior match does not prove that obfuscation structure survived.
 
 **Day 2 exit:** `minishield-flatten` produces valid, behavior-preserving IR for
 the full fixture set; CFG is visibly a dispatcher state machine.
@@ -372,13 +370,15 @@ the full fixture set; CFG is visibly a dispatcher state machine.
 - `tests/unit` (GoogleTest, link `GTest::gtest` + `GTest::gtest_main`,
   LLVM headers/libs):
   - eligibility: accept/reject on functions parsed from `.ll` text
-    (`parseFunction`/`parseModule` from `AsmParser`);
+    (`parseAssemblyString` from `llvm/AsmParser/Parser.h`);
   - CFG analysis: known edges/loops on synthetic functions;
   - flattening invariants on transformed IR: (a) `verifyModule` ok;
-    (b) block count == original+1; (c) exactly one dispatcher block with a
-    `switch` covering all states; (d) no original `br`/`condbr`/`switch`
-    remains a terminator except allowed `ret`/`unreachable`; (e) state
-    `alloca i32` exists.
+    (b) builder adds two blocks relative to the prepared CFG; (c) entry’s
+    live edge reaches a switch covering each prepared non-entry state once;
+    (d) original non-terminal transitions store correct state values and
+    branch to dispatch, while return/unreachable remain terminal; (e) state
+    storage dominates all uses. Do not assert temporary names or assume
+    preparation never splits edges.
 - `tests/ir/`: the fixture `.ll`/`.c` files (the ones from Days 1–2, plus
   negatives: EH, indirectbr, coroutine).
 - `tests/integration`: **differential executable test** (the one that
@@ -387,7 +387,8 @@ the full fixture set; CFG is visibly a dispatcher state machine.
   fixtures read inputs from argv/stdin, print results; a shell or C++ driver
   compares outputs over, e.g., 1000 random cases). Wire into CTest.
 
-**Exit criteria:** `ninja test` all green; negatives prove rejection
+**Exit criteria:** build first, then `ctest --test-dir build --output-on-failure`
+all green; negatives prove rejection
 (diagnostic + unchanged IR); a *mutated* test (break one invariant) fails
 loudly — sanity-check that your tests actually test.
 
@@ -448,7 +449,7 @@ start-to-finish unattended, README explains everything a stranger needs.
    first.
 6. Keep each class small: eligibility decides, CFGAnalyzer describes,
    StateMachineBuilder builds, FlatteningPass orchestrates (eligibility →
-   PHI demotion → build → verify).
+   PHI and escaping-value demotion → build → verify).
 
 ## Reference (official, in priority order)
 - LLVM: *Writing an LLVM Pass* (New PM + plugin section) — primary reference.
