@@ -1176,23 +1176,71 @@
     "blocks": [
       {
         "type": "task",
-        "text": "Task: write include/minishield/StatsPass.h using the earlier header as a model."
+        "text": "Task: write `include/minishield/StatsPass.h`, using the `FlatteningPass.h` header from lesson 6 as the model."
+      },
+      {
+        "type": "paragraph",
+        "text": "The statistics pass is a read-only **function pass**. Its header is an interface, not the traversal: it names the class, chooses the mixin, and declares the `run()` signature. The implementation comes later in `lib/StatsPass.cpp`. Start from this template, which leaves the pass declaration to fill in:"
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "Add #pragma once and include llvm/IR/PassManager.h.\nDeclare StatsPass inside namespace minishield.\nInherit publicly from RequiredPassInfoMixin<StatsPass>.\nDeclare the public function-pass run() method."
+        "text": "namespace minishield {\n    // TODO: declare the StatsPass class here\n} // namespace minishield"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Add the header guard and the pass infrastructure"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#pragma once\n#include \"llvm/IR/PassManager.h\""
       },
       {
         "type": "paragraph",
-        "text": "The method returns PreservedAnalyses and takes Function and FunctionAnalysisManager references. The header is an interface, not the implementation of the traversal."
+        "text": "`#pragma once` tells the compiler to include the file at most once. `llvm/IR/PassManager.h` supplies the types the pass references: `Function`, `FunctionAnalysisManager`, and `PreservedAnalyses`."
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Name the pass and choose its mixin"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "class StatsPass : public llvm::RequiredPassInfoMixin<StatsPass> {"
+      },
+      {
+        "type": "paragraph",
+        "text": "The class is named `StatsPass` and lives in `namespace minishield`. It inherits publicly from `llvm::RequiredPassInfoMixin<StatsPass>`, a mixin named for the class itself. `Required` tells the pass manager this pass must run when it is scheduled (lesson 6); `OptionalPassInfoMixin` would let it be skipped, which a statistics pass does not want."
+      },
+      {
+        "type": "heading",
+        "text": "Step 3 — Declare the `run()` method"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "public:\n    llvm::PreservedAnalyses run(\n            llvm::Function &F,\n            llvm::FunctionAnalysisManager &AM);\n};"
+      },
+      {
+        "type": "paragraph",
+        "text": "`run()` takes the function it inspects (`F`) and the function analysis manager (`AM`), and returns `llvm::PreservedAnalyses` describing which cached analyses stay valid. A function pass inspects one function at a time; the pass manager supplies the function and calls `run()` on it. The method is declared here and defined later in `lib/StatsPass.cpp`."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#pragma once\n#include \"llvm/IR/PassManager.h\"\n\nnamespace minishield {\n    class StatsPass : public llvm::RequiredPassInfoMixin<StatsPass> {\n        public:\n            llvm::PreservedAnalyses run(\n                    llvm::Function &F,\n                    llvm::FunctionAnalysisManager &AM);\n    };\n} // namespace minishield"
       },
       {
         "type": "checkpoint",
         "text": "Checkpoint: compare the declaration with the later definition. Class name, namespace, parameter types, and return type must agree."
       }
     ],
-    "words": 70
+    "words": 290
   },
   {
     "id": 9,
@@ -1200,31 +1248,71 @@
     "blocks": [
       {
         "type": "task",
-        "text": "Task: write lib/StatsPass.cpp. Include the StatsPass header, Function.h, and raw_ostream.h. Define run() inside namespace minishield."
+        "text": "Task: write `lib/StatsPass.cpp`. Include the `StatsPass` header, `Function.h`, and `raw_ostream.h`. Define `run()` inside `namespace minishield`."
       },
       {
         "type": "paragraph",
-        "text": "Skip declarations with F.isDeclaration(); declarations have no function body to inspect. Initialize an instruction counter before visiting the body."
-      },
-      {
-        "type": "paragraph",
-        "text": "The function pass manager already visits functions. Your traversal is:"
+        "text": "The function pass manager already visits functions and hands each one to `run()`. Your job is the traversal inside. Start from this template, which declares the definition and leaves the body to fill in:"
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "for (const llvm::BasicBlock &BB : F) {\n    for (const llvm::Instruction &I : BB) {\n        // Increment the instruction counter.\n    }\n}"
+        "text": "#include \"minishield/StatsPass.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\nnamespace minishield {\n\nllvm::PreservedAnalyses StatsPass::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n    // TODO: skip declarations, then count the function's blocks and instructions\n    return llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Skip declarations"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "if (F.isDeclaration())\n    return llvm::PreservedAnalyses::all();"
       },
       {
         "type": "paragraph",
-        "text": "F.size() supplies the block count. Print the function name, blocks, and total instructions to llvm::errs(). Return PreservedAnalyses::all() because no IR has changed. Using const references makes the read-only intent visible."
+        "text": "A declaration has no function body to inspect, so return before traversing. `PreservedAnalyses::all()` records that nothing changed; there is nothing to invalidate."
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Count the instructions in a nested traversal"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "int total_inst = 0;\n\nfor (const llvm::BasicBlock &BB : F) {\n    for (const llvm::Instruction &I : BB) {\n        ++total_inst;\n    }\n}"
+      },
+      {
+        "type": "paragraph",
+        "text": "Iterate each `BasicBlock` and, inside it, each `Instruction`. `F.size()` supplies the block count. The `const` references make the read-only intent visible — the pass inspects, it does not mutate."
+      },
+      {
+        "type": "heading",
+        "text": "Step 3 — Report and return"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "llvm::errs() << \"[MiniShield] function: \" << F.getName()\n    << \", blocks: \" << F.size()\n    << \", total instructions: \" << total_inst << \"\\n\";\n\nreturn llvm::PreservedAnalyses::all();"
+      },
+      {
+        "type": "paragraph",
+        "text": "Print to `llvm::errs()` (stderr) so the report does not mix with IR printed to stdout. No IR changed, so preserve all analyses."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/StatsPass.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\nnamespace minishield {\n\nllvm::PreservedAnalyses StatsPass::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n\n    if (F.isDeclaration())\n        return llvm::PreservedAnalyses::all();\n\n    int total_inst = 0;\n\n    for (const llvm::BasicBlock &BB : F) {\n        for (const llvm::Instruction &I : BB) {\n            ++total_inst;\n        }\n    }\n\n    llvm::errs() << \"[MiniShield] function: \" << F.getName()\n        << \", blocks: \" << F.size()\n        << \", total instructions: \" << total_inst << \"\\n\";\n\n    return llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
       },
       {
         "type": "checkpoint",
         "text": "Checkpoint using phi.ll: merge has four blocks and five instructions: three branches, one PHI, and one return."
       }
     ],
-    "words": 112
+    "words": 316
   },
   {
     "id": 10,
@@ -1232,20 +1320,73 @@
     "blocks": [
       {
         "type": "task",
-        "text": "Task: add lib/StatsPass.cpp to the existing CMake target. Include StatsPass.h in Plugin.cpp and extend the parsing callback to recognize minishield-stats."
+        "text": "Task: add `lib/StatsPass.cpp` to the existing CMake target. Include `StatsPass.h` in `Plugin.cpp` and extend the parsing callback to recognize `minishield-stats`."
       },
       {
         "type": "paragraph",
-        "text": "Keep both pipeline names working:"
+        "text": "The plugin currently registers only `minishield-flatten`. Add the new source to the build and teach the parsing callback a second name, keeping both pipeline names working:"
+      },
+      {
+        "type": "code",
+        "language": "text",
+        "text": "minishield-flatten -> add FlatteningPass\nminishield-stats   -> add StatsPass\nanything else     -> return false"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Add the source to the CMake target"
+      },
+      {
+        "type": "code",
+        "language": "cmake",
+        "text": "add_library(MiniShield MODULE\n    lib/Plugin.cpp\n    lib/FlatteningPass.cpp)"
+      },
+      {
+        "type": "paragraph",
+        "text": "The current `add_library` lists the two sources. Add `lib/StatsPass.cpp` to that list; CMake then compiles and links the new implementation into the module."
+      },
+      {
+        "type": "code",
+        "language": "cmake",
+        "text": "add_library(MiniShield MODULE\n    lib/Plugin.cpp\n    lib/FlatteningPass.cpp\n    lib/StatsPass.cpp\n)"
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Include the header and register the name"
+      },
+      {
+        "type": "paragraph",
+        "text": "A source list supplies the implementation at link time; it does not replace an include. Add `#include \"minishield/StatsPass.h\"` to `Plugin.cpp`, then add a branch to the parsing callback so `minishield-stats` constructs the pass:"
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "minishield-flatten -> add FlatteningPass\nminishield-stats   -> add StatsPass\nanything else     -> return false"
+        "text": "#include \"minishield/StatsPass.h\"\n\n                        else if (Name == \"minishield-stats\")\n                            FPM.addPass(minishield::StatsPass());"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
       },
       {
         "type": "paragraph",
-        "text": "After changing the sources or registration:"
+        "text": "`CMakeLists.txt` — the three-source module:"
+      },
+      {
+        "type": "code",
+        "language": "cmake",
+        "text": "cmake_minimum_required(VERSION 3.15)\nproject(MiniShield CXX)\n\n# LLVM 23 headers require C++20\nset(CMAKE_CXX_STANDARD 20)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_EXPORT_COMPILE_COMMANDS ON)\n\n# Find LLVM\nset(LLVM_LINK_LLVM_DYLIB ON)\nfind_package(LLVM REQUIRED CONFIG)\nmessage(STATUS \"Found llvm ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}\")\n# NOTE: the installed (conda) LLVM does not provide LLVM.cmake / AddLLVM.cmake,\n# so add_llvm_library is unavailable. Plain CMake + the imported target that\n# LLVMConfig.cmake defines is the correct consumer pattern.\nadd_library(MiniShield MODULE\n    lib/Plugin.cpp\n    lib/FlatteningPass.cpp\n    lib/StatsPass.cpp\n)\n\nseparate_arguments(MS_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})\ntarget_compile_definitions(MiniShield PRIVATE ${MS_LLVM_DEFS})\ntarget_include_directories(MiniShield PRIVATE\n      ${LLVM_INCLUDE_DIRS}\n      ${CMAKE_CURRENT_SOURCE_DIR}/include)\n\n# Imported target `LLVM` = libLLVM-23.so (dylib, created by LLVMConfig.cmake\n# because LLVM_LINK_LLVM_DYLIB is yes for this build). Every LLVM symbol in\n# the plugin resolves from the same library that opt itself loads.\ntarget_link_libraries(MiniShield PRIVATE LLVM)\n\nset_target_properties(MiniShield PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})"
+      },
+      {
+        "type": "paragraph",
+        "text": "`lib/Plugin.cpp` — both names registered:"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/FlatteningPass.h\"\n#include \"minishield/StatsPass.h\"\n#include \"llvm/Passes/PassBuilder.h\"\n#include \"llvm/Plugins/PassPlugin.h\"\n\nextern \"C\" LLVM_ATTRIBUTE_WEAK\nllvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {\n    return {\n        LLVM_PLUGIN_API_VERSION,\n        \"minishield\",\n        \"1.0\",\n        [](llvm::PassBuilder &PB) {\n            PB.registerPipelineParsingCallback(\n                [](llvm::StringRef Name,\n                   llvm::FunctionPassManager &FPM,\n                   llvm::ArrayRef<llvm::PassBuilder::PipelineElement> InnerPipeline) {\n                        if (!InnerPipeline.empty())\n                            return false;\n                        if (Name == \"minishield-flatten\")\n                            FPM.addPass(minishield::FlatteningPass());\n                        else if (Name == \"minishield-stats\")\n                            FPM.addPass(minishield::StatsPass());\n                        else\n                            return false;\n                        return true;\n                }\n            );\n        }\n    };\n}"
+      },
+      {
+        "type": "paragraph",
+        "text": "After changing the sources or registration, rebuild and run the new name on a fixture:"
       },
       {
         "type": "code",
@@ -1261,7 +1402,7 @@
         "text": "Observed error: \"no member named 'StatsPass' in namespace 'minishield'\" came from including FlatteningPass.h twice instead of including StatsPass.h. The compiler needs the declaration in this translation unit. CMake's source list supplies the implementation at link time; it does not replace includes."
       }
     ],
-    "words": 129
+    "words": 440
   },
   {
     "id": 11,
@@ -1269,24 +1410,46 @@
     "blocks": [
       {
         "type": "paragraph",
-        "text": "First exercise: count conditional and unconditional branches separately. Then add switches, PHIs, returns, calls, invokes, and indirect branches. Initialize all counters before the loops and print them after traversal."
+        "text": "Now count the instruction kinds. First exercise: count conditional and unconditional branches separately. Then add switches, PHIs, returns, calls, invokes, and indirect branches. Initialize all counters before the loops and print them after traversal."
       },
       {
         "type": "paragraph",
-        "text": "We first discussed isa<T>(I), from llvm/Support/Casting.h, to ask whether an instruction has a particular LLVM type. Instruction classes are declared in llvm/IR/Instructions.h."
-      },
-      {
-        "type": "paragraph",
-        "text": "The learner preferred switch/case. Use switch (I.getOpcode()) with these opcode names in this installed LLVM 23 version:"
+        "text": "The `StatsPass.cpp` from lesson 9 already has the traversal and the total-instruction counter. Start from that, with a `switch` to classify each instruction:"
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "llvm::Instruction::CondBr     — conditional branch\nllvm::Instruction::UncondBr   — unconditional branch\nllvm::Instruction::Switch    — multiway branch\nllvm::Instruction::PHI       — SSA merge\nllvm::Instruction::Ret       — return\nllvm::Instruction::Call      — call instruction\nllvm::Instruction::Invoke    — call with normal/unwind destinations\nllvm::Instruction::IndirectBr — indirect branch"
+        "text": "#include \"minishield/StatsPass.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n#include \"llvm/IR/Instructions.h\"\n\n// TODO: classify each instruction in the traversal loop and print the counts\n"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Classify with a `switch` on the opcode"
       },
       {
         "type": "paragraph",
-        "text": "Increment the appropriate counter and end each case with break. The default case can do nothing. Increment total_inst before the switch so instructions such as add and icmp remain part of the total even without their own counters."
+        "text": "We first discussed `isa<T>(I)`, from `llvm/Support/Casting.h`, to ask whether an instruction has a particular LLVM type. The learner preferred `switch/case`. Use `switch (I.getOpcode())` with these opcode names in this installed LLVM 23 version:"
+      },
+      {
+        "type": "code",
+        "language": "text",
+        "text": "llvm::Instruction::CondBr     \\u2014 conditional branch\nllvm::Instruction::UncondBr   \\u2014 unconditional branch\nllvm::Instruction::Switch    \\u2014 multiway branch\nllvm::Instruction::PHI       \\u2014 SSA merge\nllvm::Instruction::Ret       \\u2014 return\nllvm::Instruction::Call      \\u2014 call instruction\nllvm::Instruction::Invoke    \\u2014 call with normal/unwind destinations\nllvm::Instruction::IndirectBr \\u2014 indirect branch"
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Count, `break`, and keep the total"
+      },
+      {
+        "type": "paragraph",
+        "text": "Initialize one counter per kind before the loops, increment the matching counter inside each case, and end each case with `break`. The `default` case can do nothing. Increment `total_inst` before the `switch` so instructions such as `add` and `icmp` remain part of the total even without their own counters."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/StatsPass.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n#include \"llvm/IR/Instructions.h\"\n\nnamespace minishield {\n\nllvm::PreservedAnalyses StatsPass::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n\n    if (F.isDeclaration())\n        return llvm::PreservedAnalyses::all();\n\n    int cond_br = 0, uncond_br = 0, calls = 0, total_inst = 0,\n        switches = 0, phis = 0, returns = 0, invokes = 0,\n        indirectBranches = 0;\n\n    for (const llvm::BasicBlock &BB : F) {\n        for (const llvm::Instruction &I : BB) {\n            ++total_inst;\n            switch (I.getOpcode()) {\n                case llvm::Instruction::CondBr:\n                    ++cond_br;\n                    break;\n                case llvm::Instruction::UncondBr:\n                    ++uncond_br;\n                    break;\n                case llvm::Instruction::Switch:\n                    ++switches;\n                    break;\n                case llvm::Instruction::PHI:\n                    ++phis;\n                    break;\n                case llvm::Instruction::Ret:\n                    ++returns;\n                    break;\n                case llvm::Instruction::Call:\n                    ++calls;\n                    break;\n                case llvm::Instruction::Invoke:\n                    ++invokes;\n                    break;\n                case llvm::Instruction::IndirectBr:\n                    ++indirectBranches;\n                    break;\n                default:\n                    break;\n            }\n        }\n    }\n\n    llvm::errs() << \"[MiniShield] function: \" << F.getName()\n        << \", blocks: \" << F.size()\n        << \", total instructions: \" << total_inst\n        << \", phi: \" << phis\n        << \", returns: \" << returns\n        << \", switches: \" << switches\n        << \", calls: \" << calls\n        << \", invokes: \" << invokes\n        << \", indirect branches: \" << indirectBranches\n        << \", conditional branches: \" << cond_br\n        << \", unconditional branches: \" << uncond_br << \"\\n\";\n\n    return llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
       },
       {
         "type": "debug",
@@ -1302,10 +1465,10 @@
       },
       {
         "type": "paragraph",
-        "text": "These are static instruction counts. One recursive call instruction can execute many times, but its static call count is still one. Count Call and Invoke separately. Branch instructions are not the same as successor edges. Loop counting is deferred to task 1.3 rather than reporting a false zero."
+        "text": "These are static instruction counts. One recursive call instruction can execute many times, but its static call count is still one. Count `Call` and `Invoke` separately. Branch instructions are not the same as successor edges. Loop counting is deferred to task 1.3 rather than reporting a false zero."
       }
     ],
-    "words": 266
+    "words": 527
   },
   {
     "id": 12,
@@ -1314,6 +1477,27 @@
       {
         "type": "task",
         "text": "Task: compare each report against the IR and the expected table in README."
+      },
+      {
+        "type": "paragraph",
+        "text": "Task 1.2's pass now reports instruction counts. This lesson makes those numbers earn trust: cross-check every report against the IR and the hand-counted expectations, instead of assuming the pass is right because it compiles."
+      },
+      {
+        "type": "heading",
+        "text": "The template — a runner for every fixture"
+      },
+      {
+        "type": "code",
+        "language": "bash",
+        "text": "for file in tests/ir/*.ll; do\n    # run the pass and verifier on \"$file\"\ndone"
+      },
+      {
+        "type": "paragraph",
+        "text": "Start with a loop that visits every `.ll` file. It has no comparison logic yet — it only runs the pass."
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Read the expected counts"
       },
       {
         "type": "code",
@@ -1325,8 +1509,16 @@
         "text": "instruction-kinds.ll adds an invoke, an indirect branch, declarations that should not produce reports, and an optnone function that should produce one. minishield-input.ll remains the simplest load-and-run smoke fixture."
       },
       {
+        "type": "heading",
+        "text": "Step 2 — Run the pass and verifier on each file"
+      },
+      {
         "type": "paragraph",
         "text": "Start with a shell loop to run every .ll file:"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
       },
       {
         "type": "code",
@@ -1544,7 +1736,7 @@
         ]
       }
     ],
-    "words": 801
+    "words": 772
   },
   {
     "id": 13,
@@ -1555,13 +1747,25 @@
         "text": "Task: keep the loop, but capture each opt invocation's diagnostic output:"
       },
       {
+        "type": "paragraph",
+        "text": "A wall of `[MiniShield]` lines is hard to read. Turn the runner into a table that captures each `opt` invocation's report and prints it cleanly. The template is the capture structure you start from:"
+      },
+      {
         "type": "code",
         "language": "text",
         "text": "if output=$(opt ... 2>&1); then\n    # Parse and print its report lines.\nelse\n    # Show the file and diagnostic, then exit with failure.\nfi"
       },
       {
+        "type": "heading",
+        "text": "Step 1 — Capture stderr and guard the exit status"
+      },
+      {
         "type": "paragraph",
         "text": "llvm::errs() writes to stderr, so 2>&1 redirects stderr into captured stdout. The if checks opt's exit status. A verifier failure must remain a failure, not become a plausible empty table row."
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Print the header and parse each report line"
       },
       {
         "type": "paragraph",
@@ -1574,6 +1778,10 @@
       {
         "type": "paragraph",
         "text": "Fields 2 and 3 contain blocks and total instructions. Start at field 4 for the nonzero instruction highlights. Split each remaining field at \": \", and append key=value only when the numeric value is greater than zero."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
       },
       {
         "type": "paragraph",
@@ -1606,7 +1814,7 @@
         "text": "The syntax check is silent on success. It does not validate awk logic or whether the counts are correct."
       }
     ],
-    "words": 290
+    "words": 348
   },
   {
     "id": 14,
@@ -1615,6 +1823,31 @@
       {
         "type": "task",
         "text": "Task: produce canonical LLVM output with and without the stats pass:"
+      },
+      {
+        "type": "paragraph",
+        "text": "A read-only pass must leave the IR byte-for-byte identical. Prove it by emitting canonical IR with and without the statistics pass and diffing the two. Start from the plain verifier path:"
+      },
+      {
+        "type": "heading",
+        "text": "The template — the before path"
+      },
+      {
+        "type": "code",
+        "language": "bash",
+        "text": "opt -passes=verify \\\n  -S tests/ir/phi.ll -o build/phi-before.ll"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Emit the after path and compare"
+      },
+      {
+        "type": "paragraph",
+        "text": "Run the same input through the loaded plugin (the statistics pass plus the verifier), write it to a second file, and diff the two canonical outputs."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
       },
       {
         "type": "code",
@@ -1630,7 +1863,7 @@
         "text": "PreservedAnalyses::all() is appropriate for this read-only pass. When the future flattening pass restructures the CFG, generally return PreservedAnalyses::none() unless particular analyses are explicitly maintained. PreservedAnalyses reports cache validity; it does not run the verifier or prove semantic equivalence."
       }
     ],
-    "words": 100
+    "words": 182
   },
   {
     "id": 15,
@@ -1642,7 +1875,29 @@
       },
       {
         "type": "paragraph",
+        "text": "Task 1.3 begins by looking at the control flow. Add a small successor-printing diagnostic inside the existing block loop, keeping the instruction traversal after it. Start from the lesson 11 file, with a marker where the diagnostic goes:"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const llvm::BasicBlock &BB : F) {\n    // TODO: print the block name and its successors\n    for (const llvm::Instruction &I : BB) {\n        ++total_inst;\n        switch (I.getOpcode()) { /* ... */ }\n    }\n}"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Include `CFG.h` and print each block's successors"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"llvm/IR/CFG.h\"\n\n// inside the block loop, before the instruction traversal:\nllvm::errs() << BB.getName() << \" ->\";\nfor (const llvm::BasicBlock *S : llvm::successors(&BB))\n    llvm::errs() << \" \" << S->getName();\nllvm::errs() << \"\\n\";"
+      },
+      {
+        "type": "paragraph",
         "text": "Run opt directly to see the CFG lines; the table formatter intentionally keeps only the one-line statistics reports."
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Read the diamond"
       },
       {
         "type": "paragraph",
@@ -1658,11 +1913,20 @@
         "text": "entry has two successors because its conditional branch can choose either destination. left and right each have one successor. join ends in ret and has no successor. The function therefore has three branch instructions but four outgoing edges in total."
       },
       {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/StatsPass.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/IR/CFG.h\"\n\nnamespace minishield {\n\nllvm::PreservedAnalyses StatsPass::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n\n    if (F.isDeclaration())\n        return llvm::PreservedAnalyses::all();\n\n    int cond_br = 0, uncond_br = 0, calls = 0, total_inst = 0,\n        switches = 0, phis = 0, returns = 0, invokes = 0,\n        indirectBranches = 0;\n\n    for (const llvm::BasicBlock &BB : F) {\n        llvm::errs() << BB.getName() << \" ->\";\n        for (const llvm::BasicBlock *S : llvm::successors(&BB))\n            llvm::errs() << \" \" << S->getName();\n        llvm::errs() << \"\\n\";\n\n        for (const llvm::Instruction &I : BB) {\n            ++total_inst;\n            switch (I.getOpcode()) {\n                case llvm::Instruction::CondBr:\n                    ++cond_br;\n                    break;\n                case llvm::Instruction::UncondBr:\n                    ++uncond_br;\n                    break;\n                case llvm::Instruction::Switch:\n                    ++switches;\n                    break;\n                case llvm::Instruction::PHI:\n                    ++phis;\n                    break;\n                case llvm::Instruction::Ret:\n                    ++returns;\n                    break;\n                case llvm::Instruction::Call:\n                    ++calls;\n                    break;\n                case llvm::Instruction::Invoke:\n                    ++invokes;\n                    break;\n                case llvm::Instruction::IndirectBr:\n                    ++indirectBranches;\n                    break;\n                default:\n                    break;\n            }\n        }\n    }\n\n    llvm::errs() << \"[MiniShield] function: \" << F.getName()\n        << \", blocks: \" << F.size()\n        << \", total instructions: \" << total_inst\n        << \", phi: \" << phis\n        << \", returns: \" << returns\n        << \", switches: \" << switches\n        << \", calls: \" << calls\n        << \", invokes: \" << invokes\n        << \", indirect branches: \" << indirectBranches\n        << \", conditional branches: \" << cond_br\n        << \", unconditional branches: \" << uncond_br << \"\\n\";\n\n    return llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
+      },
+      {
         "type": "checkpoint",
         "text": "Checkpoint: predecessors reverse the relationship. join has left and right as predecessors; entry has none in this fixture. Printing block names is helpful for this exercise, but names are not guaranteed to exist on all LLVM blocks and should not be used as the graph's identity."
       }
     ],
-    "words": 152
+    "words": 482
   },
   {
     "id": 16,
@@ -1674,12 +1938,37 @@
       },
       {
         "type": "paragraph",
+        "text": "A pass returns preservation information; an analysis returns computed data that LLVM can cache and hand to other passes. This lesson declares the `CFGAnalyzer` interface. Start from the header scaffold:"
+      },
+      {
+        "type": "heading",
+        "text": "The template"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#pragma once\n\nnamespace minishield {\n    // TODO: declare the CFGAnalyzer analysis here\n} // namespace minishield"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Include the IR and container headers"
+      },
+      {
+        "type": "paragraph",
         "text": "Include llvm/IR/PassManager.h, llvm/IR/BasicBlock.h, and <vector>. Inside namespace minishield, inherit publicly from:"
+      },
+      {
+        "type": "heading",
+        "text": "Step 2 — Inherit from the analysis mixin"
       },
       {
         "type": "code",
         "language": "cpp",
         "text": "llvm::AnalysisInfoMixin<CFGAnalyzer>"
+      },
+      {
+        "type": "heading",
+        "text": "Step 3 — Declare the record and result types"
       },
       {
         "type": "paragraph",
@@ -1689,6 +1978,10 @@
         "type": "code",
         "language": "cpp",
         "text": "struct BlockInfo {\n    const llvm::BasicBlock *block;\n    std::vector<const llvm::BasicBlock *> successors;\n    std::vector<const llvm::BasicBlock *> predecessors;\n};\n\nstruct Result {\n    std::vector<BlockInfo> blocks;\n};"
+      },
+      {
+        "type": "heading",
+        "text": "Step 4 — Declare `run()` and the private key"
       },
       {
         "type": "paragraph",
@@ -1707,6 +2000,15 @@
         "type": "code",
         "language": "cpp",
         "text": "friend llvm::AnalysisInfoMixin<CFGAnalyzer>;\nstatic llvm::AnalysisKey Key;"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#pragma once\n\n#include \"llvm/IR/PassManager.h\"\n#include \"llvm/IR/BasicBlock.h\"\n#include <vector>\n\nnamespace minishield {\n    class CFGAnalyzer : public llvm::AnalysisInfoMixin<CFGAnalyzer> {\n        public:\n        struct BlockInfo {\n            const llvm::BasicBlock *block;\n            std::vector<const llvm::BasicBlock *> successors;\n            std::vector<const llvm::BasicBlock *> predecessors;\n        };\n\n        struct Result {\n            std::vector<BlockInfo> blocks;\n        };\n\n        Result run(llvm::Function &F, llvm::FunctionAnalysisManager &AM);\n\n        private:\n        friend llvm::AnalysisInfoMixin<CFGAnalyzer>;\n        // Unique per analysis\n        static llvm::AnalysisKey Key;\n    };\n} // namespace minishield"
       },
       {
         "type": "paragraph",
@@ -1831,7 +2133,7 @@
         ]
       }
     ],
-    "words": 504
+    "words": 620
   },
   {
     "id": 17,
@@ -1843,6 +2145,23 @@
       },
       {
         "type": "paragraph",
+        "text": "The header from lesson 16 declares the interface. This lesson implements `run()` — the basic analysis, before adding loops and back edges. Start from the implementation scaffold:"
+      },
+      {
+        "type": "heading",
+        "text": "The template"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/CFGAnalyzer.h\"\n#include \"llvm/IR/CFG.h\"\n\nnamespace minishield {\n// TODO: define CFGAnalyzer::Key and implement run()\n} // namespace minishield"
+      },
+      {
+        "type": "heading",
+        "text": "Step 1 — Plan the traversal"
+      },
+      {
+        "type": "paragraph",
         "text": "Plan the work in this order:"
       },
       {
@@ -1851,8 +2170,30 @@
         "text": "Include the analysis header and llvm/IR/CFG.h.\nDefine CFGAnalyzer::Key once in the implementation file.\nDefine run() with the Result return type declared in the header.\nCreate an empty Result and visit each basic block.\nFor each block, record its address, successors, and predecessors.\nAppend the completed BlockInfo to the result and return the result."
       },
       {
+        "type": "heading",
+        "text": "Step 2 — Visit each block and record it"
+      },
+      {
         "type": "paragraph",
         "text": "The intended implementation reads the function without changing it. After that works, add the implementation to CMake, register the analysis with the function analysis manager, and request its result from a consumer pass. Those are future steps, not capabilities already supplied by the header."
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/CFGAnalyzer.h\"\n#include \"llvm/IR/CFG.h\"\n\nnamespace minishield {\nllvm::AnalysisKey CFGAnalyzer::Key;\n\nCFGAnalyzer::Result CFGAnalyzer::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n    Result result{};\n    for (const llvm::BasicBlock &BB : F) {\n        BlockInfo info{};\n        info.block = &BB;\n        for (const llvm::BasicBlock *successor : llvm::successors(&BB))\n            info.successors.push_back(successor);\n        for (const llvm::BasicBlock *predecessor : llvm::predecessors(&BB))\n            info.predecessors.push_back(predecessor);\n        result.blocks.push_back(info);\n    }\n    return result;\n}\n} // namespace minishield"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "paragraph",
+        "text": "The file below is the end-of-section state: the basic traversal plus the terminator, back-edge, and loop members documented in the deep dives."
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/CFGAnalyzer.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/CFG.h\"\n#include \"llvm/IR/Dominators.h\"\n#include \"llvm/Analysis/LoopInfo.h\"\n\nnamespace minishield {\n    llvm::AnalysisKey CFGAnalyzer::Key;\n    CFGAnalyzer::Result CFGAnalyzer::run(llvm::Function &F, llvm::FunctionAnalysisManager &AM) {\n        Result result{};\n        const auto &DT = AM.getResult<llvm::DominatorTreeAnalysis>(F);\n        const auto &LI = AM.getResult<llvm::LoopAnalysis>(F);\n        result.loopCount = LI.getLoopsInPreorder().size();\n\n        for (const llvm::BasicBlock &BB : F){\n            BlockInfo info{};\n            info.block = &BB;\n            info.terminatorOpcode = BB.getTerminator()->getOpcode();\n            for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {\n                info.successors.push_back(successor);\n                if (DT.isReachableFromEntry(&BB) && (DT.dominates(successor, &BB))) {\n                   result.backEdges.push_back({&BB, successor});\n                }\n            }\n            for (const llvm::BasicBlock *predecessor: llvm::predecessors(&BB)) {\n                info.predecessors.push_back(predecessor);\n            }\n            result.blocks.push_back(info);\n        }\n        return result;\n    }\n} // namespace minishield"
       },
       {
         "type": "deep",
@@ -1975,7 +2316,7 @@
         ]
       }
     ],
-    "words": 581
+    "words": 770
   },
   {
     "id": 18,
@@ -1983,51 +2324,109 @@
     "blocks": [
       {
         "type": "paragraph",
-        "text": "The learner drafted CFGAnalyzer.cpp and assigned BB directly to info.block. The review identified a type mismatch: BB is a reference to a block, while info.block holds a pointer to a block."
+        "text": "In `CFGAnalyzer` you do two different things with blocks: you **walk** them, and you **store** their addresses in the `Result`. Those two jobs need two different C++ handles — a **reference** and a **pointer**. This lesson separates the two, using the code from this project so the distinction is concrete rather than abstract."
+      },
+      {
+        "type": "heading",
+        "text": "The situation in this project"
       },
       {
         "type": "paragraph",
-        "text": "Start by reading the declaration in the block loop:"
+        "text": "`CFGAnalyzer::run()` visits the function by iterating it, then records each block in a `BlockInfo`. The walk uses a **reference**; the storage uses a **pointer**."
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "for (const llvm::BasicBlock &BB : F)"
+        "text": "for (const llvm::BasicBlock &BB : F) {      // reference: walking\n    BlockInfo info{};\n    info.block = BB;                        // error: block is a pointer, BB is a reference\n}"
       },
       {
         "type": "paragraph",
-        "text": "The & in this declaration makes BB a reference. A reference is another name for an existing object; it is not a pointer variable. Use it like the object:"
+        "text": "The member `info.block` is declared as a pointer — `const llvm::BasicBlock *block` — but `BB` is a reference. Assigning a block to a pointer is a type mismatch. The fix is to store the block's *address*, not the block: `info.block = &BB;`. To see why, the two ideas below must be separate."
+      },
+      {
+        "type": "heading",
+        "text": "A reference: another name for the block"
+      },
+      {
+        "type": "paragraph",
+        "text": "`const llvm::BasicBlock &BB` does not create anything. It makes `BB` an **alias** for the existing block the loop is currently on. You use the alias exactly like the block itself, with the dot operator:"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const llvm::BasicBlock &BB : F) {\n    llvm::errs() << BB.getName();   // member access with a dot\n}"
+      },
+      {
+        "type": "paragraph",
+        "text": "A reference is not a copy and not an address: it *is* the block, reached through a second name. Three properties make it the right tool for walking. It must always name a real object, so it can never be null or reseated. It reads the block in place, so there is no copy. And because `llvm::BasicBlock` is **noncopyable**, a plain `for (BasicBlock BB : F)` would not compile at all. A reference is how you look at a live block without duplicating it."
+      },
+      {
+        "type": "heading",
+        "text": "A pointer: a variable that holds an address"
+      },
+      {
+        "type": "paragraph",
+        "text": "A pointer is a different kind of handle. `const llvm::BasicBlock *block` declares a *variable* whose value is the **address** of a block. To read the block through it you follow the pointer — with the arrow operator, or by dereferencing and then using a dot:"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "const llvm::BasicBlock *block = &BB;   // block now holds the block's address\nllvm::errs() << block->getName();    // arrow: a member through a pointer\nllvm::errs() << (*block).getName();  // or: dereference (*block), then dot"
+      },
+      {
+        "type": "paragraph",
+        "text": "`BlockInfo` stores pointers rather than references because the `Result` is plain data: it holds the addresses of blocks the function owns, without copying or owning them itself. A reference would not fit a `std::vector` or a default-initialized member — a reference must be bound at construction and is never reseated — while a pointer can start empty and be assigned. That is exactly what `std::vector<BasicBlock *>` needs for the `successors` and `predecessors` lists."
+      },
+      {
+        "type": "heading",
+        "text": "One symbol, `&`, two jobs"
+      },
+      {
+        "type": "paragraph",
+        "text": "The `&` appears in both declarations above, but its job depends on where it sits:"
       },
       {
         "type": "code",
         "language": "text",
-        "text": "BB.getName()"
+        "text": "const llvm::BasicBlock &BB     in a TYPE:       & declares a reference\n&BB                           in an EXPRESSION: & is address-of, yields BasicBlock *"
       },
       {
         "type": "paragraph",
-        "text": "Compare that with the member declaration:"
+        "text": "In `const llvm::BasicBlock &BB`, the `&` is part of the *type*: it says `BB` is a reference. In `info.block = &BB;`, the `&` is part of the *expression*: it asks for the address of the block that `BB` names, producing a `BasicBlock *`. Same glyph, different meaning — the position decides which."
+      },
+      {
+        "type": "heading",
+        "text": "So why `info.block = &BB`?"
+      },
+      {
+        "type": "paragraph",
+        "text": "`info.block` is a pointer. `BB` is a reference to the current block. To store that block's address in the pointer, take the address: `&BB`. That yields a `BasicBlock *`, which is what the member holds. Writing `info.block = BB;` would assign a block where a pointer is expected — the very error you started from."
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "const llvm::BasicBlock *block;"
+        "text": "info.block = &BB;   // &BB is the block's address; info.block is a pointer"
+      },
+      {
+        "type": "heading",
+        "text": "Why `push_back(successor)` needs no `&`"
       },
       {
         "type": "paragraph",
-        "text": "The * declares a pointer, which stores an object's address. To assign the address of the block that BB refers to, write:"
+        "text": "Now the successor loop. `llvm::successors(&BB)` yields block **pointers**: each element of that range is already a `BasicBlock *`. So `successor` is a pointer, and you store it straight into the `std::vector<BasicBlock *>`:"
       },
       {
         "type": "code",
         "language": "cpp",
-        "text": "info.block = &BB;"
+        "text": "for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {\n    info.successors.push_back(successor);   // successor is already a pointer\n}"
       },
       {
         "type": "paragraph",
-        "text": "Here & is an operator in an expression: it obtains the block's address. It does not copy the block or create a separate reference object. A compiler may implement references using addresses internally, but that does not make a reference interchangeable with a pointer in C++ source code."
+        "text": "Writing `push_back(&successor)` would store the address of your *local pointer variable* — a `BasicBlock **`, one level too deep. The range already hands you the address of each destination block; the loop copies that address, it does not take the address of the copy. The predecessor loop is the same shape."
       },
       {
-        "type": "paragraph",
-        "text": "Read each form according to its context:"
+        "type": "heading",
+        "text": "Read the six forms by context"
       },
       {
         "type": "code",
@@ -2036,20 +2435,7 @@
       },
       {
         "type": "paragraph",
-        "text": "Now compare the successor loop:"
-      },
-      {
-        "type": "code",
-        "language": "cpp",
-        "text": "for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {\n    info.successors.push_back(successor);\n}"
-      },
-      {
-        "type": "paragraph",
-        "text": "successor is already a pointer because its declaration uses *. Append it directly. Taking &successor would obtain the address of the local pointer variable, not the address of the block. That would add another pointer level and would not match the vector's element type."
-      },
-      {
-        "type": "paragraph",
-        "text": "Apply the same reasoning to predecessors. These pointers do not own the blocks; the function owns them. They must not be used after the referenced blocks have been deleted or the analysis result has become invalid."
+        "text": "The pointers `BlockInfo` stores do not own the blocks; the function owns them. They are valid only while the function and its blocks live, and only while the analysis result is not invalidated. That is why a consumer must respect analysis invalidation rather than reuse a stale `Result`."
       },
       {
         "type": "paragraph",
@@ -2063,6 +2449,15 @@
       {
         "type": "checkpoint",
         "text": "Checkpoint: explain why info.block needs &BB, while push_back(successor) needs no additional &. Then fix the implementation yourself, add its source to CMake, and build before registering the analysis with LLVM."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const llvm::BasicBlock &BB : F) {\n    BlockInfo info{};\n    info.block = &BB;                       // reference -> store its address\n    for (const llvm::BasicBlock *successor : llvm::successors(&BB))\n        info.successors.push_back(successor);      // pointer -> store as-is\n    for (const llvm::BasicBlock *predecessor : llvm::predecessors(&BB))\n        info.predecessors.push_back(predecessor);\n    result.blocks.push_back(info);\n}"
       },
       {
         "type": "deep",
@@ -2135,7 +2530,7 @@
         ]
       }
     ],
-    "words": 594
+    "words": 1127
   },
   {
     "id": 19,
@@ -2144,6 +2539,15 @@
       {
         "type": "paragraph",
         "text": "The learner asked why some traversals use * and others use &. Start with the type of each range's elements, rather than memorizing one loop pattern."
+      },
+      {
+        "type": "heading",
+        "text": "The loops in question"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const llvm::BasicBlock &BB : F)\n    for (const llvm::BasicBlock *successor : llvm::successors(&BB))\n        // one reference, one pointer - why both?"
       },
       {
         "type": "code",
@@ -2210,6 +2614,15 @@
       {
         "type": "checkpoint",
         "text": "Checkpoint: annotate these four operations in your own words:"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const llvm::BasicBlock &BB : F) {\n    for (const llvm::BasicBlock *successor : llvm::successors(&BB))\n        llvm::errs() << successor->getName();\n}\nfor (const auto &info : cfg.blocks) {\n    for (const auto *successor : info.successors)\n        llvm::errs() << successor->getName();\n}"
       },
       {
         "type": "code",
@@ -2297,7 +2710,7 @@
         ]
       }
     ],
-    "words": 699
+    "words": 724
   },
   {
     "id": 20,
@@ -2306,6 +2719,10 @@
       {
         "type": "paragraph",
         "text": "During the function eligibility exercise, the learner asked why this loop cannot replace the explicit reference declaration:"
+      },
+      {
+        "type": "heading",
+        "text": "The loop in question"
       },
       {
         "type": "code",
@@ -2349,6 +2766,15 @@
       {
         "type": "checkpoint",
         "text": "Checkpoint: explain why auto bb fails for F, why const auto &bb succeeds, and why auto successor can succeed for info.successors. Keep the eligibility checker read-only and write the code yourself."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const auto &bb : F) {\n    // Bind each existing block by const reference; no copy is attempted.\n}"
       },
       {
         "type": "deep",
@@ -2412,7 +2838,7 @@
         ]
       }
     ],
-    "words": 555
+    "words": 562
   },
   {
     "id": 21,
@@ -2421,6 +2847,10 @@
       {
         "type": "paragraph",
         "text": "During function eligibility work, the learner asked why both F.hasPersonalityFn() and BB.isEHPad() check exception handling, then asked what the word pad means."
+      },
+      {
+        "type": "heading",
+        "text": "The invoke and its landing pad"
       },
       {
         "type": "paragraph",
@@ -2481,6 +2911,15 @@
       {
         "type": "reference",
         "text": "Reference: https://llvm.org/docs/ExceptionHandling.html"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "llvm",
+        "text": "define i32 @with_invoke() personality ptr @__gxx_personality_v0 {\nentry:\n  %result = invoke i32 @callee() to label %normal unwind label %exception\nnormal:\n  ret i32 %result\nexception:\n  %landing = landingpad { ptr, i32 } cleanup\n  resume { ptr, i32 } %landing\n}"
       },
       {
         "type": "deep",
@@ -2544,7 +2983,7 @@
         ]
       }
     ],
-    "words": 683
+    "words": 714
   },
   {
     "id": 22,
@@ -2553,6 +2992,10 @@
       {
         "type": "paragraph",
         "text": "The learner asked how an intrinsic relates to an instruction after adding coroutine detection to the eligibility checker."
+      },
+      {
+        "type": "heading",
+        "text": "Instructions and intrinsics"
       },
       {
         "type": "paragraph",
@@ -2621,6 +3064,15 @@
       {
         "type": "reference",
         "text": "Reference: https://llvm.org/docs/LangRef.html#intrinsic-functions"
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "for (const llvm::BasicBlock &bb : F) {\n    for (const llvm::Instruction &I : bb) {\n        if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(&I)) {\n            if (intrinsic->getCalledFunction()->getName().starts_with(\"llvm.coro.\")) {\n                return {false, \"coroutine intrinsic is unsupported\"};\n            }\n        }\n    }\n}"
       },
       {
         "type": "deep",
@@ -2706,7 +3158,7 @@
         ]
       }
     ],
-    "words": 669
+    "words": 681
   },
   {
     "id": 23,
@@ -2715,6 +3167,10 @@
       {
         "type": "paragraph",
         "text": "After implementing the helper, first replace its temporary final rejection with return {true, \"\"};. Keep that success return after all checks and outside both traversal loops. Correct diagnostic spelling so rejection messages are clear and stable."
+      },
+      {
+        "type": "heading",
+        "text": "Integrate the decision"
       },
       {
         "type": "paragraph",
@@ -2732,6 +3188,19 @@
       {
         "type": "checkpoint",
         "text": "Checkpoint: explain why rejecting before transformation is essential, and why eligible means passing the current feature checks rather than already being transformed or proven safe under every possible future algorithm."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "const auto eligibility = FunctionEligibility::check(F);\nif (!eligibility.eligible) {\n    llvm::errs() << \"[MiniShield] rejected: \" << F.getName() << \": \" << eligibility.reason << \"\\n\";\n    return llvm::PreservedAnalyses::all();\n}\nllvm::errs() << \"[MiniShield] eligible: \" << F.getName() << \"\\n\";"
+      },
+      {
+        "type": "heading",
+        "text": "Verify"
       },
       {
         "type": "paragraph",
@@ -2803,7 +3272,7 @@
         ]
       }
     ],
-    "words": 410
+    "words": 430
   },
   {
     "id": 24,
@@ -2812,6 +3281,10 @@
       {
         "type": "paragraph",
         "text": "Next teaching task: write fixtures yourself for coroutine intrinsics and address-taken blocks. Do not rely only on the existing EH and indirectbr examples: an earlier rejection can mask the check being tested."
+      },
+      {
+        "type": "heading",
+        "text": "The fixtures you write"
       },
       {
         "type": "paragraph",
@@ -2851,6 +3324,15 @@
       {
         "type": "paragraph",
         "text": "Repeat using tests/ir/address_taken.ll. Confirm the function name and the intended rejection reason, rather than treating any rejection as sufficient."
+      },
+      {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "llvm",
+        "text": "declare ptr @llvm.coro.noop()\n\ndefine ptr @coroutine_handle() {\nentry:\n  %handle = call ptr @llvm.coro.noop()\n  ret ptr %handle\n}\n\ndefine ptr @address_taken() {\nentry:\n  br label %target\ntarget:\n  ret ptr blockaddress(@address_taken, %target)\n}"
       },
       {
         "type": "deep",
@@ -2902,7 +3384,7 @@
         ]
       }
     ],
-    "words": 325
+    "words": 354
   },
   {
     "id": 25,
@@ -2911,6 +3393,10 @@
       {
         "type": "paragraph",
         "text": "The rejection contract requires leaving the function untouched. Verification alone only checks IR validity; valid IR can still be different from input."
+      },
+      {
+        "type": "heading",
+        "text": "Verify the rejected IR is unchanged"
       },
       {
         "type": "paragraph",
@@ -2934,6 +3420,15 @@
         "text": "The next negative test should isolate isPresplitCoroutine() separately from intrinsic detection. After completing the remaining Day 1 checks, review the roadmap before starting any flattening transformations."
       },
       {
+        "type": "heading",
+        "text": "The full implementation"
+      },
+      {
+        "type": "code",
+        "language": "text",
+        "text": "opt -passes=verify \\\n  -S tests/ir/coroutine.ll -o build/before.ll\n\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/coroutine.ll -o build/after.ll\n\ndiff -u build/before.ll build/after.ll"
+      },
+      {
         "type": "deep",
         "title": "preserve rejected IR",
         "blocks": [
@@ -2953,7 +3448,7 @@
         ]
       }
     ],
-    "words": 261
+    "words": 285
   },
   {
     "id": 26,

@@ -1592,32 +1592,92 @@ Checkpoint: explain why an analysis result is requested by reference, why domina
 17. Understand references, pointers, and addresses while implementing the CFG
 =============================================================================
 
-The learner drafted CFGAnalyzer.cpp and assigned BB directly to info.block.
-The review identified a type mismatch: BB is a reference to a block, while
-info.block holds a pointer to a block.
+In CFGAnalyzer you do two different things with blocks: you walk them, and
+you store their addresses in the Result. Those two jobs need two different
+C++ handles - a reference and a pointer. This section separates the two,
+using the code from this project so the distinction is concrete rather than
+abstract.
 
-Start by reading the declaration in the block loop:
+CFGAnalyzer::run() visits the function by iterating it, then records each
+block in a BlockInfo. The walk uses a reference; the storage uses a pointer.
+The draft assigned the block itself to the pointer member:
 
-  for (const llvm::BasicBlock &BB : F)
+  for (const llvm::BasicBlock &BB : F) {      // reference: walking
+      BlockInfo info{};
+      info.block = BB;                        // error: block is a pointer, BB is a reference
+  }
 
-The & in this declaration makes BB a reference. A reference is another name
-for an existing object; it is not a pointer variable. Use it like the object:
+The member info.block is declared as a pointer, const llvm::BasicBlock
+*block, but BB is a reference. Assigning a block to a pointer is a type
+mismatch. The fix is to store the block's address, not the block:
+info.block = &BB;. To see why, keep the two ideas below separate.
 
-  BB.getName()
+A reference is another name for the block. const llvm::BasicBlock &BB does
+not create anything; it makes BB an alias for the existing block the loop is
+currently on. You use the alias exactly like the block itself, with the dot
+operator:
 
-Compare that with the member declaration:
+  for (const llvm::BasicBlock &BB : F) {
+      llvm::errs() << BB.getName();   // member access with a dot
+  }
 
-  const llvm::BasicBlock *block;
+A reference is not a copy and not an address: it is the block, reached
+through a second name. Three properties make it the right tool for walking.
+It must always name a real object, so it can never be null or reseated. It
+reads the block in place, so there is no copy. And because
+llvm::BasicBlock is noncopyable, a plain for (BasicBlock BB : F) would not
+compile at all. A reference is how you look at a live block without
+duplicating it.
 
-The * declares a pointer, which stores an object's address. To assign the
-address of the block that BB refers to, write:
+A pointer is a different kind of handle. const llvm::BasicBlock *block
+declares a variable whose value is the address of a block. To read the block
+through it you follow the pointer, with the arrow operator, or by
+dereferencing and then using a dot:
 
-  info.block = &BB;
+  const llvm::BasicBlock *block = &BB;   // block now holds the block's address
+  llvm::errs() << block->getName();      // arrow: a member through a pointer
+  llvm::errs() << (*block).getName();    // or: dereference (*block), then dot
 
-Here & is an operator in an expression: it obtains the block's address.
-It does not copy the block or create a separate reference object. A compiler
-may implement references using addresses internally, but that does not make
-a reference interchangeable with a pointer in C++ source code.
+BlockInfo stores pointers rather than references because the Result is plain
+data: it holds the addresses of blocks the function owns, without copying or
+owning them itself. A reference would not fit a std::vector or a
+default-initialized member - a reference must be bound at construction and is
+never reseated - while a pointer can start empty and be assigned. That is
+exactly what std::vector<BasicBlock *> needs for the successors and
+predecessors lists.
+
+The & appears in both declarations above, but its job depends on where it
+sits. In a type, & declares a reference; in an expression, & is the
+address-of operator:
+
+  const llvm::BasicBlock &BB     in a TYPE:       & declares a reference
+  &BB                            in an EXPRESSION: & is address-of, yields BasicBlock *
+
+In const llvm::BasicBlock &BB, the & is part of the type: it says BB is a
+reference. In info.block = &BB;, the & is part of the expression: it asks for
+the address of the block that BB names, producing a BasicBlock *. Same
+glyph, different meaning - the position decides which.
+
+Because info.block is a pointer and BB is a reference to the current block,
+store that block's address in the pointer: take the address, &BB. That yields
+a BasicBlock *, which is what the member holds. Writing info.block = BB;
+would assign a block where a pointer is expected - the very error you started
+from.
+
+  info.block = &BB;   // &BB is the block's address; info.block is a pointer
+
+Now the successor loop. llvm::successors(&BB) yields block pointers: each
+element of that range is already a BasicBlock *. So successor is a pointer,
+and you store it straight into the std::vector<BasicBlock *>:
+
+  for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
+      info.successors.push_back(successor);   // successor is already a pointer
+  }
+
+Writing push_back(&successor) would store the address of your local pointer
+variable - a BasicBlock **, one level too deep. The range already hands you
+the address of each destination block; the loop copies that address, it does
+not take the address of the copy. The predecessor loop is the same shape.
 
 Read each form according to its context:
 
@@ -1628,20 +1688,10 @@ Read each form according to its context:
   BB.getName()                 Access a member through a reference.
   ptr->getName()               Access a member through a pointer.
 
-Now compare the successor loop:
-
-  for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
-      info.successors.push_back(successor);
-  }
-
-successor is already a pointer because its declaration uses *. Append it
-directly. Taking &successor would obtain the address of the local pointer
-variable, not the address of the block. That would add another pointer level
-and would not match the vector's element type.
-
-Apply the same reasoning to predecessors. These pointers do not own the
-blocks; the function owns them. They must not be used after the referenced
-blocks have been deleted or the analysis result has become invalid.
+The pointers BlockInfo stores do not own the blocks; the function owns them.
+They are valid only while the function and its blocks live, and only while
+the analysis result is not invalidated. That is why a consumer must respect
+analysis invalidation rather than reuse a stale Result.
 
 The implementation review also supplied three related corrections:
 
@@ -1655,6 +1705,18 @@ The implementation review also supplied three related corrections:
 Checkpoint: explain why info.block needs &BB, while push_back(successor)
 needs no additional &. Then fix the implementation yourself, add its source
 to CMake, and build before registering the analysis with LLVM.
+
+The full implementation at the end of this section:
+
+  for (const llvm::BasicBlock &BB : F) {
+      BlockInfo info{};
+      info.block = &BB;                       // reference -> store its address
+      for (const llvm::BasicBlock *successor : llvm::successors(&BB))
+          info.successors.push_back(successor);      // pointer -> store as-is
+      for (const llvm::BasicBlock *predecessor : llvm::predecessors(&BB))
+          info.predecessors.push_back(predecessor);
+      result.blocks.push_back(info);
+  }
 
 ### Deep dive: references and addresses
 
