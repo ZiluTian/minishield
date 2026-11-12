@@ -396,12 +396,12 @@
       },
       {
         "type": "paragraph",
-        "text": "**Move 3 — define the target (lines 16–22).**"
+        "text": "**Move 3 — define the target (lines 16–19).**"
       },
       {
         "type": "code",
         "language": "cmake",
-        "text": "add_library(MiniShield MODULE\n    lib/Plugin.cpp\n    lib/FlatteningPass.cpp\n    lib/StatsPass.cpp\n    lib/CFGAnalyzer.cpp\n    lib/FunctionEligibility.cpp)"
+        "text": "add_library(MiniShield MODULE\n    lib/Plugin.cpp\n    lib/FlatteningPass.cpp)"
       },
       {
         "type": "paragraph",
@@ -409,7 +409,7 @@
       },
       {
         "type": "paragraph",
-        "text": "**Move 4 — attach the requirements (lines 24–35).**"
+        "text": "**Move 4 — attach the requirements (lines 21–32).**"
       },
       {
         "type": "code",
@@ -827,7 +827,7 @@
         ]
       }
     ],
-    "words": 2466
+    "words": 2463
   },
   {
     "id": 3,
@@ -1110,7 +1110,7 @@
       },
       {
         "type": "paragraph",
-        "text": "Your `add_library(MiniShield MODULE ...)` lists only the sources that exist now — `lib/Plugin.cpp` and `lib/FlatteningPass.cpp`. Lesson 2 showed the full five-source list; that is the end state. Add `StatsPass.cpp`, `CFGAnalyzer.cpp`, and `FunctionEligibility.cpp` to the list as the later lessons create them."
+        "text": "Your `add_library(MiniShield MODULE ...)` — set up in lesson 2 — lists the two sources the smoke test needs: `lib/Plugin.cpp` and `lib/FlatteningPass.cpp`. Later lessons add `StatsPass.cpp`, `CFGAnalyzer.cpp`, and `FunctionEligibility.cpp` to the list as they create them."
       },
       {
         "type": "code",
@@ -1122,7 +1122,7 @@
         "text": "It lands at `build/libMiniShield.so`, where the `opt` commands point."
       }
     ],
-    "words": 357
+    "words": 352
   },
   {
     "id": 7,

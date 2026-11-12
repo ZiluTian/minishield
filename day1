@@ -365,15 +365,12 @@ that file defines `LLVM_INCLUDE_DIRS`, `LLVM_DEFINITIONS`, and the imported
 `LLVM` target this file uses in the next moves. `REQUIRED` makes a missing
 LLVM a hard configure error instead of a later, mysterious failure.
 
-**Move 3 — define the target (lines 16–22).**
+**Move 3 — define the target (lines 16–19).**
 
 ```cmake
 add_library(MiniShield MODULE
     lib/Plugin.cpp
-    lib/FlatteningPass.cpp
-    lib/StatsPass.cpp
-    lib/CFGAnalyzer.cpp
-    lib/FunctionEligibility.cpp)
+    lib/FlatteningPass.cpp)
 ```
 
 This is the hello-world divergence in one keyword. Hello-world says
@@ -384,7 +381,7 @@ time. (`STATIC` would be an archive no one can `dlopen`; `SHARED` would
 declare a "you may link me" relationship that does not exist — see the
 `add_library` deep dive below.)
 
-**Move 4 — attach the requirements (lines 24–35).**
+**Move 4 — attach the requirements (lines 21–32).**
 
 ```cmake
 separate_arguments(MS_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})
@@ -987,11 +984,11 @@ llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
 }
 ```
 
-Your `add_library(MiniShield MODULE ...)` lists only the sources that exist
-now — `lib/Plugin.cpp` and `lib/FlatteningPass.cpp`. Lesson 1 showed the
-full five-source list; that is the end state. Add `StatsPass.cpp`,
-`CFGAnalyzer.cpp`, and `FunctionEligibility.cpp` to the list as the later
-lessons create them.
+Your `add_library(MiniShield MODULE ...)` — set up in lesson 1 — lists the
+two sources the smoke test needs: `lib/Plugin.cpp` and
+`lib/FlatteningPass.cpp`. Later lessons add `StatsPass.cpp`,
+`CFGAnalyzer.cpp`, and `FunctionEligibility.cpp` to the list as they create
+them.
 
 Build the plugin:
 
