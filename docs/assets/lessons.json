@@ -1,6 +1,187 @@
 [
   {
     "id": 0,
+    "originalTitle": "The words in the README, before lesson 0",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "This section exists because the README (and the lessons that follow) assume you already know what a \"pass\", \"IR\", and \"CFG\" are. It is not part of the numbered lessons; read it once, then start at lesson 1."
+      },
+      {
+        "type": "heading",
+        "text": "What is a compiler, and where does LLVM fit?"
+      },
+      {
+        "type": "paragraph",
+        "text": "A compiler translates a program you wrote in a language like C++ into machine instructions a CPU executes. Modern compilers are built in stages, and each stage reads one representation of the program, inspects or improves it, and hands a new representation to the next stage:"
+      },
+      {
+        "type": "code",
+        "language": "text",
+        "text": "C++ source  ->  [front end]  ->  LLVM IR  ->  [mid-end: passes]  ->  LLVM IR'\n            ->  [back end]  ->  machine code  ->  object file  ->  executable"
+      },
+      {
+        "type": "paragraph",
+        "text": "**Clang** is the front end: it turns `.c`/`.cpp` files into LLVM IR. **LLVM** is the rest of the pipeline's infrastructure: the intermediate representation itself, plus libraries of analyses (things that inspect the IR and report facts about it) and transformations (things that rewrite it), and the tools to load and run them."
+      },
+      {
+        "type": "paragraph",
+        "text": "MiniShield does not compile C++ programs. It is a plugin loaded into `opt`, LLVM's command-line IR tool (below), which then runs MiniShield's passes over `.ll` IR files."
+      },
+      {
+        "type": "heading",
+        "text": "What is LLVM IR?"
+      },
+      {
+        "type": "paragraph",
+        "text": "LLVM IR (intermediate representation) describes a program in terms of typed values and instructions, before any specific CPU is chosen. A minimal example (this is the entire `minishield-input.ll` fixture):"
+      },
+      {
+        "type": "code",
+        "language": "llvm",
+        "text": "define i32 @add_one(i32 %x) {\nentry:\n  %result = add i32 %x, 1\n  ret i32 %result\n}"
+      },
+      {
+        "type": "list",
+        "ordered": false,
+        "items": [
+          "`@add_one` is a **function**; `i32` is a 32-bit integer type; `%x` is a typed value.",
+          "`entry:` names a **basic block**: a straight-line run of instructions with a single entry point and no jumps inside it. A block always ends with a **terminator** instruction that transfers control (`ret`, `br`, ...).",
+          "`%result = add i32 %x, 1` is one **instruction**; the name `%result` is defined exactly once and only used after that definition. This \"define once, use later\" property is called **SSA** (static single assignment).",
+          "The files in `tests/ir/` (for example `tests/ir/phi.ll`) are handwritten text IR, one small function each."
+        ]
+      },
+      {
+        "type": "heading",
+        "text": "What is a pass?"
+      },
+      {
+        "type": "paragraph",
+        "text": "A **pass** is one program-level inspection or transformation that LLVM runs over the IR. A pass receives an object (here: a `Function`), inspects or changes it, and returns a result describing what it did. Think of a pass as a function that LLVM calls for you, once per function, in the order you scheduled."
+      },
+      {
+        "type": "paragraph",
+        "text": "MiniShield has two so far: `StatsPass` only counts instructions and prints a report (a read-only pass), and `FlatteningPass`, which will restructure the function's control flow (a transformation pass, not yet implemented)."
+      },
+      {
+        "type": "heading",
+        "text": "What is `opt`, and what is a pass plugin?"
+      },
+      {
+        "type": "paragraph",
+        "text": "`opt` is LLVM's command-line tool for IR: it reads an IR file, runs a **pipeline** of passes, and writes IR back (or just prints diagnostics). Out of the box, `opt` only knows LLVM's built-in passes."
+      },
+      {
+        "type": "paragraph",
+        "text": "A **pass plugin** is a small shared library (here `build/libMiniShield.so`) that `opt` loads at start-up when you pass `-load-pass-plugin=...`. The loading happens through the system's `dlopen()` mechanism: the library is read into memory and its exported entry point `llvmGetPassPluginInfo` is called. That entry point hands back the pass names the plugin provides (`minishield-stats`, `minishield-flatten`), so after loading, `-passes='function(minishield-stats)'` can name your pass. The plugin is therefore a load-time relationship with `opt`, not a link-time one (lesson 2 explains why that decides the CMake library type)."
+      },
+      {
+        "type": "paragraph",
+        "text": "The comma in `-passes='function(minishield-stats),verify'` is the pipeline: run the named function pass on every function, then run the built-in `verify` pass over the module."
+      },
+      {
+        "type": "heading",
+        "text": "What are control flow, a CFG, and control-flow flattening?"
+      },
+      {
+        "type": "paragraph",
+        "text": "**Control flow** is the order in which a program's instructions execute, determined by its branches. An `if` statement means \"these instructions, or those, depending on a condition\", and a `while` loop means \"these instructions, possibly again\"."
+      },
+      {
+        "type": "paragraph",
+        "text": "The **control-flow graph (CFG)** makes that order explicit: basic blocks are nodes, and every possible \"go to next block\" transfer is an edge. The function in `tests/ir/phi.ll` has four blocks:"
+      },
+      {
+        "type": "code",
+        "language": "text",
+        "text": "entry -> left  -> join\n       \\       /\n        right ->   (join ends the function with ret)"
+      },
+      {
+        "type": "paragraph",
+        "text": "`entry` has two successors (its conditional branch can choose either), `join` has none (it ends in `ret`)."
+      },
+      {
+        "type": "paragraph",
+        "text": "**Control-flow flattening** is a transformation that takes a structured CFG like that and rewires it into a shallower, harder-to-follow shape: many small basic blocks, all at the same level, joined by a dispatcher — usually a loop plus a big `switch` over block identifiers that decides which block runs next. The program still computes the same results, but the visible control flow becomes one long sequential loop instead of the original if/else or loop structure. Flattening is used in binary hardening and obfuscation (attackers' tools find it harder to reconstruct the original logic), which is why MiniShield's goal is a safe flattener: it must accept only functions whose flow it fully understands and leave everything else byte-for-byte untouched."
+      },
+      {
+        "type": "paragraph",
+        "text": "**Natural loops** (mentioned in the README and lesson 17) are the loops a specific standard algorithm finds: take a **back edge** (an edge from a block to an earlier block that dominates it — dominates meaning every path from the entry to that block passes through it) and collect every block that can reach the loop header without going through the exit. LLVM's `LoopAnalysis` computes exactly these; in `tests/ir/loop.ll` the edge `body -> header` is the single back edge, and the natural loop is `{header, body}`."
+      },
+      {
+        "type": "heading",
+        "text": "What do \"function eligibility\" and \"diagnostic stub\" mean?"
+      },
+      {
+        "type": "paragraph",
+        "text": "**Eligibility** is the yes/no decision made before a flattening pass rewrites a function: is this function's shape one the pass can handle? The current policy (lesson 23) rejects, among other things, functions with exception handling, coroutine intrinsics, block addresses used as values, or terminators the pass does not model (only `br`, `switch`, `ret`, `unreachable` are accepted). An accepted function is **eligible**; a rejected one must be left completely unchanged — lesson 25 shows how to prove that with a diff. Eligibility is a conservative \"we can handle this shape\" decision, not a proof that flattening is safe in general."
+      },
+      {
+        "type": "paragraph",
+        "text": "A **stub** is a placeholder implementation: the interface exists and runs, but the real work is not there yet. At the start of this project, `FlatteningPass::run` only prints the function name and block count; it changes nothing. The word **diagnostic** (as in \"diagnostic stub\") says the stub's job is to report observations, not to transform. By lesson 23 the stub also prints the eligibility decision."
+      },
+      {
+        "type": "heading",
+        "text": "What are conda, CMake, and Ninja, in one line each?"
+      },
+      {
+        "type": "list",
+        "ordered": false,
+        "items": [
+          "**Conda** (here via **Miniforge**, a conda distribution that defaults to the conda-forge channel) is a package and environment manager. The `minishield` environment is a self-contained directory with its own compiler, LLVM 23.1.5, build tools, and libraries, so the project does not depend on what the host machine happens to have installed. \"Activating\" it puts that environment's tools at the front of the shell's command search path.",
+          "**CMake** is the configure step: it reads `CMakeLists.txt`, locates the installed LLVM, and generates build instructions. It does not compile anything itself.",
+          "**Ninja** is the build step: it executes the generated instructions (`build/build.ninja`), compiling only the changed files and linking the plugin."
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": "The four-step chain — create the environment, activate it, configure with CMake, build with Ninja — is exactly the lesson 1 checkpoint."
+      },
+      {
+        "type": "heading",
+        "text": "What do the `opt` flags in the README mean?"
+      },
+      {
+        "type": "code",
+        "language": "bash",
+        "text": "opt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-stats),verify' \\\n  -S tests/ir/phi.ll -o build/phi-output.ll"
+      },
+      {
+        "type": "list",
+        "ordered": false,
+        "items": [
+          "`-load-pass-plugin=...` loads MiniShield's `.so` so its pass names exist.",
+          "`-passes=...` is the pipeline to run; `function(X)` means \"run X once per function in the module\".",
+          "`verify` is a built-in pass that checks the IR's structural rules.",
+          "`-S` prints the result as text IR; without it, `opt` writes compact binary IR by default.",
+          "`-o file` writes the transformed IR to a file; `-disable-output` keeps the IR in memory and writes nothing — used when you only want the diagnostics the pass printed."
+        ]
+      },
+      {
+        "type": "heading",
+        "text": "What is a fixture?"
+      },
+      {
+        "type": "paragraph",
+        "text": "A **fixture** is a small, stable input file kept in the repository (here the `.ll` files under `tests/ir/`) whose expected results are known by hand. You run your tool on the fixture and compare the output to the expectation (the table in lesson 12). \"Fixture\" comes from test setup being fixed in place: nobody edits a fixture to make a test pass."
+      },
+      {
+        "type": "heading",
+        "text": "Valid vs. correct: what `verify` does and does not prove"
+      },
+      {
+        "type": "paragraph",
+        "text": "`verify` checks that the IR obeys LLVM's structural rules: types agree, every value is defined exactly once before use (SSA), every PHI node has an incoming value from each predecessor block, return types match the function's type, and so on. IR that passes is **valid** (well-formed)."
+      },
+      {
+        "type": "paragraph",
+        "text": "**Correctness** — does the transformed program compute the same results, with the same side effects, as the input — is a separate, stronger property. `verify` does not check it: a pass can emit perfectly valid IR that behaves differently. That is why lesson 14's empty-diff check (the pass must leave the IR unchanged while it is a stub) and, later, real testing, are the actual safety nets."
+      }
+    ],
+    "words": 1497
+  },
+  {
+    "id": 1,
     "originalTitle": "Create the minishield Conda environment",
     "blocks": [
       {
@@ -138,7 +319,7 @@
     "words": 504
   },
   {
-    "id": 1,
+    "id": 2,
     "originalTitle": "Understand what CMake is configuring",
     "blocks": [
       {
@@ -621,7 +802,7 @@
     "words": 2299
   },
   {
-    "id": 2,
+    "id": 3,
     "originalTitle": "Generate the build instructions before trying to build",
     "blocks": [
       {
@@ -691,7 +872,7 @@
     "words": 389
   },
   {
-    "id": 3,
+    "id": 4,
     "originalTitle": "Split the plugin into an entry point and a pass",
     "blocks": [
       {
@@ -728,7 +909,7 @@
     "words": 140
   },
   {
-    "id": 4,
+    "id": 5,
     "originalTitle": "Choose optional or required pass behavior explicitly",
     "blocks": [
       {
@@ -812,7 +993,7 @@
     "words": 340
   },
   {
-    "id": 5,
+    "id": 6,
     "originalTitle": "Register the pass name that opt will recognize",
     "blocks": [
       {
@@ -848,7 +1029,7 @@
     "words": 123
   },
   {
-    "id": 6,
+    "id": 7,
     "originalTitle": "Run a small smoke input and distinguish validity from correctness",
     "blocks": [
       {
@@ -894,7 +1075,7 @@
     "words": 139
   },
   {
-    "id": 7,
+    "id": 8,
     "originalTitle": "Start task 1.2 by declaring StatsPass",
     "blocks": [
       {
@@ -918,7 +1099,7 @@
     "words": 70
   },
   {
-    "id": 8,
+    "id": 9,
     "originalTitle": "Count blocks and instructions before classifying instructions",
     "blocks": [
       {
@@ -950,7 +1131,7 @@
     "words": 112
   },
   {
-    "id": 9,
+    "id": 10,
     "originalTitle": "Make the new pass available, then rebuild the plugin",
     "blocks": [
       {
@@ -987,7 +1168,7 @@
     "words": 129
   },
   {
-    "id": 10,
+    "id": 11,
     "originalTitle": "Add instruction classifications in small increments",
     "blocks": [
       {
@@ -1031,7 +1212,7 @@
     "words": 266
   },
   {
-    "id": 11,
+    "id": 12,
     "originalTitle": "Cross-check the supplied fixtures",
     "blocks": [
       {
@@ -1270,7 +1451,7 @@
     "words": 801
   },
   {
-    "id": 12,
+    "id": 13,
     "originalTitle": "Turn test_all.sh output into a readable table",
     "blocks": [
       {
@@ -1332,7 +1513,7 @@
     "words": 290
   },
   {
-    "id": 13,
+    "id": 14,
     "originalTitle": "Check that inspection preserves the IR",
     "blocks": [
       {
@@ -1356,7 +1537,7 @@
     "words": 100
   },
   {
-    "id": 14,
+    "id": 15,
     "originalTitle": "Start task 1.3 by printing successor relationships",
     "blocks": [
       {
@@ -1388,7 +1569,7 @@
     "words": 152
   },
   {
-    "id": 15,
+    "id": 16,
     "originalTitle": "Declare a reusable CFGAnalyzer analysis",
     "blocks": [
       {
@@ -1557,7 +1738,7 @@
     "words": 504
   },
   {
-    "id": 16,
+    "id": 17,
     "originalTitle": "Next exercise: implement the basic analysis before adding loops",
     "blocks": [
       {
@@ -1701,7 +1882,7 @@
     "words": 581
   },
   {
-    "id": 17,
+    "id": 18,
     "originalTitle": "Understand references, pointers, and addresses while implementing the CFG",
     "blocks": [
       {
@@ -1861,7 +2042,7 @@
     "words": 594
   },
   {
-    "id": 18,
+    "id": 19,
     "originalTitle": "Read pointer and reference syntax in traversal loops",
     "blocks": [
       {
@@ -2023,7 +2204,7 @@
     "words": 699
   },
   {
-    "id": 19,
+    "id": 20,
     "originalTitle": "Understand why auto alone tries to copy a basic block",
     "blocks": [
       {
@@ -2138,7 +2319,7 @@
     "words": 555
   },
   {
-    "id": 20,
+    "id": 21,
     "originalTitle": "Explain exception-handling pads and personality checks",
     "blocks": [
       {
@@ -2270,7 +2451,7 @@
     "words": 683
   },
   {
-    "id": 21,
+    "id": 22,
     "originalTitle": "Relate intrinsics to instructions during coroutine checks",
     "blocks": [
       {
@@ -2432,7 +2613,7 @@
     "words": 669
   },
   {
-    "id": 22,
+    "id": 23,
     "originalTitle": "Integrate eligibility decisions into the flattening stub",
     "blocks": [
       {
@@ -2529,7 +2710,7 @@
     "words": 410
   },
   {
-    "id": 23,
+    "id": 24,
     "originalTitle": "Isolate rejection checks with new fixtures",
     "blocks": [
       {
@@ -2628,7 +2809,7 @@
     "words": 325
   },
   {
-    "id": 24,
+    "id": 25,
     "originalTitle": "Check that rejected functions remain unchanged",
     "blocks": [
       {
@@ -2677,5 +2858,309 @@
       }
     ],
     "words": 261
+  },
+  {
+    "id": 26,
+    "originalTitle": "Glossary. Terms used in the README and Day 1",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "Alphabetical, one-to-three-sentence definitions of the terms that appear in the README or in this guide, for readers who met them before they were explained. \"See lesson N\" points to where the term is used; the lesson's deep dives go further than the entry here. Entries marked (Background) are covered by the Background lesson (lesson 0) that opens this book."
+      },
+      {
+        "type": "table",
+        "rows": [
+          [
+            "Term",
+            "Definition"
+          ],
+          [
+            "ABI (application binary interface).",
+            "The machine-level contract between compiled code and its libraries: calling convention, object layout, and which shared-library symbols exist. Switching the LLVM release changes the headers and ABI, which is why the plugin must be built against exactly the LLVM release that `opt` runs (see lesson 2, \"which installation\" row)."
+          ],
+          [
+            "Address-taken block.",
+            "A basic block whose address is used as a value in the IR (produced by `blockaddress`). Such a block is a value a program can compute with, not just a control-flow destination, so the flattening policy rejects it (see lesson 24)."
+          ],
+          [
+            "`add_library`.",
+            "A CMake command that creates a library target — a named node in the build graph carrying sources, compile/link rules, and requirements. The type keyword (`STATIC` / `SHARED` / `MODULE`) decides the artifact (see lesson 2, \"What does add_library do?\")."
+          ],
+          [
+            "`awk`.",
+            "A small text-processing language for line-by-line field work. `awk -F ', '` splits each input line into fields at the first comma-plus-space separator (see lesson 13)."
+          ],
+          [
+            "Back edge.",
+            "An edge `A -> B` in a CFG where `B` **dominates** `A` (every path from the function entry to `A` passes through `B`). Every natural loop has at least one; in `loop.ll` the edge `body -> header` is the only back edge (see lesson 17)."
+          ],
+          [
+            "Basic block.",
+            "A straight-line run of instructions with one entry point, no jumps inside, and a terminator at the end. Basic blocks are the nodes of a CFG (Background)."
+          ],
+          [
+            "`blockaddress`.",
+            "An LLVM operation that yields the address of a named basic block as a value: `ret ptr blockaddress(@f, %target)`. It is what makes a block \"address-taken\" (see lesson 24)."
+          ],
+          [
+            "Binary IR.",
+            "LLVM IR serialized to a compact binary format (`.bc` files); `opt`'s default output. `-S` requests text IR instead (see lesson 7)."
+          ],
+          [
+            "`build.ninja`.",
+            "The file CMake + the Ninja generator write into `build/`: the complete list of compile and link rules. \"Ninja could not find build.ninja\" means configuration did not complete (see lesson 3)."
+          ],
+          [
+            "CMake list.",
+            "CMake has no array type; a \"list\" is a string whose elements are separated by `;`. A space-joined string is one element, which is why `LLVM_DEFINITIONS` must pass through `separate_arguments` before use (see lesson 2, \"What does separate_arguments do?\")."
+          ],
+          [
+            "`clang` / `clang++`.",
+            "The C and C++ compilers of the LLVM project. The conda environment exposes `clang++-23` (no plain `clang++`), so the configure command pins that path explicitly (see lessons 0, 2)."
+          ],
+          [
+            "Conda / Miniforge.",
+            "A package and environment manager (Miniforge is a common conda distribution that defaults to the conda-forge channel). The `minishield` environment is a self-contained directory with one consistent toolchain — its own compiler, LLVM 23.1.5, and build tools — so the project does not depend on the host machine's C++ setup (see lesson 1)."
+          ],
+          [
+            "Conda environment.",
+            "A named directory prefix holding one consistent set of packages. Creating it installs packages into that prefix; activating it only changes the current shell so the environment's tools are found first (see lesson 1, checkpoint)."
+          ],
+          [
+            "Conda prefix.",
+            "The directory an environment is installed into (for example `~/miniforge3/envs/minishield`). \"Separate prefix\" means packages do not mix with the system's or other environments' (see lesson 1)."
+          ],
+          [
+            "`CONDA_PREFIX`.",
+            "An environment variable set by `conda activate`, holding the path to the active environment. Recipes like `$CONDA_PREFIX/bin/clang++-23` and `export LIBRARY_PATH=$CONDA_PREFIX/lib` are how you point CMake and the linker at that environment's tools (see lessons 0, 2)."
+          ],
+          [
+            "Coroutine.",
+            "A function that can be suspended and resumed. In LLVM IR it is expressed through `llvm.coro.*` intrinsics. A **presplit coroutine** is a coroutine function the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()` (see lessons 21, 22, 24)."
+          ],
+          [
+            "C++ standard library headers (for example `<type_traits>`).",
+            "The header files of `libstdc++`, the C++ runtime. Conda installs the runtime (`libstdc++.so`) and its development headers as separate packages; a missing `<type_traits>` means the `libstdcxx-devel_linux-64` package is absent, not that an LLVM header is misconfigured (see lesson 1)."
+          ],
+          [
+            "Declaration vs. definition (function).",
+            "A declaration (`declare i32 @foo(i32)`) announces that a function exists, with no body; a definition (`define i32 @foo(i32 %x) { ... }`) provides the body. Passes only run on definitions; `F.isDeclaration()` detects the former (see lessons 8, 21)."
+          ],
+          [
+            "`dlopen()`.",
+            "The POSIX function that loads a shared library at run time and returns a handle to its symbols. This is the mechanism behind `-load-pass-plugin=...`: the plugin is a load-time relationship with `opt`, not a link-time one (see lesson 2)."
+          ],
+          [
+            "Dominator.",
+            "Block B dominates block A when every path from the function entry to A passes through B. Dominance underpins the back-edge definition and the `DominatorTreeAnalysis` (see lesson 17)."
+          ],
+          [
+            "dylib.",
+            "A shared library. LLVM's dylib in this environment is `libLLVM-23.so` (about 188 MB); `opt` loads it, and the plugin resolves its LLVM symbols against the same copy at load time (see lesson 2, \"Where does the size go?\")."
+          ],
+          [
+            "EH pad.",
+            "The first instruction of a block that receives exceptional control: `landingpad`, `catchpad`, `cleanuppad`, or `catchswitch`. The name comes from landing pad. `BB.isEHPad()` asks whether the block's first non-PHI instruction is one of these (see lesson 21)."
+          ],
+          [
+            "`fallthrough`.",
+            "In a C `switch`, control continuing into the next `case` because the current case has no `break`. A missing `break` after a branch case was the counting bug of lesson 11."
+          ],
+          [
+            "Fixture.",
+            "A small stable input file with known-by-hand expected results (here, the `.ll` files in `tests/ir/`); \"fixed in place\" as test setup (Background)."
+          ],
+          [
+            "`friend`.",
+            "A C++ declaration granting another type access to private members. `friend llvm::AnalysisInfoMixin<CFGAnalyzer>;` lets the mixin reach the analysis's private `AnalysisKey` (see lesson 16)."
+          ],
+          [
+            "GoogleTest (gtest).",
+            "A C++ unit-testing framework; installed in the environment now and used by the later C++ test suite (see lesson 1)."
+          ],
+          [
+            "`Instruction.def`.",
+            "A file in LLVM's source that lists every opcode name; the authoritative spelling reference for this version (`CondBr`, `UncondBr`, `Switch`, ...). There is no `Instruction::Br` in LLVM 23 (see lesson 11)."
+          ],
+          [
+            "`isa<T>(X)` / `dyn_cast<T>(X)`.",
+            "LLVM's type-testing and type-casting helpers: `isa` answers \"is this value a T?\" and returns a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise (see lessons 10, 21)."
+          ],
+          [
+            "Intrinsic.",
+            "A special function declared by LLVM itself, with names in the reserved `llvm.` namespace (for example `llvm.sqrt.f64`, `llvm.coro.noop`), whose semantics LLVM knows and which is lowered directly to target code. In IR it appears as an ordinary `call` instruction with opcode `Call` (see lesson 22)."
+          ],
+          [
+            "IR / LLVM IR.",
+            "The typed, SSA intermediate representation that compiler stages operate on; `.ll` files are text IR (Background)."
+          ],
+          [
+            "`LIBRARY_PATH`.",
+            "An environment variable the compiler driver reads for link-time library search directories. Conda's clang does not search `$CONDA_PREFIX/lib` by default, so the export makes `libstdc++.so` findable. It is a different thing from `LD_LIBRARY_PATH` (which affects runtime library loading) and from `LLVM_DIR` (which tells CMake where the LLVM CMake package lives) (see lessons 0, 2)."
+          ],
+          [
+            "`lld`.",
+            "The LLVM linker; installed in the environment for future toolchain work (see lesson 1)."
+          ],
+          [
+            "Landing pad.",
+            "The block a thrown exception \"lands\" on; see EH pad (lesson 21)."
+          ],
+          [
+            "`LoopAnalysis` / natural loop.",
+            "LLVM's standard loop finder. A natural loop is a back edge's target (the header) plus every block that can reach the header without going through the exit. `getLoopsInPreorder()` lists nested loops in tree **preorder** (parent before children); iterating the `LoopInfo` object directly visits only the outermost loops (see lesson 17)."
+          ],
+          [
+            "`minishield-input.ll`.",
+            "The smallest fixture: one function, one block, one `add`, one `ret` (see lesson 7)."
+          ],
+          [
+            "`MODULE` / `SHARED` / `STATIC`.",
+            "The three CMake library types: `STATIC` builds an object archive (`libX.a`) whose code is copied into each consumer; `SHARED` builds a linkable shared object (`libX.so`) consumers record a `DT_NEEDED` entry for; `MODULE` builds a loadable plugin (`libX.so`) that nothing links against and that is loaded via `dlopen()` (see lesson 2)."
+          ],
+          [
+            "Mixin.",
+            "A base class that contributes one concern — here, pass metadata such as the pass name — to a pass class. `OptionalPassInfoMixin` vs. `RequiredPassInfoMixin` decide whether the pass may be skipped (see lesson 5)."
+          ],
+          [
+            "`ninja` / \"no work to do\".",
+            "The build tool that executes `build/build.ninja`. \"No work to do\" means every rule's outputs are up to date; it is not a test result and not a failure (see lessons 1, 2)."
+          ],
+          [
+            "`opt`.",
+            "LLVM's IR command-line tool: read IR, run a pipeline of passes, write IR and diagnostics (Background)."
+          ],
+          [
+            "`optnone`.",
+            "A function attribute meaning \"do not optimize this function\". Optional passes (like `FlatteningPass`) are skipped on `optnone` functions; required passes (like `StatsPass`) still run there (see lessons 4, 22)."
+          ],
+          [
+            "Opcode.",
+            "The operation code of an instruction: `add`, `icmp`, `br`, `call`, `ret`, ... `Instruction::getOpcode()` returns it; the exact spellings in LLVM 23 are listed in lesson 11."
+          ],
+          [
+            "`opt -S` / `-o` / `-disable-output`.",
+            "Print text IR / write the output to a file / keep the result in memory and print no IR (Background)."
+          ],
+          [
+            "`PATH`.",
+            "The colon-separated list of directories the shell searches for commands. `conda activate` puts the active environment's `bin/` at the front of it, which is what \"activation\" accomplishes (see lesson 1)."
+          ],
+          [
+            "Pass.",
+            "One program-level inspection or transformation that LLVM runs over the IR, once per object, in scheduled order (Background)."
+          ],
+          [
+            "PassBuilder.",
+            "The C++ class that turns a pipeline string like `function(minishield-stats),verify` into actual pass instances and managers. A plugin registers its passes with the `PassBuilder` through the callback it returns from `llvmGetPassPluginInfo` (see lesson 6)."
+          ],
+          [
+            "Pass pipeline.",
+            "The `-passes=` string: an ordered list of pass invocations with nesting groups such as `function(X)` (run X once per function), `module(Y)`, or `loop(Z)`; a comma separates consecutive stages (Background)."
+          ],
+          [
+            "PassPluginLibraryInfo.",
+            "The C++ structure a plugin's entry point returns: the plugin API version, the plugin name, the plugin version, and the callbacks that register passes with the `PassBuilder` (see lesson 6)."
+          ],
+          [
+            "Personality routine.",
+            "The function a language runtime calls while an exception unwinds, to decide how the exception is handled (in C++ it is `_Unwind_Resume`). A function that can receive exceptions carries one; `F.hasPersonalityFn()` asks whether it does (see lesson 21)."
+          ],
+          [
+            "PHI node / `phi`.",
+            "An instruction that, at the entry of a block, picks which value flows in from which predecessor: `%x = phi i32 [ 1, %left ], [ 2, %right ]`. It exists because of SSA: instead of redefining a value's name at a merge point, the merge point explicitly selects among incoming values (lesson 7; Background)."
+          ],
+          [
+            "Plugin API version (`LLVM_PLUGIN_API_VERSION`).",
+            "A constant from `llvm/Plugins/PassPlugin.h` identifying which plugin ABI the plugin was written against; the host checks it matches before loading. It is separate from the plugin's own version string (see lesson 6)."
+          ],
+          [
+            "Predecessor / successor.",
+            "For block B: predecessors are the blocks with an edge into B; successors are the blocks with an edge out of B. `llvm::predecessors(&BB)` / `llvm::successors(&BB)` yield them (see lesson 15)."
+          ],
+          [
+            "Preorder.",
+            "A tree traversal order in which a parent is listed before its children. `getLoopsInPreorder()` therefore lists an outer loop before the loops nested inside it (see lesson 17)."
+          ],
+          [
+            "PreservedAnalyses.",
+            "The value a transformation pass returns, describing which cached analyses remain valid after its changes. `::all()` says \"nothing was touched\" (correct for read-only passes like `StatsPass`); `::none()` says \"assume every cached analysis is invalid\" (the safe default for a real transformation). It reports cache validity only — it does not run the verifier or prove behavior was preserved (see lessons 3, 13)."
+          ],
+          [
+            "`#pragma once`.",
+            "A compiler directive meaning \"include this header at most once per translation unit\" (see lesson 8)."
+          ],
+          [
+            "Release build.",
+            "`CMAKE_BUILD_TYPE=Release`: the compiler is asked to optimize the plugin and omits debug-oriented checks (see lesson 3)."
+          ],
+          [
+            "Reference vs. pointer.",
+            "A reference (`const BasicBlock &BB`) is another name for an existing object; a pointer (`const BasicBlock p`) stores an object's address. `&BB` takes the address of the referenced object; `p` dereferences a pointer (see lessons 17, 18)."
+          ],
+          [
+            "Shared library (`.so`).",
+            "A compiled object loaded at run time and shared by every user of it. `libLLVM-23.so` and `build/libMiniShield.so` are both shared objects; the first is linked against (recorded in `DT_NEEDED`), the second is loaded via `dlopen()` by `opt` (see lesson 2)."
+          ],
+          [
+            "`soname`.",
+            "The canonical name recorded inside a shared library, which consumers record in their `DT_NEEDED` entries so the runtime loader knows which file to load (see lesson 2)."
+          ],
+          [
+            "SSA (static single assignment).",
+            "The rule that every value in LLVM IR is defined exactly once and used only after that definition. Jumps and merges are handled by PHI nodes instead of redefining names; `verify` checks the SSA constraints (lessons 6, 8; Background)."
+          ],
+          [
+            "Static count vs. dynamic count.",
+            "A static count counts what is written in the IR: one `call` instruction counts as 1 no matter how many times it executes at runtime. A dynamic count would count runtime executions. Every count in MiniShield so far is static (see lesson 11)."
+          ],
+          [
+            "`stderr` / `stdout` / `2>&1`.",
+            "Stream 1 (stdout) carries normal output; stream 2 (stderr) carries diagnostics — `llvm::errs()` writes there. `2>&1` merges stderr into stdout so a `$(...)` command substitution can capture both (see lesson 13)."
+          ],
+          [
+            "Stub.",
+            "A placeholder implementation that exists and runs but does not do the real work yet; a \"diagnostic stub\" is one whose only job is to print observations (Background)."
+          ],
+          [
+            "Target (CMake).",
+            "A named node in CMake's build graph carrying its sources, compile/link rules, and the requirements attached by the `target_*` commands; `add_library` creates one (see lesson 2)."
+          ],
+          [
+            "Text IR.",
+            "Human-readable LLVM IR (`.ll`); `-S` requests it. The compact default is binary IR (see lesson 7)."
+          ],
+          [
+            "Terminator.",
+            "The last instruction of a basic block; it transfers control: `br`, `switch`, `indirectbr`, `ret`, `invoke`, or `unreachable`. The current flattening policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only (see lessons 10, 22)."
+          ],
+          [
+            "Translation unit.",
+            "One `.cpp` file, expanded with the headers it includes and compiled into one object file. Each translation unit needs the declarations of the classes it uses; the CMake source list decides which translation units get compiled and linked into the plugin (see lesson 4)."
+          ],
+          [
+            "Unreachable.",
+            "A terminator marking a point that cannot execute (for example after an infinite loop or a checked precondition); it transfers control nowhere. The flattening policy accepts it (see lesson 23)."
+          ],
+          [
+            "Unwind / `invoke`.",
+            "An `invoke` instruction calls with two exits: `to label %normal` and `unwind label %exception`. Unwinding is the exceptional exit; it lands on an EH pad (see lesson 21)."
+          ],
+          [
+            "Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`).",
+            "CMake's model of who sees a target's compile/link requirements: `PRIVATE` = the target itself only, `PUBLIC` = the target and its consumers, `INTERFACE` = consumers only. MiniShield is a plugin nothing links to, so everything is `PRIVATE` (see lesson 2)."
+          ],
+          [
+            "Valid vs. correct.",
+            "`verify` proves validity (the IR obeys LLVM's structural rules); it does not prove correctness (the transformed program behaves the same as the input) (Background)."
+          ],
+          [
+            "`verify`.",
+            "A built-in pass that checks IR structural validity: types, SSA constraints, PHI incoming edges, return types, and related invariants. It succeeds silently on valid IR (Background; lesson 7)."
+          ]
+        ]
+      }
+    ],
+    "words": 2507
   }
 ]
