@@ -912,13 +912,29 @@
         "text": "Task: create the pass interface, its implementation, and its registration:"
       },
       {
+        "type": "heading",
+        "text": "Recall: what a pass is, and how a plugin supplies one"
+      },
+      {
+        "type": "paragraph",
+        "text": "A pass is one program-level inspection or transformation that LLVM runs over the IR: it receives an object (here, a `Function`), inspects or changes it, and returns a result describing what it did (Background). The plugin's job is to make `opt` call it. With `-load-pass-plugin=...`, `opt` loads the shared library through `dlopen()` and calls its exported `extern \"C\"` entry point `llvmGetPassPluginInfo()`, which returns a `PassPluginLibraryInfo`. One of the callbacks that structure registers with LLVM's `PassBuilder` — `registerPipelineParsingCallback` — is where the pipeline name `minishield-flatten` becomes `FPM.addPass(FlatteningPass())`; lesson 6 traces that registration."
+      },
+      {
+        "type": "paragraph",
+        "text": "A pass's `run()` receives `llvm::Function &F` and `llvm::FunctionAnalysisManager &AM`, and returns `llvm::PreservedAnalyses`: the set of analyses still valid after the pass ran. `PreservedAnalyses::all()` says nothing was invalidated — correct for a read-only or stub pass like this one — while `PreservedAnalyses::none()` says recompute everything."
+      },
+      {
+        "type": "paragraph",
+        "text": "An analysis is a registered class whose `run()` computes and returns data instead of modifying the IR. A pass asks for that data with `AM.getResult<CFGAnalyzer>(F)`; the manager computes it once and caches it, and the same `PreservedAnalyses` bookkeeping keeps the cache honest. The `CFGAnalyzer` declaration comes in lesson 16."
+      },
+      {
         "type": "code",
         "language": "cpp",
         "text": "include/minishield/FlatteningPass.h — class and run() declaration\nlib/FlatteningPass.cpp             — run() definition\nlib/Plugin.cpp                     — plugin entry point and registration"
       },
       {
         "type": "paragraph",
-        "text": "The header lets other translation units know the pass class exists. Each .cpp file is compiled separately, so Plugin.cpp needs to include that header. CMake must also list the implementation .cpp file to compile and link it."
+        "text": "Each file has one job. The header is the interface: it declares the class, and because each .cpp file is compiled on its own, Plugin.cpp must include it to see the declaration. CMake must list lib/FlatteningPass.cpp as well: the source list decides what is compiled and linked into the plugin."
       },
       {
         "type": "paragraph",
@@ -934,11 +950,11 @@
         "text": "It returns llvm::PreservedAnalyses. The initial implementation only reports the function name and block count, so it returns PreservedAnalyses::all()."
       },
       {
-        "type": "paragraph",
+        "type": "debug",
         "text": "Observed mistakes: the header was initially named FlatteningPass.cpp, while the includes requested FlatteningPass.h. Rename the declaration file to .h. Plugin.cpp also needed semicolons after the callback registration expression and the returned aggregate initializer. Read the compiler location and check the surrounding statement boundaries when diagnosing these syntax errors."
       }
     ],
-    "words": 140
+    "words": 348
   },
   {
     "id": 5,
@@ -2948,7 +2964,7 @@
           ],
           [
             "`clang` / `clang++`.",
-            "The C and C++ compilers of the LLVM project. The conda environment exposes `clang++-23` (no plain `clang++`), so the configure command pins that path explicitly (see lessons 0, 2)."
+            "The C and C++ compilers of the LLVM project. The conda environment exposes `clang++-23` (no plain `clang++`), so the configure command pins that path explicitly (see lessons 1, 3)."
           ],
           [
             "Conda / Miniforge.",
@@ -2964,11 +2980,11 @@
           ],
           [
             "`CONDA_PREFIX`.",
-            "An environment variable set by `conda activate`, holding the path to the active environment. Recipes like `$CONDA_PREFIX/bin/clang++-23` and `export LIBRARY_PATH=$CONDA_PREFIX/lib` are how you point CMake and the linker at that environment's tools (see lessons 0, 2)."
+            "An environment variable set by `conda activate`, holding the path to the active environment. Recipes like `$CONDA_PREFIX/bin/clang++-23` and `export LIBRARY_PATH=$CONDA_PREFIX/lib` are how you point CMake and the linker at that environment's tools (see lessons 1, 3)."
           ],
           [
             "Coroutine.",
-            "A function that can be suspended and resumed. In LLVM IR it is expressed through `llvm.coro.*` intrinsics. A **presplit coroutine** is a coroutine function the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()` (see lessons 21, 22, 24)."
+            "A function that can be suspended and resumed. In LLVM IR it is expressed through `llvm.coro.*` intrinsics. A **presplit coroutine** is a coroutine function the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()` (see lessons 22, 23, 25)."
           ],
           [
             "C++ standard library headers (for example `<type_traits>`).",
@@ -2976,7 +2992,7 @@
           ],
           [
             "Declaration vs. definition (function).",
-            "A declaration (`declare i32 @foo(i32)`) announces that a function exists, with no body; a definition (`define i32 @foo(i32 %x) { ... }`) provides the body. Passes only run on definitions; `F.isDeclaration()` detects the former (see lessons 8, 21)."
+            "A declaration (`declare i32 @foo(i32)`) announces that a function exists, with no body; a definition (`define i32 @foo(i32 %x) { ... }`) provides the body. Passes only run on definitions; `F.isDeclaration()` detects the former (see lessons 9, 22)."
           ],
           [
             "`dlopen()`.",
@@ -3016,7 +3032,7 @@
           ],
           [
             "`isa<T>(X)` / `dyn_cast<T>(X)`.",
-            "LLVM's type-testing and type-casting helpers: `isa` answers \"is this value a T?\" and returns a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise (see lessons 10, 21)."
+            "LLVM's type-testing and type-casting helpers: `isa` answers \"is this value a T?\" and returns a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise (see lessons 11, 22)."
           ],
           [
             "Intrinsic.",
@@ -3028,7 +3044,7 @@
           ],
           [
             "`LIBRARY_PATH`.",
-            "An environment variable the compiler driver reads for link-time library search directories. Conda's clang does not search `$CONDA_PREFIX/lib` by default, so the export makes `libstdc++.so` findable. It is a different thing from `LD_LIBRARY_PATH` (which affects runtime library loading) and from `LLVM_DIR` (which tells CMake where the LLVM CMake package lives) (see lessons 0, 2)."
+            "An environment variable the compiler driver reads for link-time library search directories. Conda's clang does not search `$CONDA_PREFIX/lib` by default, so the export makes `libstdc++.so` findable. It is a different thing from `LD_LIBRARY_PATH` (which affects runtime library loading) and from `LLVM_DIR` (which tells CMake where the LLVM CMake package lives) (see lessons 1, 3)."
           ],
           [
             "`lld`.",
@@ -3056,7 +3072,7 @@
           ],
           [
             "`ninja` / \"no work to do\".",
-            "The build tool that executes `build/build.ninja`. \"No work to do\" means every rule's outputs are up to date; it is not a test result and not a failure (see lessons 1, 2)."
+            "The build tool that executes `build/build.ninja`. \"No work to do\" means every rule's outputs are up to date; it is not a test result and not a failure (see lessons 2, 3)."
           ],
           [
             "`opt`.",
@@ -3064,7 +3080,7 @@
           ],
           [
             "`optnone`.",
-            "A function attribute meaning \"do not optimize this function\". Optional passes (like `FlatteningPass`) are skipped on `optnone` functions; required passes (like `StatsPass`) still run there (see lessons 4, 22)."
+            "A function attribute meaning \"do not optimize this function\". Optional passes (like `FlatteningPass`) are skipped on `optnone` functions; required passes (like `StatsPass`) still run there (see lessons 5, 23)."
           ],
           [
             "Opcode.",
@@ -3116,7 +3132,7 @@
           ],
           [
             "PreservedAnalyses.",
-            "The value a transformation pass returns, describing which cached analyses remain valid after its changes. `::all()` says \"nothing was touched\" (correct for read-only passes like `StatsPass`); `::none()` says \"assume every cached analysis is invalid\" (the safe default for a real transformation). It reports cache validity only — it does not run the verifier or prove behavior was preserved (see lessons 3, 13)."
+            "The value a transformation pass returns, describing which cached analyses remain valid after its changes. `::all()` says \"nothing was touched\" (correct for read-only passes like `StatsPass`); `::none()` says \"assume every cached analysis is invalid\" (the safe default for a real transformation). It reports cache validity only — it does not run the verifier or prove behavior was preserved (see lessons 4, 14)."
           ],
           [
             "`#pragma once`.",
@@ -3128,7 +3144,7 @@
           ],
           [
             "Reference vs. pointer.",
-            "A reference (`const BasicBlock &BB`) is another name for an existing object; a pointer (`const BasicBlock p`) stores an object's address. `&BB` takes the address of the referenced object; `p` dereferences a pointer (see lessons 17, 18)."
+            "A reference (`const BasicBlock &BB`) is another name for an existing object; a pointer (`const BasicBlock p`) stores an object's address. `&BB` takes the address of the referenced object; `p` dereferences a pointer (see lessons 18, 19)."
           ],
           [
             "Shared library (`.so`).",
@@ -3164,7 +3180,7 @@
           ],
           [
             "Terminator.",
-            "The last instruction of a basic block; it transfers control: `br`, `switch`, `indirectbr`, `ret`, `invoke`, or `unreachable`. The current flattening policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only (see lessons 10, 22)."
+            "The last instruction of a basic block; it transfers control: `br`, `switch`, `indirectbr`, `ret`, `invoke`, or `unreachable`. The current flattening policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only (see lessons 11, 23)."
           ],
           [
             "Translation unit.",

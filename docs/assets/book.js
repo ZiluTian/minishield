@@ -74,7 +74,7 @@ function renderBlocks(blocks){return blocks.map(block=>{
  if(block.type==='table')return `<div class="table-scroll"><table class="data-table"><thead><tr>${block.rows[0].map(cell=>`<th>${inline(cell)}</th>`).join('')}</tr></thead><tbody>${block.rows.slice(1).map(row=>`<tr>${row.map(cell=>`<td>${inline(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
  if(block.type==='deep')return `<details class="deep-dive"><summary>${inline(block.title)}</summary><div class="deep-content">${renderBlocks(block.blocks)}</div></details>`;
  if(block.type==='list'){const tag=block.ordered?'ol':'ul';return `<${tag}>${block.items.map(item=>`<li>${inline(item)}</li>`).join('')}</${tag}>`}
- if(['task','checkpoint','debug'].includes(block.type)){const label=({task:'Your task',checkpoint:'Pause & explain',debug:'From the debugging bench'})[block.type];return `<aside class="callout ${block.type}"><div class="callout-label">${label}</div><p>${inline(block.text.replace(/^(?:Task:|Goal:|Checkpoint:?|Observed (?:error|correction|bug|omission):)\s*/,''))}</p></aside>`}
+ if(['task','checkpoint','debug'].includes(block.type)){const label=({task:'Your task',checkpoint:'Pause & explain',debug:'From the debugging bench'})[block.type];return `<aside class="callout ${block.type}"><div class="callout-label">${label}</div><p>${inline(block.text.replace(/^(?:Task:|Goal:|Checkpoint:?|Observed (?:error|correction|bug|omission|mistakes):)\s*/,''))}</p></aside>`}
  if(block.type==='reference'){const url=block.text.replace(/^Reference:\s*/,'');return /^https?:\/\//.test(url)?`<p><a href="${escapeHTML(url)}" target="_blank" rel="noopener">Read the LLVM reference ↗</a></p>`:`<p>${inline(block.text)}</p>`}
  return `<p>${inline(block.text)}</p>`;
 }).join('')}

@@ -770,15 +770,43 @@ Verified against this environment; each of these bit the actual build:
 3. Split the plugin into an entry point and a pass
 ==================================================
 
+### Recall: what a pass is, and how a plugin supplies one
+
+A pass is one program-level inspection or transformation that LLVM runs
+over the IR: it receives an object (here, a `Function`), inspects or
+changes it, and returns a result describing what it did (Background).
+The plugin's job is to make `opt` call it. With
+`-load-pass-plugin=...`, `opt` loads the shared library through
+`dlopen()` and calls its exported `extern "C"` entry point
+`llvmGetPassPluginInfo()`, which returns a `PassPluginLibraryInfo`.
+One of the callbacks that structure registers with LLVM's `PassBuilder`
+— `registerPipelineParsingCallback` — is where the pipeline name
+`minishield-flatten` becomes `FPM.addPass(FlatteningPass())`; lesson 5
+traces that registration.
+
+A pass's `run()` receives `llvm::Function &F` and
+`llvm::FunctionAnalysisManager &AM`, and returns
+`llvm::PreservedAnalyses`: the set of analyses still valid after the pass
+ran. `PreservedAnalyses::all()` says nothing was invalidated — correct
+for a read-only or stub pass like this one — while
+`PreservedAnalyses::none()` says recompute everything.
+
+An analysis is a registered class whose `run()` computes and returns
+data instead of modifying the IR. A pass asks for that data with
+`AM.getResult<CFGAnalyzer>(F)`; the manager computes it once and caches
+it, and the same `PreservedAnalyses` bookkeeping keeps the cache honest.
+The `CFGAnalyzer` declaration comes in lesson 15.
+
 Task: create the pass interface, its implementation, and its registration:
 
   include/minishield/FlatteningPass.h — class and run() declaration
   lib/FlatteningPass.cpp             — run() definition
   lib/Plugin.cpp                     — plugin entry point and registration
 
-The header lets other translation units know the pass class exists. Each
-.cpp file is compiled separately, so Plugin.cpp needs to include that header.
-CMake must also list the implementation .cpp file to compile and link it.
+Each file has one job. The header is the interface: it declares the class,
+and because each .cpp file is compiled on its own, Plugin.cpp must include
+it to see the declaration. CMake must list lib/FlatteningPass.cpp as well:
+the source list decides what is compiled and linked into the plugin.
 
 For a function pass, run() receives:
 
