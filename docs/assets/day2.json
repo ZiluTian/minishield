@@ -1,7 +1,7 @@
 {
   "day": 2,
   "title": "From inspection to transformation",
-  "status": "Published incrementally: PHI preparation, cross-block value demotion, and memory walkthroughs are available. Dispatcher chapters are next.",
+  "status": "All Day 2 lessons so far are available through connecting an unconditional entry branch. Conditional entries and state-block branch rewriting are the next exercises.",
   "groups": [
     {
       "name": "Before mutation",
@@ -45,6 +45,28 @@
       "ids": [
         37,
         38
+      ]
+    },
+    {
+      "name": "Build the dispatcher",
+      "label": "DISPATCH",
+      "key": "dispatch",
+      "description": "Assign state IDs, create complete blocks, and connect the first unconditional entry branch.",
+      "ids": [
+        39,
+        40,
+        41,
+        42,
+        43
+      ]
+    },
+    {
+      "name": "Day 2 reference",
+      "label": "GLOSSARY",
+      "key": "reference",
+      "description": "Look up the new mutation, type, and dispatcher terms.",
+      "ids": [
+        44
       ]
     }
   ],
@@ -1430,6 +1452,819 @@
         ],
         "answer": 1,
         "why": "Control flow selects which store executes. The load reads the value written on that path."
+      }
+    },
+    {
+      "id": 39,
+      "day": 2,
+      "number": 12,
+      "title": "Assign states before changing edges",
+      "originalTitle": "Assign states before changing edges",
+      "summary": "Preserve the real entry as one-time setup and assign deterministic integer IDs to the other original blocks.",
+      "takeaway": "Pointer identity is the key; block names are for display.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "dispatch",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: After both demotion stages, map the original non-entry blocks to unsigned state IDs. Do not create dispatcher blocks during this traversal."
+        },
+        {
+          "type": "heading",
+          "text": "Before you begin — what a state represents"
+        },
+        {
+          "type": "paragraph",
+          "text": "A state number identifies which original block the future dispatcher should run next. It is not an instruction count, a block name, or a new block. In this design, entry stays setup and is excluded from the switch’s ordinary state cases."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "std::vector<llvm::BasicBlock *> stateBlocks;\nllvm::DenseMap<llvm::BasicBlock *, unsigned> stateIDs;\nauto *entry = &F.getEntryBlock();\nunsigned id = 0;\nfor (auto &BB : F) {\n    // TODO: skip entry, append the block pointer, record id, increment id.\n}\n// TODO: print the IDs by iterating stateBlocks."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Include the map type"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/ADT/DenseMap.h\""
+        },
+        {
+          "type": "paragraph",
+          "text": "DenseMap maps a key to a value. Here the key is BasicBlock* and the value is unsigned. The vector keeps the order; the map supports looking up a destination’s ID when rewriting a branch."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Keep setup out of the state loop"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (&BB == entry)\n    continue;"
+        },
+        {
+          "type": "paragraph",
+          "text": "The entry block must execute once, particularly its stack allocations. Dispatching through setup repeatedly could allocate storage or repeat initialization on each transition. The pointer returned by &F.getEntryBlock() identifies the actual entry regardless of its name."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Record a block and its ID"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "stateBlocks.push_back(&BB);\nstateIDs[&BB] = id;\n++id;"
+        },
+        {
+          "type": "paragraph",
+          "text": "Take the address because BB is a reference to the block. The next lesson revisits the pointer and pair-construction errors found in the first draft."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Print in vector order"
+        },
+        {
+          "type": "paragraph",
+          "text": "Iterate stateBlocks to print deterministic output. DenseMap iteration order is not a stable display order. Do not rely on LLVM block names as unique persistent IDs."
+        },
+        {
+          "type": "heading",
+          "text": "The full mapping fragment"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "std::vector<llvm::BasicBlock *> stateBlocks;\nllvm::DenseMap<llvm::BasicBlock *, unsigned> stateIDs;\nauto *entry = &F.getEntryBlock();\nunsigned id = 0;\nfor (auto &BB : F) {\n    if (&BB == entry)\n        continue;\n    stateBlocks.push_back(&BB);\n    stateIDs[&BB] = id;\n    ++id;\n}\nfor (auto *BB : stateBlocks)\n    llvm::errs() << \"state \" << stateIDs.lookup(BB)\n                 << \" -> \" << BB->getName() << \"\\n\";"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -disable-output tests/ir/phi.ll"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Fixture",
+              "State 0",
+              "State 1",
+              "State 2"
+            ],
+            [
+              "phi.ll",
+              "left",
+              "right",
+              "join"
+            ],
+            [
+              "loop.ll",
+              "header",
+              "body",
+              "exit"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "No entry state is assigned. Mapping IDs changes C++ bookkeeping only; it does not itself invalidate analyses. Keep the existing changed decision from demotion."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why are a vector and a map both useful? Why does entry not get a state? Why can state zero be an incorrect universal initialization value for a conditional entry?"
+        }
+      ],
+      "words": 405,
+      "quiz": {
+        "q": "Why preserve the existing entry as setup?",
+        "choices": [
+          "To avoid reexecuting allocations and initialization on dispatcher iterations",
+          "Because LLVM forbids branches in entry",
+          "To give it the highest state ID"
+        ],
+        "answer": 0,
+        "why": "Setup executes once. The dispatcher routes between the other blocks; entry is not one of its repeated states."
+      }
+    },
+    {
+      "id": 40,
+      "day": 2,
+      "number": 13,
+      "title": "Fix pointer keys and pair insertion",
+      "originalTitle": "Fix pointer keys and pair insertion",
+      "summary": "Translate the state-map compiler errors into exact C++ types, and distinguish copying a pointer from copying a block.",
+      "takeaway": "Use &BB over block objects, but BB over a vector of block pointers.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "dispatch",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Review the state-mapping draft and fix its three type/syntax errors before building a dispatcher."
+        },
+        {
+          "type": "heading",
+          "text": "The failing template"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto &BB : F) {\n    if (entry == BB)       // TODO: compare compatible types.\n        continue;\n    stateBlocks.push_back(BB); // TODO: supply the pointer element type.\n    stateIDs.insert(<BB, id>); // TODO: construct a key/value pair.\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Compare addresses"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (entry == &BB)\n    continue;"
+        },
+        {
+          "type": "paragraph",
+          "text": "entry is BasicBlock*. BB is BasicBlock&. Comparing entry with &BB compares pointer identity."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Append an address, not an object"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "stateBlocks.push_back(&BB);"
+        },
+        {
+          "type": "paragraph",
+          "text": "The vector stores BasicBlock*. BB is not already a pointer merely because a reference may be implemented internally using an address."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Use map assignment or a brace-constructed pair"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "stateIDs[&BB] = id;\n// Alternative, choose one form rather than using both:\n// stateIDs.insert({&BB, id});"
+        },
+        {
+          "type": "paragraph",
+          "text": "Angle brackets delimit template arguments in DenseMap<...>. Braces construct the key/value pair passed to insert. For this collection every block key is new; bracket assignment is a straightforward choice."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Print the name, not a pointer address"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto *BB : stateBlocks) {\n    llvm::errs() << \"state \" << stateIDs.lookup(BB)\n                 << \" -> \" << BB->getName() << \"\\n\";\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "In this loop BB is already a pointer because that is the vector’s element type. lookup receives the pointer key, while -> accesses a block member."
+        },
+        {
+          "type": "heading",
+          "text": "The full corrected loop"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto &BB : F) {\n    if (&BB == entry)\n        continue;\n    stateBlocks.push_back(&BB);\n    stateIDs[&BB] = id++;\n}"
+        },
+        {
+          "type": "debug",
+          "text": "Observed error: const auto *BB would be a pointer to const BasicBlock and would not implicitly convert to the map’s BasicBlock* key. const auto BB instead makes the copied pointer itself const. These are different declarations."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Rebuild and compare the phi.ll state order with lesson 12. lookup returns a default zero for a missing key; in this prototype all original destination blocks must already be mapped, so do not treat lookup as validation that a key exists. Use find() when validating membership."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why is copying a pointer element okay here even though for (auto BB : F) would try to copy a noncopyable block?"
+        }
+      ],
+      "words": 342,
+      "quiz": {
+        "q": "Which value belongs in a DenseMap<BasicBlock*, unsigned> key?",
+        "choices": [
+          "The block’s address",
+          "A copy of the BasicBlock object",
+          "The block’s printed name string"
+        ],
+        "answer": 0,
+        "why": "The map declaration requires a pointer. Take &BB when iterating block references, and use the pointer directly when iterating stateBlocks."
+      }
+    },
+    {
+      "id": 41,
+      "day": 2,
+      "number": 14,
+      "title": "Construct a complete dispatcher block",
+      "originalTitle": "Construct a complete dispatcher block",
+      "summary": "Learn insertion points and IRBuilder while constructing a switch that is deliberately not connected to execution yet.",
+      "takeaway": "Every new block needs a terminator, even before it becomes reachable.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "dispatch",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: After state mapping, add an i32 state slot and two complete new blocks. Preserve the old branch structure at this construction checkpoint."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "bool changed = !phis.empty() || !escapingValues.empty();\nif (!stateBlocks.empty()) {\n    // TODO: allocate ms.state in the original entry.\n    // TODO: append ms.dispatch and ms.invalid, not before entry.\n    // TODO: terminate invalid; load state and switch in dispatcher.\n    // TODO: add one case for each original state block.\n    // TODO: changed = true.\n}\nreturn changed ? llvm::PreservedAnalyses::none()\n               : llvm::PreservedAnalyses::all();"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Choose an insertion point"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/IRBuilder.h\"\n// Inside the nonempty-stateBlocks branch:\nllvm::IRBuilder<> setup(&*entry->getFirstInsertionPt());"
+        },
+        {
+          "type": "paragraph",
+          "text": "IRBuilder is a helper for inserting instructions. getFirstInsertionPt() returns an iterator to the first legal insertion position; * obtains the instruction and & takes its address. The builder inserts before that instruction. This expression differs from &*dispatcher, which just recovers a pointer you already had."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Allocate the state once"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *stateSlot = setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\");"
+        },
+        {
+          "type": "paragraph",
+          "text": "getInt32Ty() returns the LLVM i32 type. CreateAlloca returns the storage pointer. nullptr supplies no array-size operand, meaning the default single element in this overload. The final string is the IR result name. No store is added yet because the dispatcher is deliberately unreachable."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Append the two blocks"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *dispatcher = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.dispatch\", &F);\nauto *invalidBlock = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.invalid\", &F);"
+        },
+        {
+          "type": "paragraph",
+          "text": "LLVMContext owns shared IR context such as uniqued types. &F attaches each block to this function. With no insertion-before argument, the blocks are appended; the original entry remains first. stateBlocks was collected before creation, so neither new block receives a normal state ID."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Terminate the invalid-state path"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::IRBuilder<> invalidBuilder(invalidBlock);\ninvalidBuilder.CreateUnreachable();"
+        },
+        {
+          "type": "paragraph",
+          "text": "unreachable ends the block and declares that this path must never execute in a valid run. It is not a runtime exception handler or a recovery return. Correct state writes must prevent invalid values from selecting it."
+        },
+        {
+          "type": "heading",
+          "text": "Step 5 — Load and switch"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::IRBuilder<> dispatchBuilder(dispatcher);\nauto *current = dispatchBuilder.CreateLoad(\n    dispatchBuilder.getInt32Ty(), stateSlot, \"ms.current\");\nauto *dispatchSwitch = dispatchBuilder.CreateSwitch(\n    current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));"
+        },
+        {
+          "type": "paragraph",
+          "text": "CreateLoad needs the loaded value type and pointer. CreateSwitch creates the terminator and sets its default destination. Its third argument reserves case capacity; it does not add case edges."
+        },
+        {
+          "type": "heading",
+          "text": "Step 6 — Populate the cases and mark the mutation"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto *BB : stateBlocks) {\n    dispatchSwitch->addCase(\n        dispatchBuilder.getInt32(stateIDs.lookup(BB)), BB);\n}\nchanged = true;"
+        },
+        {
+          "type": "paragraph",
+          "text": "getInt32(ID) creates an i32 integer constant, unlike getInt32Ty(), which supplies a Type*. Keep changed declared before construction so the final preservation result includes the new instructions and blocks."
+        },
+        {
+          "type": "heading",
+          "text": "The full construction stage"
+        },
+        {
+          "type": "paragraph",
+          "text": "Place this after the demotion and state-mapping stages. It replaces the old final preservation return. The variable entry is the BasicBlock* saved during mapping; if your source calls it entry_ptr, use that spelling consistently."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "bool changed = !phis.empty() || !escapingValues.empty();\nif (!stateBlocks.empty()) {\n    llvm::IRBuilder<> setup(&*entry->getFirstInsertionPt());\n    auto *stateSlot = setup.CreateAlloca(\n        setup.getInt32Ty(), nullptr, \"ms.state\");\n    auto *dispatcher = llvm::BasicBlock::Create(\n        F.getContext(), \"ms.dispatch\", &F);\n    auto *invalidBlock = llvm::BasicBlock::Create(\n        F.getContext(), \"ms.invalid\", &F);\n\n    llvm::IRBuilder<> invalidBuilder(invalidBlock);\n    invalidBuilder.CreateUnreachable();\n\n    llvm::IRBuilder<> dispatchBuilder(dispatcher);\n    auto *current = dispatchBuilder.CreateLoad(\n        dispatchBuilder.getInt32Ty(), stateSlot, \"ms.current\");\n    auto *dispatchSwitch = dispatchBuilder.CreateSwitch(\n        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));\n    for (auto *BB : stateBlocks) {\n        dispatchSwitch->addCase(\n            dispatchBuilder.getInt32(stateIDs.lookup(BB)), BB);\n    }\n    changed = true;\n}\nreturn changed ? llvm::PreservedAnalyses::none()\n               : llvm::PreservedAnalyses::all();"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/phi.ll -o build/phi-dispatcher.ll\ncat build/phi-dispatcher.ll"
+        },
+        {
+          "type": "paragraph",
+          "text": "Expect a state slot, a dispatcher load and switch with 0→left, 1→right, 2→join, and an invalid block ending in unreachable. ms.dispatch has no predecessors at this checkpoint. Its load is not executed, so no initialization store is needed yet."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Which block executes the allocation? Why is a switch destination not a substitute for that destination block’s own terminator? Why must new blocks not enter stateBlocks?"
+        }
+      ],
+      "words": 606,
+      "quiz": {
+        "q": "Does CreateSwitch(..., 3) create three cases?",
+        "choices": [
+          "No; it reserves capacity, and addCase creates the cases",
+          "Yes, it automatically assigns IDs 0, 1, and 2",
+          "Only if the function has exactly three blocks"
+        ],
+        "answer": 0,
+        "why": "Capacity and contents are separate. Add each integer constant and destination explicitly."
+      }
+    },
+    {
+      "id": 42,
+      "day": 2,
+      "number": 15,
+      "title": "Separate block names from C++ variables",
+      "originalTitle": "Separate block names from C++ variables",
+      "summary": "Fix the creation errors from the first dispatcher draft and explain exactly why a block pointer is the right return type.",
+      "takeaway": "dispatcher is a C++ identifier; \"ms.dispatch\" is an LLVM name string.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "dispatch",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Review the BasicBlock creation statements and the empty invalid block found in the first draft."
+        },
+        {
+          "type": "heading",
+          "text": "The failing template"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::BasicBlock ms.dispatch =\n    llvm::BasicBlock::Create(F.getContext(), name, &F);\nllvm::BasicBlock *dispatcher = &ms.dispatch;"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Use a legal C++ identifier"
+        },
+        {
+          "type": "paragraph",
+          "text": "A dot is member access in C++, not part of an identifier. Writing ms.dispatch makes the parser look for a member named dispatch on an object named ms. Use dispatcher as the variable name."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Keep the returned pointer"
+        },
+        {
+          "type": "paragraph",
+          "text": "BasicBlock::Create returns BasicBlock*. The function owns the attached block. Do not try to construct a local BasicBlock value from that pointer or take the address of an invented local object."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Pass the IR name as a string"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *dispatcher = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.dispatch\", &F);"
+        },
+        {
+          "type": "paragraph",
+          "text": "The placeholder name in the teaching signature meant “supply a name here”; it was not a predefined variable. Quoted \"ms.dispatch\" is the block’s display name and may contain a dot even though the C++ identifier cannot."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Finish the invalid block"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *invalidBlock = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.invalid\", &F);\nllvm::IRBuilder<> invalidBuilder(invalidBlock);\ninvalidBuilder.CreateUnreachable();"
+        },
+        {
+          "type": "paragraph",
+          "text": "After the declaration errors are fixed, an empty invalid block would still fail LLVM verification. Compilation checks C++ syntax and types; verify checks the IR your C++ creates."
+        },
+        {
+          "type": "heading",
+          "text": "The full corrected declarations"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *dispatcher = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.dispatch\", &F);\nauto *invalidBlock = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.invalid\", &F);\nllvm::IRBuilder<> invalidBuilder(invalidBlock);\ninvalidBuilder.CreateUnreachable();\nllvm::IRBuilder<> dispatchBuilder(dispatcher);"
+        },
+        {
+          "type": "debug",
+          "text": "Observed error: The build failed before producing a new plugin. An existing .so can still contain an older implementation; testing it after a failed build does not verify the draft you just wrote."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "paragraph",
+          "text": "Rebuild successfully, then rerun the phi.ll construction check from lesson 14. Do not proceed merely because an old shared library still loads."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Distinguish the pointer variable, the object it identifies, and its IR name. Which problem belongs to the C++ compiler and which to the LLVM verifier?"
+        }
+      ],
+      "words": 311,
+      "quiz": {
+        "q": "What is \"ms.dispatch\" in BasicBlock::Create(..., \"ms.dispatch\", &F)?",
+        "choices": [
+          "A C++ expression accessing a member",
+          "A string naming the LLVM basic block",
+          "A pointer to the current dispatcher"
+        ],
+        "answer": 1,
+        "why": "The return value is the block pointer. The string argument supplies the IR name."
+      }
+    },
+    {
+      "id": 43,
+      "day": 2,
+      "number": 16,
+      "title": "Connect an unconditional entry branch",
+      "originalTitle": "Connect an unconditional entry branch",
+      "summary": "Initialize state from the actual entry successor, insert the replacement instructions, and remove the old branch safely.",
+      "takeaway": "Store the selected state before execution reaches the dispatcher.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "dispatch",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Connect only an unconditional entry branch first. Use loop.ll, whose entry branches to header, mapped to state 0. This is still a partial transformation."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// Inside if (!stateBlocks.empty()), after constructing the dispatcher.\nauto *entryTerminator = entry->getTerminator();\nllvm::IRBuilder<> entryBuilder(entryTerminator);\nswitch (entryTerminator->getOpcode()) {\ncase llvm::Instruction::UncondBr: {\n    // TODO: get the original destination, store its ID, branch to dispatcher.\n    // TODO: erase the old terminator only after using it.\n    break;\n}\ndefault:\n    break;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Save the original terminator"
+        },
+        {
+          "type": "paragraph",
+          "text": "The old branch identifies the real first destination. It also provides an insertion point so replacement instructions can be inserted before it. Keep this code inside the construction block where stateSlot and dispatcher are in scope."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Look up its destination state"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *destination = entryTerminator->getSuccessor(0);\nauto *initialState = entryBuilder.getInt32(stateIDs.lookup(destination));"
+        },
+        {
+          "type": "paragraph",
+          "text": "An unconditional branch has one successor, at index 0. For the loop fixture this is header with ID 0. The lookup must use the destination block, not the entry itself: entry intentionally has no state ID."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Store, branch, then erase"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "entryBuilder.CreateStore(initialState, stateSlot);\nentryBuilder.CreateBr(dispatcher);\nentryTerminator->eraseFromParent();"
+        },
+        {
+          "type": "paragraph",
+          "text": "The store runs before the dispatcher’s load. Emit replacements before deleting the old instruction: the builder’s insertion point and the original successor information are still needed. The brief intermediate state with two terminators must not survive to verification. Do not dereference entryTerminator after eraseFromParent()."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Leave other entry forms unchanged for now"
+        },
+        {
+          "type": "paragraph",
+          "text": "default: break leaves conditional, switch, return, and unreachable entries untouched at this checkpoint. Do not invent a universal store of zero for them. Later lessons must select the state corresponding to the actual path."
+        },
+        {
+          "type": "heading",
+          "text": "The full entry-rewriting fragment"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *entryTerminator = entry->getTerminator();\nllvm::IRBuilder<> entryBuilder(entryTerminator);\nswitch (entryTerminator->getOpcode()) {\ncase llvm::Instruction::UncondBr: {\n    auto *destination = entryTerminator->getSuccessor(0);\n    auto *initialState = entryBuilder.getInt32(stateIDs.lookup(destination));\n    entryBuilder.CreateStore(initialState, stateSlot);\n    entryBuilder.CreateBr(dispatcher);\n    entryTerminator->eraseFromParent();\n    break;\n}\ndefault:\n    break; // Conditional entries and other forms are a later exercise.\n}"
+        },
+        {
+          "type": "heading",
+          "text": "The full reference file at this checkpoint"
+        },
+        {
+          "type": "paragraph",
+          "text": "This is a complete lib/FlatteningPass.cpp reference to compare after doing the steps. It includes the earlier preparation and mapping, so it replaces the file rather than being appended to your existing run(). It is a study prototype, not a finished production flattener."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/FlatteningPass.h\"\n#include \"minishield/FunctionEligibility.h\"\n#include \"llvm/ADT/DenseMap.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/Support/Casting.h\"\n#include \"llvm/Support/raw_ostream.h\"\n#include \"llvm/Transforms/Utils/Local.h\"\n#include <vector>\n\nnamespace minishield {\nllvm::PreservedAnalyses FlatteningPass::run(\n    llvm::Function &F, llvm::FunctionAnalysisManager &) {\n    if (F.isDeclaration())\n        return llvm::PreservedAnalyses::all();\n    const auto eligibility = FunctionEligibility::check(F);\n    if (!eligibility.eligible) {\n        llvm::errs() << \"[MiniShield] rejected: \" << F.getName()\n                     << \": \" << eligibility.reason << \"\\n\";\n        return llvm::PreservedAnalyses::all();\n    }\n    std::vector<llvm::PHINode *> phis;\n    for (auto &BB : F) {\n        for (auto &I : BB) {\n            if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {\n                phis.push_back(phi);\n            }\n        }\n    }\n    llvm::errs() << \"Number of PHIs: \" << phis.size() << \"\\n\";\n    for (auto *phi : phis)\n        llvm::DemotePHIToStack(phi);\n\n    std::vector<llvm::Instruction *> escapingValues;\n    for (auto &BB : F) {\n        for (auto &I : BB) {\n            if (I.getType()->isVoidTy() || llvm::isa<llvm::AllocaInst>(I))\n                continue;\n            if (I.isUsedOutsideOfBlock(&BB))\n                escapingValues.push_back(&I);\n        }\n    }\n    for (auto *value : escapingValues)\n        llvm::DemoteRegToStack(*value);\n\n\n    std::vector<llvm::BasicBlock *> stateBlocks;\n    llvm::DenseMap<llvm::BasicBlock *, unsigned> stateIDs;\n    auto *entry = &F.getEntryBlock();\n    unsigned id = 0;\n    for (auto &BB : F) {\n        if (&BB == entry)\n            continue;\n        stateBlocks.push_back(&BB);\n        stateIDs[&BB] = id;\n        ++id;\n    }\n    for (auto *BB : stateBlocks)\n        llvm::errs() << \"state \" << stateIDs.lookup(BB)\n                     << \" -> \" << BB->getName() << \"\\n\";\n\n    bool changed = !phis.empty() || !escapingValues.empty();\n    if (!stateBlocks.empty()) {\n        llvm::IRBuilder<> setup(&*entry->getFirstInsertionPt());\n        auto *stateSlot = setup.CreateAlloca(\n            setup.getInt32Ty(), nullptr, \"ms.state\");\n        auto *dispatcher = llvm::BasicBlock::Create(\n            F.getContext(), \"ms.dispatch\", &F);\n        auto *invalidBlock = llvm::BasicBlock::Create(\n            F.getContext(), \"ms.invalid\", &F);\n\n        llvm::IRBuilder<> invalidBuilder(invalidBlock);\n        invalidBuilder.CreateUnreachable();\n\n        llvm::IRBuilder<> dispatchBuilder(dispatcher);\n        auto *current = dispatchBuilder.CreateLoad(\n            dispatchBuilder.getInt32Ty(), stateSlot, \"ms.current\");\n        auto *dispatchSwitch = dispatchBuilder.CreateSwitch(\n            current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));\n        for (auto *BB : stateBlocks) {\n            dispatchSwitch->addCase(\n                dispatchBuilder.getInt32(stateIDs.lookup(BB)), BB);\n        }\n\n        auto *entryTerminator = entry->getTerminator();\n        llvm::IRBuilder<> entryBuilder(entryTerminator);\n        switch (entryTerminator->getOpcode()) {\n        case llvm::Instruction::UncondBr: {\n            auto *destination = entryTerminator->getSuccessor(0);\n            auto *initialState = entryBuilder.getInt32(stateIDs.lookup(destination));\n            entryBuilder.CreateStore(initialState, stateSlot);\n            entryBuilder.CreateBr(dispatcher);\n            entryTerminator->eraseFromParent();\n            break;\n        }\n        default:\n            break; // Conditional entries and other forms are a later exercise.\n        }\n        changed = true;\n    }\n    return changed ? llvm::PreservedAnalyses::none()\n                   : llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/loop.ll -o build/loop-dispatcher.ll\ncat build/loop-dispatcher.ll"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "; Expected entry ending for this fixture:\nstore i32 0, ptr %ms.state\nbr label %ms.dispatch"
+        },
+        {
+          "type": "paragraph",
+          "text": "ms.dispatch should now have entry as a predecessor. The original header/body/exit branches are still direct: only the first hop uses the dispatcher. For phi.ll, the conditional entry remains unchanged, so the dispatcher remains unconnected there."
+        },
+        {
+          "type": "paragraph",
+          "text": "Reference check: this complete example was compiled separately from the learner’s source, passed verify on the 10 existing fixtures, and matched five selected original/transformed lli results (loop counts 4 and 0, both merge paths, and factorial(5)). These are limited checks, not a proof for arbitrary IR or a completed flattener."
+        },
+        {
+          "type": "heading",
+          "text": "What remains after this lesson"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Handle conditional and switch entries with the correct successor state.",
+            "Rewrite original state-block branches to store a new state and return to the dispatcher.",
+            "Tighten eligibility for unsupported memory/data-flow cases, including allocations outside the preserved setup block, before treating this as a general transformation.",
+            "Use behavior comparisons and regression fixtures in addition to verify. Preserve store-before-load ordering; the switch alone does not prove it."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why must the old branch stay alive until replacements are emitted? Why does a conditional entry require more than storing the first state ID?"
+        }
+      ],
+      "words": 884,
+      "quiz": {
+        "q": "At this checkpoint, which original branches have been redirected?",
+        "choices": [
+          "Every branch in every function",
+          "Only an unconditional entry branch; state-block branches are unchanged",
+          "Only return instructions"
+        ],
+        "answer": 1,
+        "why": "This connects the first hop. Full flattening needs later successor-selection and state-transition rewriting."
+      }
+    },
+    {
+      "id": 44,
+      "day": 2,
+      "number": 17,
+      "title": "Look up a Day 2 term",
+      "originalTitle": "Look up a Day 2 term",
+      "summary": "A compact reference for the new SSA, memory, C++ API, and dispatcher vocabulary used in Day 2.",
+      "takeaway": "Look up the word, then return to the concrete IR example.",
+      "source": "day2",
+      "group": "reference",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Use this reference when a term interrupts your progress. The Day 1 glossary remains available under the Day 1 tab."
+        },
+        {
+          "type": "heading",
+          "text": "SSA and memory, in one picture"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "SSA result → store into an entry-allocated slot → load at a use"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Term",
+              "Meaning in these lessons"
+            ],
+            [
+              "SSA",
+              "Static single assignment: each SSA value has one definition; definitions must satisfy dominance requirements at their uses."
+            ],
+            [
+              "Dominance",
+              "A definition’s block lies on every reachable path to a use’s block. New CFG edges can invalidate it."
+            ],
+            [
+              "PHI",
+              "An SSA merge selecting an incoming value according to the predecessor edge used to enter a block."
+            ],
+            [
+              "Demotion",
+              "Replace selected SSA value flow with stack storage, stores, and loads to prepare for CFG changes."
+            ],
+            [
+              "Stack slot / alloca",
+              "Storage allocated in the function’s stack frame; the alloca instruction returns a pointer to it."
+            ],
+            [
+              "load / store",
+              "Read a typed value from memory / write a value to memory. A store has no SSA result."
+            ],
+            [
+              "Void result",
+              "The instruction produces no value for another instruction to consume, regardless of its operand types."
+            ],
+            [
+              "Cross-block / escaping value",
+              "An instruction result used outside the block in which it was defined. “Escaping” here is not a full escape analysis."
+            ],
+            [
+              "Worklist",
+              "A C++ collection of pointers to instructions to process after discovery; it does not own those instructions."
+            ],
+            [
+              "isa / dyn_cast",
+              "LLVM type check returning bool / checked cast returning a typed pointer or nullptr."
+            ],
+            [
+              "Upcast / downcast",
+              "Treat a derived object as its base type / access a base-typed object through a more specific type after a valid check."
+            ],
+            [
+              "Iterator invalidation",
+              "A saved traversal position may stop being valid when its underlying instruction list is changed."
+            ],
+            [
+              "PreservedAnalyses",
+              "The pass’s report of which cached analysis results remain valid after it runs."
+            ],
+            [
+              "DenseMap",
+              "LLVM’s key/value container; here BasicBlock* keys map to unsigned IDs. Iteration order is not presentation order."
+            ],
+            [
+              "State ID",
+              "The integer naming a destination block in our dispatcher; not the same as the block’s optional printed name."
+            ],
+            [
+              "Dispatcher",
+              "A block loading the next state and switching to the corresponding original block."
+            ],
+            [
+              "Setup / entry",
+              "The preserved one-time function entry, holding allocations and initialization outside repeated state dispatch."
+            ],
+            [
+              "LLVMContext",
+              "LLVM’s shared context for IR facilities such as uniqued types; obtained here from the function."
+            ],
+            [
+              "IRBuilder",
+              "An LLVM helper that inserts instructions at a chosen position or at the end of a block."
+            ],
+            [
+              "Insertion point",
+              "The position where the builder will insert the next instruction; a pointer-based constructor can insert before an existing instruction."
+            ],
+            [
+              "getInt32Ty / getInt32",
+              "Get the LLVM i32 Type / get an i32 ConstantInt holding a particular value."
+            ],
+            [
+              "Switch capacity / case",
+              "Reserved space is not an edge. addCase associates an integer constant with a destination block."
+            ],
+            [
+              "Terminator",
+              "The final instruction in a complete basic block; replacements must leave exactly one valid terminator."
+            ],
+            [
+              "unreachable",
+              "A terminator declaring that the path must not execute in a valid run; it is not recovery logic."
+            ],
+            [
+              "eraseFromParent",
+              "Remove and delete an instruction from its block. Do not use its pointer afterward."
+            ],
+            [
+              "Prototype checkpoint",
+              "A deliberately limited stage that can verify without implementing all supported input cases or full flattening."
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Where to return"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "PHI collection and pointer mismatch: lessons 01–03.",
+            "Cross-block candidates, void, alloca, and helper signatures: lessons 04–09.",
+            "Before/after memory examples: lessons 10–11.",
+            "State IDs, block creation, and first-hop connection: lessons 12–16."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition."
+        }
+      ],
+      "words": 97,
+      "quiz": {
+        "q": "Which pair denotes a type and a value, respectively?",
+        "choices": [
+          "getInt32Ty() and getInt32(2)",
+          "getInt32(2) and getInt32Ty()",
+          "eraseFromParent() and continue"
+        ],
+        "answer": 0,
+        "why": "An instruction builder often needs both an LLVM Type* and particular constant values. They are different API inputs."
       }
     }
   ]
