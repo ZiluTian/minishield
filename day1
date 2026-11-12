@@ -700,15 +700,6 @@ Task: from the project root, activate the environment and configure CMake:
     -DCMAKE_CXX_COMPILER="$CONDA_PREFIX/bin/clang++-23" \
     -DLLVM_DIR="$CONDA_PREFIX/lib/cmake/llvm"
 
-The options mean:
-
-  -G Ninja: use Ninja as the generated build system.
-  -S .: read the source project's CMakeLists.txt here.
-  -B build: place generated files in build/.
-  CMAKE_BUILD_TYPE: select Release settings.
-  CMAKE_CXX_COMPILER: use this environment's C++ compiler.
-  LLVM_DIR: locate this LLVM installation's CMake configuration.
-
 The `export` line in the task is not a CMake option — it is the environment
 the compiler runs in. When Ninja links the plugin, conda's clang driver
 searches for libraries only in its default `-L` paths (the gcc-layout
@@ -720,6 +711,15 @@ compilation succeed and the link step fails with
 `x86_64-conda-linux-gnu-ld: cannot find -lstdc++`. Note what it is *not*:
 not `LD_LIBRARY_PATH` (runtime library loading) and not `LLVM_DIR` (which
 tells CMake where to find `LLVMConfig.cmake`).
+
+The options mean:
+
+  -G Ninja: use Ninja as the generated build system.
+  -S .: read the source project's CMakeLists.txt here.
+  -B build: place generated files in build/.
+  CMAKE_BUILD_TYPE: select Release settings.
+  CMAKE_CXX_COMPILER: use this environment's C++ compiler.
+  LLVM_DIR: locate this LLVM installation's CMake configuration.
 
 Wait for CMake to report that configuration and generation succeeded. Then:
 
