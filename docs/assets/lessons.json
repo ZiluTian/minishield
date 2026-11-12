@@ -1072,9 +1072,57 @@
       {
         "type": "checkpoint",
         "text": "Checkpoint: trace how the string minishield-flatten results in constructing FlatteningPass and adding it to the function pass manager."
+      },
+      {
+        "type": "heading",
+        "text": "Define the three stub files to turn the crank"
+      },
+      {
+        "type": "paragraph",
+        "text": "You now have all three pieces: the `run()` contract (lesson 4), the mixin choice (lesson 5), and the registration (this lesson). Define the files and build, and `opt` can run the pass."
+      },
+      {
+        "type": "paragraph",
+        "text": "`include/minishield/FlatteningPass.h` — the declaration:"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#pragma once\n\n#include \"llvm/IR/PassManager.h\"\n\nnamespace minishield {\n    class FlatteningPass : public llvm::OptionalPassInfoMixin<FlatteningPass> {\n        public:\n            llvm::PreservedAnalyses run(\n                    llvm::Function &F,\n                    llvm::FunctionAnalysisManager &AM);\n    };\n} // namespace minishield\n"
+      },
+      {
+        "type": "paragraph",
+        "text": "`lib/FlatteningPass.cpp` — the stub `run()`. It reports the function name and block count, then returns `PreservedAnalyses::all()` (nothing is invalidated):"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/FlatteningPass.h\"\n\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\nnamespace minishield {\n\nllvm::PreservedAnalyses FlatteningPass::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n    llvm::errs() << \"[MiniShield] function: \" << F.getName()\n                 << \", blocks: \" << F.getBasicBlockList().size() << \"\\n\";\n    return llvm::PreservedAnalyses::all();\n}\n\n} // namespace minishield\n"
+      },
+      {
+        "type": "paragraph",
+        "text": "`lib/Plugin.cpp` — the entry point that registers `minishield-flatten`:"
+      },
+      {
+        "type": "code",
+        "language": "cpp",
+        "text": "#include \"minishield/FlatteningPass.h\"\n\n#include \"llvm/Passes/PassBuilder.h\"\n#include \"llvm/Plugins/PassPlugin.h\"\n\nextern \"C\" LLVM_ATTRIBUTE_WEAK\nllvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {\n    return {\n        LLVM_PLUGIN_API_VERSION,\n        \"minishield\",\n        \"1.0\",\n        [](llvm::PassBuilder &PB) {\n            PB.registerPipelineParsingCallback(\n                [](llvm::StringRef Name,\n                   llvm::FunctionPassManager &FPM,\n                   llvm::ArrayRef<llvm::PassBuilder::PipelineElement> InnerPipeline) {\n                    if (!InnerPipeline.empty())\n                        return false;\n                    if (Name == \"minishield-flatten\")\n                        FPM.addPass(minishield::FlatteningPass());\n                    else\n                        return false;\n                    return true;\n                });\n        }\n    };\n}\n"
+      },
+      {
+        "type": "paragraph",
+        "text": "Your `add_library(MiniShield MODULE ...)` lists only the sources that exist now — `lib/Plugin.cpp` and `lib/FlatteningPass.cpp`. Lesson 2 showed the full five-source list; that is the end state. Add `StatsPass.cpp`, `CFGAnalyzer.cpp`, and `FunctionEligibility.cpp` to the list as the later lessons create them."
+      },
+      {
+        "type": "code",
+        "language": "bash",
+        "text": "cmake --build build"
+      },
+      {
+        "type": "paragraph",
+        "text": "It lands at `build/libMiniShield.so`, where the `opt` commands point."
       }
     ],
-    "words": 123
+    "words": 357
   },
   {
     "id": 7,
