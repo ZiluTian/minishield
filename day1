@@ -221,6 +221,8 @@ testing, are the actual safety nets.
 0. Create the minishield Conda environment
 ==========================================
 
+Day 1 builds toward one decision — which functions a control-flow-flattening pass may touch. Everything before that decision is inspection, and inspection needs a plugin that actually loads. This part is the ground every later lesson stands on: a consistent Conda toolchain and a CMake project that turns your source into a loadable library.
+
 Goal: give the project one consistent Linux C++ toolchain, LLVM release, build system, and test library.
 
 The recorded environment was originally created with this command (confirmed in its conda-meta/history):
@@ -767,6 +769,8 @@ Verified against this environment; each of these bit the actual build:
 3. Split the plugin into an entry point and a pass
 ==================================================
 
+Now the toolchain is in place; this part makes LLVM actually run your code. You split the plugin into an entry point, a pass declaration, and a pass implementation, then prove the result loads by having opt find your pass. Every later pass — stats, analysis, and flattening — runs only if this chain works, so each link is built and checked on its own.
+
 ### Recall: what a pass is, and how a plugin supplies one
 
 A pass is one program-level inspection or transformation that LLVM runs
@@ -1033,6 +1037,8 @@ Pipeline syntax must be valid before LLVM can run any pass.
 
 7. Start task 1.2 by declaring StatsPass
 ========================================
+
+With a plugin that loads, you can write your first pass end to end: a read-only stats pass that walks each function's blocks and instructions and counts what it finds. Counting is the safe way to learn the traversal, because it changes nothing — you are reading IR, not rewriting it. The same loop shapes up for the analysis that follows.
 
 Task: write include/minishield/StatsPass.h using the earlier header as a model.
 
@@ -1352,6 +1358,8 @@ prove semantic equivalence.
 14. Start task 1.3 by printing successor relationships
 ======================================================
 
+Counting told you what is in a function; this part captures its shape. You turn the walk into a control-flow graph — block addresses, successors, and predecessors — returned as an analysis that LLVM can cache and hand to another pass. The flattening pass will ask for exactly this graph, so it is built as reusable data, not as diagnostic text.
+
 Task: include llvm/IR/CFG.h and, inside the existing block loop, print the
 block name followed by names from llvm::successors(&BB). Keep the instruction
 traversal after that small diagnostic exercise.
@@ -1591,6 +1599,8 @@ Checkpoint: explain why an analysis result is requested by reference, why domina
 
 17. Understand references, pointers, and addresses while implementing the CFG
 =============================================================================
+
+Before the LLVM calls keep demanding these details, make the C++ ideas under them click: an `&` in a type declares a reference, an `&` in an expression is address-of, a pointer is a variable holding an address, and a plain loop variable copies by value. Every CFG function you have written so far uses all of these, and the eligibility checks that follow build directly on them.
 
 In CFGAnalyzer you do two different things with blocks: you walk them, and
 you store their addresses in the Result. Those two jobs need two different
@@ -1957,6 +1967,8 @@ the function and must only be used while those blocks remain valid.
 
 20. Explain exception-handling pads and personality checks
 ==========================================================
+
+MiniShield's product is a control-flow-flattening pass: it rewrites a function's branching into a single dispatcher. It can only run on functions it fully understands, so the first job is a guard — an eligibility policy that accepts a function only if every block, terminator, and call is supported, and rejects everything else without changing it. Lessons 21–22 are two of those rejection rules (exception-handling pads, coroutine intrinsics); lessons 23–25 wire the decision into the pass and prove a rejected function stays byte-for-byte identical.
 
 During function eligibility work, the learner asked why both
 F.hasPersonalityFn() and BB.isEHPad() check exception handling, then asked
