@@ -418,7 +418,27 @@
       },
       {
         "type": "paragraph",
-        "text": "Hello-world compiles against the standard library and needs none of this. The plugin has four requirements, all `PRIVATE` because nothing consumes MiniShield: the LLVM compile definitions (split into real `-D` flags first), the LLVM and project include directories, the link against the imported `LLVM` target — which is `libLLVM-23.so`, the same library `opt` already loads, so one LLVM per process — and a pinned output location so the plugin lands at `build/libMiniShield.so` where the `opt` commands in the README point."
+        "text": "Hello-world compiles against the standard library and needs none of this.\nThe plugin has five requirements, all target-scoped and all `PRIVATE`\nbecause nothing links against MiniShield. Each command answers one\nquestion; they configure the target, and compilation and linking happen\nlater, when the build runs."
+      },
+      {
+        "type": "paragraph",
+        "text": "**`separate_arguments` — turn a flag string into a list.** CMake has no\narray type: a \"list\" is a `;`-separated string. `LLVMConfig.cmake` stores\n`LLVM_DEFINITIONS` as *one* space-joined string (e.g.\n`\"-D_GNU_SOURCE -D_GLIBCXX_USE_CXX11_ABI=1 -D__STDC_FORMAT_MACROS\"`), so\npassed as-is it would reach the compiler as a *single* argument — one giant\nmacro name containing spaces and `=`, which the compiler rejects.\n`separate_arguments(MS_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})`\nsplits it into individual `-D` flags (`NATIVE_COMMAND` applies the current\nplatform's quoting rules). You need this only when a variable is a\nspace-joined string rather than a list; variables you create yourself\n(`set(X a b c)`) are already lists."
+      },
+      {
+        "type": "paragraph",
+        "text": "**`target_compile_definitions` — preprocessor definitions for this\ntarget.** Attaches the split `-D` flags to MiniShield's compile line only.\nThe classic LLVM-consumer snippet uses the directory-global\n`add_definitions(...)`, which would leak LLVM's flags into every target\nadded later; the target-scoped form keeps them on the one target that needs\nthem (see the deep dive on target scope below)."
+      },
+      {
+        "type": "paragraph",
+        "text": "**`target_include_directories` — where to find headers.** Adds LLVM's\nheader directories and this project's `include/` to the compiler's search\npaths (typically as `-I` options), so source files can include LLVM and\nproject headers. Including a header does not link LLVM's implementation: a\ndeclaration is not code, so this line alone leaves the target unable to\nresolve LLVM's symbols."
+      },
+      {
+        "type": "paragraph",
+        "text": "**`target_link_libraries` — which libraries to link.** `LLVM` is the\nimported target supplied by `find_package(LLVM REQUIRED CONFIG)`; CMake\nuses its metadata to locate the existing `libLLVM-23.so` and construct the\nlink command. This is the line that supplies the implementation the\nheaders declared — and because it is the same library `opt` already loads,\nthe process ends with one LLVM, not two. The project does not build LLVM;\nit only consumes the installed shared library."
+      },
+      {
+        "type": "paragraph",
+        "text": "**`set_target_properties` — named settings on the target.**\n`LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}` chooses where the built\nmodule is written: with `cmake -S . -B build` and Ninja, that is\n`build/libMiniShield.so`, the path the README's `opt` commands point at.\nIt changes the destination, not the filename or the link dependencies\n(a multi-configuration generator may append a subdirectory such as\n`Debug/`)."
       },
       {
         "type": "paragraph",
@@ -477,27 +497,6 @@
       {
         "type": "paragraph",
         "text": "Every difference traces back to one sentence: hello-world produces a program you run, with no dependencies, while MiniShield produces a plugin opt loads that must match opt's exact LLVM release. The three-line file works because it has no decisions to make; the 35-line file is mostly the record of decisions it does."
-      },
-      {
-        "type": "paragraph",
-        "text": "We separated three CMake questions:"
-      },
-      {
-        "type": "code",
-        "language": "text",
-        "text": "target_include_directories: where does the compiler search for headers?\ntarget_link_libraries: which compiled libraries does the target depend on?\nset_target_properties: which named settings apply to the target?"
-      },
-      {
-        "type": "paragraph",
-        "text": "In this project, the include directories contain LLVM's headers and our own include/ directory. Linking to LLVM uses an imported target supplied by find_package(LLVM REQUIRED CONFIG). That target describes an existing shared library; our project does not build LLVM itself."
-      },
-      {
-        "type": "paragraph",
-        "text": "LIBRARY_OUTPUT_DIRECTORY chooses where the plugin is written. With Ninja and the current configuration, that is build/libMiniShield.so."
-      },
-      {
-        "type": "paragraph",
-        "text": "PRIVATE means a requirement applies to MiniShield without advertising it as a requirement for consumers. PUBLIC applies to both; INTERFACE applies to consumers. MiniShield's plugin dependencies are private."
       },
       {
         "type": "checkpoint",
@@ -748,55 +747,6 @@
       },
       {
         "type": "deep",
-        "title": "What do `target_include_directories`, `target_link_libraries`, and `set_target_properties` do?",
-        "blocks": [
-          {
-            "type": "paragraph",
-            "text": "These commands configure the `MiniShield` target created by `add_library`. Compilation and linking happen later, when the build runs."
-          },
-          {
-            "type": "paragraph",
-            "text": "**`target_include_directories` — where to find headers.**"
-          },
-          {
-            "type": "code",
-            "language": "cmake",
-            "text": "target_include_directories(MiniShield PRIVATE\n    ${LLVM_INCLUDE_DIRS}\n    ${CMAKE_CURRENT_SOURCE_DIR}/include)"
-          },
-          {
-            "type": "paragraph",
-            "text": "This adds LLVM's header directories and this project's `include/` directory to MiniShield's compiler search paths (typically through `-I` options). It lets source files include LLVM and project headers; it does not link LLVM's compiled implementation. `PRIVATE` applies these paths to MiniShield without exposing them as requirements for consumers."
-          },
-          {
-            "type": "paragraph",
-            "text": "**`target_link_libraries` — which libraries to link.**"
-          },
-          {
-            "type": "code",
-            "language": "cmake",
-            "text": "target_link_libraries(MiniShield PRIVATE LLVM)"
-          },
-          {
-            "type": "paragraph",
-            "text": "`LLVM` is an imported target supplied by `find_package(LLVM REQUIRED CONFIG)`. CMake uses its metadata to locate the existing LLVM shared library and construct MiniShield's link command. Target dependencies can also contribute usage requirements, such as include paths and compile definitions. Here, shared linking records a runtime dependency on LLVM instead of copying LLVM's implementation into the plugin. `PRIVATE` keeps LLVM out of MiniShield's public link interface."
-          },
-          {
-            "type": "paragraph",
-            "text": "**`set_target_properties` — configure named settings on the target.**"
-          },
-          {
-            "type": "code",
-            "language": "cmake",
-            "text": "set_target_properties(MiniShield PROPERTIES\n    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})"
-          },
-          {
-            "type": "paragraph",
-            "text": "The general form is `set_target_properties(<targets> PROPERTIES <name> <value>…)`. Here, `LIBRARY_OUTPUT_DIRECTORY` chooses where to write the built module; `${CMAKE_BINARY_DIR}` is the top-level build directory. Configuring with `cmake -S . -B build` and building with Ninja therefore produces `build/libMiniShield.so`. This changes the destination, not the filename or link dependencies. Multi-configuration generators may append a configuration subdirectory such as `Debug/`."
-          }
-        ]
-      },
-      {
-        "type": "deep",
         "title": "Why target-scoped `target_*` instead of `add_definitions` / `include_directories`?",
         "blocks": [
           {
@@ -875,79 +825,9 @@
             ]
           }
         ]
-      },
-      {
-        "type": "deep",
-        "title": "What does `separate_arguments` do?",
-        "blocks": [
-          {
-            "type": "paragraph",
-            "text": "CMake has no array type: a \"list\" is a string whose elements are separated by `;`. Two distinct representations therefore exist for \"several things\":"
-          },
-          {
-            "type": "code",
-            "language": "cmake",
-            "text": "set(X a b c)                    # stored as \"a;b;c\" — a 3-element list\nset(Y \"a b c\")                  # stored as ONE element containing spaces"
-          },
-          {
-            "type": "paragraph",
-            "text": "`LLVMConfig.cmake` defines `LLVM_DEFINITIONS` with the *second* form — one quoted, space-joined string (line 367):"
-          },
-          {
-            "type": "code",
-            "language": "text",
-            "text": "\"-D_GNU_SOURCE -D_GLIBCXX_USE_CXX11_ABI=1 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS\""
-          },
-          {
-            "type": "paragraph",
-            "text": "so it is a **1-element** \"list\". Passed as-is to `target_compile_definitions`, CMake would emit it as a *single* shell-quoted compiler argument — one giant \"macro name\" containing spaces and `=` — which the compiler rejects. What the compiler needs is separate `-D…` arguments."
-          },
-          {
-            "type": "paragraph",
-            "text": "`separate_arguments(<out> <mode> <in>)` fixes the representation by splitting on unquoted whitespace:"
-          },
-          {
-            "type": "code",
-            "language": "text",
-            "text": "before:  1 element(s) → '-D_GNU_SOURCE -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS'\nafter:   3 element(s) → -D_GNU_SOURCE;-D__STDC_FORMAT_MACROS;-D__STDC_LIMIT_MACROS"
-          },
-          {
-            "type": "paragraph",
-            "text": "The second argument selects the *quoting rules* used while splitting — it only matters when the string contains escaped quotes (CMake's internal command-line representation uses `\\\"`):"
-          },
-          {
-            "type": "table",
-            "rows": [
-              [
-                "Mode",
-                "Rules applied"
-              ],
-              [
-                "`NATIVE_COMMAND` (default)",
-                "conventions of the machine CMake runs on (Linux → Unix rules)"
-              ],
-              [
-                "`UNIX_COMMAND`",
-                "always Unix rules"
-              ],
-              [
-                "`WIN32_COMMAND`",
-                "always Windows rules (for strings captured from a Windows command line)"
-              ]
-            ]
-          },
-          {
-            "type": "paragraph",
-            "text": "With a quote-free string on Linux, all three behave identically, so `NATIVE_COMMAND` is just the portable default (and what the canonical LLVM docs snippet uses)."
-          },
-          {
-            "type": "paragraph",
-            "text": "**When you need it:** only when a variable is a *space-joined string* rather than a CMake list. Variables you create yourself (`set(X a b c)`) are already proper lists; `LLVM_DEFINITIONS` is the exception because the package author wrote it as one quoted string. Rule of thumb: before using a string *as a list* (foreach, `target_*` call, command arguments), know which of the two representations you're holding."
-          }
-        ]
       }
     ],
-    "words": 2787
+    "words": 2466
   },
   {
     "id": 3,
@@ -970,6 +850,10 @@
         "type": "code",
         "language": "text",
         "text": "-G Ninja: use Ninja as the generated build system.\n-S .: read the source project's CMakeLists.txt here.\n-B build: place generated files in build/.\nCMAKE_BUILD_TYPE: select Release settings.\nCMAKE_CXX_COMPILER: use this environment's C++ compiler.\nLLVM_DIR: locate this LLVM installation's CMake configuration."
+      },
+      {
+        "type": "paragraph",
+        "text": "The `export` line in the task is not a CMake option — it is the environment the compiler runs in. When Ninja links the plugin, conda's clang driver searches for libraries only in its default `-L` paths (the gcc-layout directories and the sysroot), and those do not include `$CONDA_PREFIX/lib`, where the environment's `libstdcxx` package installed `libstdc++.so` — the C++ standard library the plugin links against. `LIBRARY_PATH` adds that directory to the driver's link-time search. Without it, configuration and compilation succeed and the link step fails with `x86_64-conda-linux-gnu-ld: cannot find -lstdc++`. Note what it is not: not `LD_LIBRARY_PATH` (runtime library loading) and not `LLVM_DIR` (which tells CMake where to find `LLVMConfig.cmake`)."
       },
       {
         "type": "paragraph",
@@ -1017,7 +901,7 @@
         ]
       }
     ],
-    "words": 389
+    "words": 492
   },
   {
     "id": 4,
