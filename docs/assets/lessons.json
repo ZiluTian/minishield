@@ -797,9 +797,161 @@
             "text": "**When you need it:** only when a variable is a *space-joined string* rather than a CMake list. Variables you create yourself (`set(X a b c)`) are already proper lists; `LLVM_DEFINITIONS` is the exception because the package author wrote it as one quoted string. Rule of thumb: before using a string *as a list* (foreach, `target_*` call, command arguments), know which of the two representations you're holding."
           }
         ]
+      },
+      {
+        "type": "deep",
+        "title": "A hello-world CMakeLists to start from",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "The smallest CMakeLists.txt that does anything useful is three lines:"
+          },
+          {
+            "type": "code",
+            "language": "cmake",
+            "text": "cmake_minimum_required(VERSION 3.15)\nproject(HelloWorld CXX)\nadd_executable(hello main.cpp)"
+          },
+          {
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "`cmake_minimum_required` sets a version floor: CMake refuses to run if it is older than this.",
+              "`project(HelloWorld CXX)` names the project and enables the C++ compiler.",
+              "`add_executable` defines one target: a program. CMake compiles `main.cpp` and links `build/hello`."
+            ]
+          },
+          {
+            "type": "paragraph",
+            "text": "With that file, `cmake -S . -B build && cmake --build build` works and you run `./build/hello`. Notice what is not there: no package discovery, no compiler flags, no include paths, no link libraries, no output location. Every one of those omissions is possible because hello-world has no dependencies and produces a program that you run directly."
+          },
+          {
+            "type": "paragraph",
+            "text": "MiniShield's CMakeLists.txt has none of that by accident: every extra line exists because the project consumes a prebuilt third-party library and produces a plugin that `opt` loads, not a program you run."
+          }
+        ]
+      },
+      {
+        "type": "deep",
+        "title": "MiniShield's CMakeLists, line by line",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "The project's file makes four moves."
+          },
+          {
+            "type": "paragraph",
+            "text": "**Move 1 — pick the language and standard (lines 1–6).**"
+          },
+          {
+            "type": "code",
+            "language": "cmake",
+            "text": "cmake_minimum_required(VERSION 3.15)\nproject(MiniShield CXX)\nset(CMAKE_CXX_STANDARD 20)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_EXPORT_COMPILE_COMMANDS ON)"
+          },
+          {
+            "type": "paragraph",
+            "text": "Same opening as hello-world, plus decisions hello-world can skip: LLVM 23's headers require C++20, so the standard is pinned (`REQUIRED ON` makes a downgrade an error, not a warning), and `CMAKE_EXPORT_COMPILE_COMMANDS` writes `build/compile_commands.json` so clangd and IDEs can index the project."
+          },
+          {
+            "type": "paragraph",
+            "text": "**Move 2 — find LLVM (lines 10–12).**"
+          },
+          {
+            "type": "code",
+            "language": "cmake",
+            "text": "set(LLVM_LINK_LLVM_DYLIB ON)\nfind_package(LLVM REQUIRED CONFIG)\nmessage(STATUS \"Found llvm ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}\")"
+          },
+          {
+            "type": "paragraph",
+            "text": "Hello-world needs no packages; this project needs the prebuilt LLVM the Conda environment installed. `find_package(LLVM REQUIRED CONFIG)` locates the `LLVMConfig.cmake` that the configure step's `-DLLVM_DIR` points at; that file defines `LLVM_INCLUDE_DIRS`, `LLVM_DEFINITIONS`, and the imported `LLVM` target this file uses in the next moves. `REQUIRED` makes a missing LLVM a hard configure error instead of a later, mysterious failure."
+          },
+          {
+            "type": "paragraph",
+            "text": "**Move 3 — define the target (lines 16–22).**"
+          },
+          {
+            "type": "code",
+            "language": "cmake",
+            "text": "add_library(MiniShield MODULE\n    lib/Plugin.cpp\n    lib/FlatteningPass.cpp\n    lib/StatsPass.cpp\n    lib/CFGAnalyzer.cpp\n    lib/FunctionEligibility.cpp)"
+          },
+          {
+            "type": "paragraph",
+            "text": "This is the hello-world divergence in one keyword. Hello-world says `add_executable`: build a program with a `main()`. MiniShield says `add_library ... MODULE`: build a loadable shared library with no `main()`. Nothing links against MiniShield; `opt` `dlopen()`s it at run time. (`STATIC` would be an archive no one can `dlopen`; `SHARED` would declare a \"you may link me\" relationship that does not exist — see the `add_library` deep dive above.)"
+          },
+          {
+            "type": "paragraph",
+            "text": "**Move 4 — attach the requirements (lines 24–35).**"
+          },
+          {
+            "type": "code",
+            "language": "cmake",
+            "text": "separate_arguments(MS_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})\ntarget_compile_definitions(MiniShield PRIVATE ${MS_LLVM_DEFS})\ntarget_include_directories(MiniShield PRIVATE\n    ${LLVM_INCLUDE_DIRS}\n    ${CMAKE_CURRENT_SOURCE_DIR}/include)\ntarget_link_libraries(MiniShield PRIVATE LLVM)\nset_target_properties(MiniShield PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})"
+          },
+          {
+            "type": "paragraph",
+            "text": "Hello-world compiles against the standard library and needs none of this. The plugin has four requirements, all `PRIVATE` because nothing consumes MiniShield: the LLVM compile definitions (split into real `-D` flags first), the LLVM and project include directories, the link against the imported `LLVM` target — which is `libLLVM-23.so`, the same library `opt` already loads, so one LLVM per process — and a pinned output location so the plugin lands at `build/libMiniShield.so` where the `opt` commands in the README point."
+          },
+          {
+            "type": "paragraph",
+            "text": "**Side by side.**"
+          },
+          {
+            "type": "table",
+            "rows": [
+              [
+                "Question",
+                "hello-world",
+                "MiniShield"
+              ],
+              [
+                "Artifact",
+                "an executable — a program you run",
+                "a MODULE shared library — a plugin opt loads"
+              ],
+              [
+                "Who uses it",
+                "you, via `./build/hello`",
+                "`opt`, via `-load-pass-plugin` (`dlopen` at run time)"
+              ],
+              [
+                "`main()`?",
+                "required",
+                "none — a plugin is entered by opt, not by the OS"
+              ],
+              [
+                "Dependencies",
+                "the standard library only",
+                "LLVM 23, discovered by `find_package(LLVM REQUIRED CONFIG)`"
+              ],
+              [
+                "C++ standard",
+                "the compiler's default",
+                "C++20, forced — LLVM 23 headers require it"
+              ],
+              [
+                "Extra flags",
+                "none",
+                "`LLVM_DEFINITIONS` (split by `separate_arguments`) + LLVM include dirs"
+              ],
+              [
+                "Linking",
+                "implicit",
+                "`PRIVATE` against the imported `LLVM` target (`libLLVM-23.so`)"
+              ],
+              [
+                "Output",
+                "`build/hello`, by default",
+                "`build/libMiniShield.so`, pinned by `LIBRARY_OUTPUT_DIRECTORY`"
+              ]
+            ]
+          },
+          {
+            "type": "paragraph",
+            "text": "Every difference traces back to one sentence: hello-world produces a program you run, with no dependencies, while MiniShield produces a plugin opt loads that must match opt's exact LLVM release. The three-line file works because it has no decisions to make; the 35-line file is mostly the record of decisions it does."
+          }
+        ]
       }
     ],
-    "words": 2299
+    "words": 2787
   },
   {
     "id": 3,
