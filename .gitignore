@@ -1,0 +1,9 @@
+# Local build products and editor configuration.
+/build/
+/.clangd
+*.swp
+*.swo
+
+# Local runner and root-level IR scratch/output files.
+/test_all.sh
+/*.ll
