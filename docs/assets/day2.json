@@ -1,0 +1,504 @@
+{
+  "day": 2,
+  "title": "From inspection to transformation",
+  "status": "Published incrementally: context and PHI preparation are available. More lessons from our session are being added.",
+  "groups": [
+    {
+      "name": "Before mutation",
+      "label": "BACKGROUND",
+      "key": "context",
+      "description": "Recall SSA, dominance, and the memory operations introduced by the first transformations.",
+      "ids": [
+        27
+      ]
+    },
+    {
+      "name": "Collect and demote PHIs",
+      "label": "PHIS",
+      "key": "phi",
+      "description": "Start with a typed worklist, fix the push_back mismatch, and replace PHIs with memory operations.",
+      "ids": [
+        28,
+        29,
+        30
+      ]
+    }
+  ],
+  "lessons": [
+    {
+      "id": 27,
+      "day": 2,
+      "number": 0,
+      "title": "Before changing the IR",
+      "originalTitle": "Before changing the IR",
+      "summary": "Recall SSA and dominance, learn the memory operations we will introduce, and locate the exact boundary between inspection and transformation.",
+      "takeaway": "Changing IR means taking responsibility for both its structure and behavior.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "context",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Read this context before editing FlatteningPass. Day 1 built the plugin, statistics, CFG analysis, and eligibility checker. Day 2 starts changing eligible functions."
+        },
+        {
+          "type": "heading",
+          "text": "What are we trying to build?"
+        },
+        {
+          "type": "paragraph",
+          "text": "A dispatcher is a block that reads a state number and uses a switch to choose the next program block. Eventually, an original branch will become “store the destination state, then branch to the dispatcher.” We have not implemented that complete transformation yet."
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "original entry/setup → dispatcher → selected original block\n                           ↑                  |\n                           └──────────────────┘"
+        },
+        {
+          "type": "paragraph",
+          "text": "The original entry stays a one-time setup block. Its stack slots must not be allocated repeatedly in the dispatcher. Return and unreachable blocks finish their path instead of looping back."
+        },
+        {
+          "type": "heading",
+          "text": "Recall SSA and dominance"
+        },
+        {
+          "type": "paragraph",
+          "text": "An SSA value has one definition. That definition must dominate its uses: every reachable path from entry to a use passes through the definition. Adding dispatcher edges can create new paths that violate that relationship, even if the original program never had a problem."
+        },
+        {
+          "type": "heading",
+          "text": "The memory operations you will see"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "IR operation",
+              "Meaning"
+            ],
+            [
+              "alloca i32",
+              "Allocate space for one i32 in the current function’s stack frame; the result is a pointer."
+            ],
+            [
+              "store i32 %x, ptr %slot",
+              "Write %x into the storage addressed by %slot; the instruction produces no result."
+            ],
+            [
+              "%y = load i32, ptr %slot",
+              "Read an i32 from that address; the result is a new SSA value."
+            ],
+            [
+              "phi",
+              "Select an incoming value according to the predecessor edge used to enter the block."
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Demotion replaces selected SSA dependencies with stores and loads. “Register” here means an LLVM SSA, register-like value—not a guaranteed physical CPU register. The original arithmetic remains; the way its result reaches users changes."
+        },
+        {
+          "type": "heading",
+          "text": "Your starting template"
+        },
+        {
+          "type": "paragraph",
+          "text": "Edit the existing lib/FlatteningPass.cpp. Do not create a second run() definition. The eligibility guard from Day 1 stays at the top; every new mutation belongs after it."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"minishield/FlatteningPass.h\"\n#include \"minishield/FunctionEligibility.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\nnamespace minishield {\nllvm::PreservedAnalyses FlatteningPass::run(\n    llvm::Function &F, llvm::FunctionAnalysisManager &AM) {\n    if (F.isDeclaration())\n        return llvm::PreservedAnalyses::all();\n    const auto eligibility = FunctionEligibility::check(F);\n    if (!eligibility.eligible) {\n        llvm::errs() << \"[MiniShield] rejected: \" << F.getName()\n                     << \": \" << eligibility.reason << \"\\n\";\n        return llvm::PreservedAnalyses::all();\n    }\n    // TODO: add the current lesson's work here, after eligibility succeeds.\n    return llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
+        },
+        {
+          "type": "heading",
+          "text": "How to use the lessons"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Start with the template. Fill in each numbered step yourself.",
+            "Use the full implementation to compare only after trying the exercise. Snippets state where to insert them.",
+            "Run verify after each complete structural change. It checks valid IR, not equivalent program behavior.",
+            "A template containing TODOs is an exercise scaffold, not a claim that the transformation is finished."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why must eligibility run before mutation? Why is a successful verifier run weaker than proving that a transformation preserves behavior?"
+        }
+      ],
+      "words": 380,
+      "quiz": {
+        "q": "Why prepare SSA values before adding dispatcher edges?",
+        "choices": [
+          "Extra edges can break definition-to-use dominance",
+          "The verifier requires every function to use memory",
+          "PHIs are forbidden in all LLVM programs"
+        ],
+        "answer": 0,
+        "why": "PHIs are valid LLVM IR. It is our planned CFG restructuring that can invalidate existing SSA relationships."
+      }
+    },
+    {
+      "id": 28,
+      "day": 2,
+      "number": 1,
+      "title": "Collect PHIs without changing them",
+      "originalTitle": "Collect PHIs without changing them",
+      "summary": "Build a small worklist of PHI pointers, using mutable traversal and a checked downcast. Verify the count before introducing mutation.",
+      "takeaway": "Collect first; transform afterward.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "phi",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Collect PHI nodes in the existing FlatteningPass::run(), after the eligibility guard. This lesson does not modify IR."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// Insert after the eligibility guard.\nstd::vector<llvm::PHINode *> phis;\nfor (auto &BB : F) {\n    for (auto &I : BB) {\n        // TODO: check whether I is a PHI and append its typed pointer.\n    }\n}\n// TODO: report phis.size(). Keep the existing all() return for now."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Include the types and container"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/Instructions.h\"\n#include \"llvm/Support/Casting.h\"\n#include <vector>"
+        },
+        {
+          "type": "paragraph",
+          "text": "Instructions.h defines PHINode and other instruction subclasses. Casting.h supplies LLVM’s type checks. std::vector is a growable collection; this vector’s element type is PHINode*, not Instruction*."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Traverse existing instructions by reference"
+        },
+        {
+          "type": "paragraph",
+          "text": "F is a mutable Function&. Therefore auto &BB and auto &I refer to mutable existing blocks and instructions. Plain auto would try to copy objects; const auto & would prevent collecting the mutable PHI pointers needed by the later utility."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Keep the result of dyn_cast"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {\n    phis.push_back(phi);\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "dyn_cast returns a PHINode* when the instruction is a PHI, or nullptr otherwise. The if tests that pointer. push_back copies the pointer into the vector; it does not copy or take ownership of the instruction."
+        },
+        {
+          "type": "heading",
+          "text": "Step 4 — Print and preserve"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::errs() << \"Number of PHIs: \" << phis.size() << \"\\n\";"
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep PreservedAnalyses::all(): collecting pointers and printing a count leave IR unchanged. The existing function declaration and rejection returns also remain unchanged."
+        },
+        {
+          "type": "heading",
+          "text": "The full implementation of this insertion"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "std::vector<llvm::PHINode *> phis;\nfor (auto &BB : F) {\n    for (auto &I : BB) {\n        if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {\n            phis.push_back(phi);\n        }\n    }\n}\nllvm::errs() << \"Number of PHIs: \" << phis.size() << \"\\n\";"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -disable-output tests/ir/phi.ll"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Fixture",
+              "PHI count"
+            ],
+            [
+              "phi.ll",
+              "1"
+            ],
+            [
+              "loop.ll",
+              "1"
+            ],
+            [
+              "minishield-input.ll",
+              "0"
+            ]
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: What does the vector own? Why do we retain pointers rather than copies? What changes when a later utility deletes a PHI?"
+        }
+      ],
+      "words": 320,
+      "quiz": {
+        "q": "What does phis.push_back(phi) copy?",
+        "choices": [
+          "The entire PHI instruction",
+          "Only the pointer value",
+          "The function containing the PHI"
+        ],
+        "answer": 1,
+        "why": "LLVM owns the instruction. The vector keeps its address so a later pass stage can find it."
+      }
+    },
+    {
+      "id": 29,
+      "day": 2,
+      "number": 2,
+      "title": "Keep the typed pointer from dyn_cast",
+      "originalTitle": "Keep the typed pointer from dyn_cast",
+      "summary": "Understand the actual push_back error: a successful type test does not change the declared type of the original instruction.",
+      "takeaway": "A type check is useful only if you keep the typed result you need.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "phi",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: Fix the pointer-type mismatch encountered while collecting PHIs. Work in the inner instruction loop from the previous lesson."
+        },
+        {
+          "type": "heading",
+          "text": "The failing template"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (llvm::dyn_cast<llvm::PHINode>(&I)) {\n    phis.push_back(&I); // TODO: identify the mismatched argument type.\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Read the declared types"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Expression",
+              "Type"
+            ],
+            [
+              "I",
+              "llvm::Instruction&"
+            ],
+            [
+              "&I",
+              "llvm::Instruction*"
+            ],
+            [
+              "dyn_cast<PHINode>(&I)",
+              "llvm::PHINode* (or nullptr)"
+            ],
+            [
+              "One phis element",
+              "llvm::PHINode*"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "A PHINode derives from Instruction. Converting PHINode* to Instruction* is an upcast. The reverse needs a check: an arbitrary Instruction* might identify an add, branch, load, or return. A condition does not automatically narrow the C++ type of I."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Name the cast result"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);"
+        },
+        {
+          "type": "paragraph",
+          "text": "This does not allocate a PHI. It gives a more specific pointer to the same instruction if the type matches. The draft discarded this pointer and then pushed the original, less-specific &I."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Append only a successful cast"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use an if-initializer-style declaration in the condition so the typed pointer is available inside the body. A null pointer skips the body."
+        },
+        {
+          "type": "heading",
+          "text": "The full corrected fragment"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {\n    phis.push_back(phi);\n}"
+        },
+        {
+          "type": "debug",
+          "text": "Observed error: phis.push_back(&I) fails because the vector needs PHINode* but &I remains Instruction*. Saving the result as phi makes the argument type match."
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -disable-output tests/ir/phi.ll"
+        },
+        {
+          "type": "paragraph",
+          "text": "Compilation should succeed and the phi.ll count should still be 1. We have changed C++ bookkeeping, not LLVM IR."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why is &I later valid for a vector<Instruction*> but invalid here? Explain the difference between a runtime type test and the static type of an expression."
+        }
+      ],
+      "words": 245,
+      "quiz": {
+        "q": "Does a successful dyn_cast used only as an if condition retype I?",
+        "choices": [
+          "Yes, I becomes a PHINode reference",
+          "No; keep the returned PHINode pointer",
+          "Yes, but only inside the if body"
+        ],
+        "answer": 1,
+        "why": "I keeps its declared type. The returned pointer is the value with the more specific type."
+      }
+    },
+    {
+      "id": 30,
+      "day": 2,
+      "number": 3,
+      "title": "Demote PHIs after collection",
+      "originalTitle": "Demote PHIs after collection",
+      "summary": "Use LLVM’s per-PHI utility, understand why it must run after traversal, and recognize the changed IR and analysis-preservation decision.",
+      "takeaway": "The PHI disappears; incoming paths store and users load.",
+      "source": "lib/FlatteningPass.cpp",
+      "group": "phi",
+      "blocks": [
+        {
+          "type": "task",
+          "text": "Task: After collecting PHIs, replace each PHI with stack-based data flow. This is the first lesson that actually changes the program’s IR."
+        },
+        {
+          "type": "heading",
+          "text": "The template to start with"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// Keep the PHI collection from lesson 01 above this point.\nif (phis.empty())\n    return llvm::PreservedAnalyses::all();\nfor (auto *phi : phis) {\n    // TODO: demote this PHI using LLVM’s utility.\n}\n// TODO: report that cached analyses must be recomputed."
+        },
+        {
+          "type": "heading",
+          "text": "Step 1 — Include the transformation helper"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/Transforms/Utils/Local.h\""
+        },
+        {
+          "type": "paragraph",
+          "text": "The installed LLVM 23 API is a free function: DemotePHIToStack(PHINode*, optional insertion point). There is no DemotePHIToStack::runOnFunction(F) method. The default insertion behavior is enough for these study fixtures."
+        },
+        {
+          "type": "heading",
+          "text": "Step 2 — Process the saved pointers"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::DemotePHIToStack(phi);"
+        },
+        {
+          "type": "paragraph",
+          "text": "The utility allocates stack storage, arranges stores of incoming values and loads for users, and deletes the PHI. Do not dereference phi after this call. The vector still contains that address, but the instruction it identified no longer exists."
+        },
+        {
+          "type": "heading",
+          "text": "Step 3 — Invalidate after a change"
+        },
+        {
+          "type": "paragraph",
+          "text": "Return PreservedAnalyses::none() after demotion. Return all() if there were no PHIs and nothing changed. This early return is correct for this PHI-only checkpoint; a later lesson removes it when a second transformation stage must run even without PHIs."
+        },
+        {
+          "type": "heading",
+          "text": "The full implementation of this stage"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "std::vector<llvm::PHINode *> phis;\nfor (auto &BB : F) {\n    for (auto &I : BB) {\n        if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {\n            phis.push_back(phi);\n        }\n    }\n}\nllvm::errs() << \"Number of PHIs: \" << phis.size() << \"\\n\";\n\n// Replace the final all() return after the collection code.\nif (phis.empty())\n    return llvm::PreservedAnalyses::all();\nfor (auto *phi : phis) {\n    llvm::DemotePHIToStack(phi);\n}\nreturn llvm::PreservedAnalyses::none();"
+        },
+        {
+          "type": "heading",
+          "text": "Verify"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/phi.ll -o build/phi-demoted.ll\ncat build/phi-demoted.ll"
+        },
+        {
+          "type": "heading",
+          "text": "Expected data flow"
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "entry:  allocate %value.slot once\nleft:   store 10 into %value.slot\nright:  store 20 into %value.slot\njoin:   load %value.slot and return the loaded value"
+        },
+        {
+          "type": "paragraph",
+          "text": "Expect no PHI instruction, one slot for this PHI, stores in left and right, and a load for the return in join. Actual generated names can differ. The original branch structure remains."
+        },
+        {
+          "type": "debug",
+          "text": "Observed error: Do not delete PHIs while using an ordinary loop over the same instruction list. Collecting first avoids using an invalidated iterator."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Trace both outcomes of the condition. Which store executes? What does join load? Why must changing IR invalidate cached analyses?"
+        }
+      ],
+      "words": 376,
+      "quiz": {
+        "q": "Why collect PHIs before demoting them?",
+        "choices": [
+          "The utility deletes the PHI and can invalidate ordinary traversal",
+          "A vector is required by the LLVM API",
+          "PHIs have no operands until put into a vector"
+        ],
+        "answer": 0,
+        "why": "Demotion mutates the instruction list. A worklist separates discovery from deletion."
+      }
+    }
+  ]
+}

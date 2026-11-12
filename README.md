@@ -7,6 +7,9 @@ eligibility. The flattening pass is still a diagnostic stub.
 **[Read the Day 1 book](https://zilutian.github.io/minishield/)** — step-by-step
 lessons, diagrams, code, explanations, and checkpoints. The editable teaching
 source is [day1](day1); the roadmap is [PLAN.md](PLAN.md).
+[Day 2: transformations](https://zilutian.github.io/minishield/#day2) adds
+PHI and cross-block value demotion, then dispatcher construction. Its teaching
+notes are in [day2](day2).
 
 ## Set up the environment
 

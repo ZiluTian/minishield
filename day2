@@ -1,0 +1,785 @@
+MiniShield — Day 2: the step-by-step teaching guide
+Recorded from the study session on 2026-11-12
+
+How to use this guide
+====================
+
+The learner writes the implementation. These notes are updated as lessons
+and code reviews happen in the conversation, including errors, explanations,
+and checks. Exercises and proposed next steps are distinguished from work
+that has been verified. Each exercise introduces one change,
+explains the types and behavior involved, and supplies a check before the
+next step. This guide continues day1, starting with PHI demotion.
+
+
+1. Collect PHI nodes before modifying them
+=========================================
+
+The flattening pass currently checks eligibility without changing IR. The
+first exercise is to collect pointers to PHI instructions in an eligible
+function. Do this after the eligibility check succeeds.
+
+Include llvm/IR/Instructions.h, llvm/Support/Casting.h, and <vector>.
+Declare a collection of pointers to the instructions we intend to demote:
+
+  std::vector<llvm::PHINode *> phis;
+
+Traverse the function using mutable references:
+
+  for (auto &BB : F) {
+      for (auto &I : BB) {
+          // Identify PHIs and collect their pointers.
+      }
+  }
+
+F is a mutable Function reference, so BB refers to an existing mutable
+BasicBlock and I refers to an existing mutable Instruction. Using const
+references would give pointers to const instructions, unsuitable for the
+later modifying operation.
+
+For each instruction, dyn_cast<llvm::PHINode>(&I) checks whether it is a
+PHI. Store the returned pointer and append it only when non-null:
+
+  if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
+      phis.push_back(phi);
+  }
+
+After both loops, print phis.size(). Keep returning
+PreservedAnalyses::all() at this stage because collection changes no IR.
+
+Rebuild and run:
+
+  cmake --build build
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-flatten),verify' \
+    -disable-output tests/ir/phi.ll
+
+Expected PHI counts:
+
+  phi.ll                1
+  loop.ll               1
+  minishield-input.ll   0
+
+These are collection checks, not evidence that demotion has occurred.
+
+
+2. Diagnose the push_back pointer-type mismatch
+==============================================
+
+The learner initially wrote:
+
+  if (llvm::dyn_cast<llvm::PHINode>(&I)) {
+      phis.push_back(&I);
+  }
+
+The condition correctly checks whether the instruction is a PHI, but the
+push_back argument still has the wrong C++ type.
+
+Read the types separately:
+
+  I                    llvm::Instruction &
+  &I                   llvm::Instruction *
+  phis element type    llvm::PHINode *
+
+PHINode derives from Instruction. A PHINode pointer can be converted to an
+Instruction pointer, but an arbitrary Instruction pointer cannot implicitly
+be converted to a PHINode pointer. It might refer to an add, branch, return,
+or another instruction type.
+
+Calling dyn_cast in a condition does not change the declared type of I or
+the type of the expression &I. C++ does not narrow that expression merely
+because the check succeeded. In the first version, the useful PHINode
+pointer returned by dyn_cast was discarded.
+
+Keep that returned pointer instead:
+
+  if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
+      phis.push_back(phi);
+  }
+
+Now phi has type llvm::PHINode *, exactly matching the vector's element
+type. The if condition tests that pointer: non-null enters the body;
+nullptr skips it. The variable phi is available inside the if body.
+
+No instruction is copied or newly allocated. I and *phi refer to the same
+underlying instruction; phi provides access through its more specific PHI
+type. Appending phi copies the pointer into the vector, not the instruction.
+
+Checkpoint: explain why phis.push_back(&I) fails, why phis.push_back(phi)
+succeeds, and why a successful type check does not retype the original
+variable. Distinguish the instruction object from a pointer used to access it.
+
+
+3. Next exercise: demote after collection finishes
+=================================================
+
+After the collection checks pass, the next step is to include
+llvm/Transforms/Utils/Local.h and invoke llvm::DemotePHIToStack(phi) for each
+collected pointer. This is a free function taking one PHI pointer, not a
+DemotePHIToStack::runOnFunction(F) method.
+
+Collect first and transform afterward. DemotePHIToStack deletes the PHI it
+processes; modifying the instruction list during ordinary traversal can
+invalidate the iterator. Do not dereference a collected PHI pointer after
+its node has been demoted.
+
+Once IR changes, return PreservedAnalyses::none() unless specific analyses
+are explicitly maintained. If there are no PHIs and nothing changes, return
+PreservedAnalyses::all(). The implementation and verification of that
+transformation are the next exercise, not completed work in these notes.
+
+
+4. Find values used outside their defining block
+===============================================
+
+After PHI demotion works, inspect the demoted loop fixture. A PHI becomes
+memory operations, but the result of a load can still be used across blocks:
+
+  header:
+    %i.reload = load i32, ptr %i.reg2mem
+
+In loop.ll, i.reload is also used in body and exit. Currently header
+dominates those uses. A future dispatcher could introduce paths to those
+blocks that bypass header, breaking that dominance relationship.
+
+Lesson: removing PHIs does not remove all cross-block SSA dependencies.
+Before building the dispatcher, identify the remaining values that escape
+their defining blocks. The exercise is to collect them, not yet transform
+them.
+
+After PHI demotion, declare:
+
+  std::vector<llvm::Instruction *> escapingValues;
+
+Traverse the function again using mutable block and instruction references.
+Skip instructions with void result type and AllocaInst instructions for this
+exercise. Then collect instructions for which this expression is true:
+
+  I.isUsedOutsideOfBlock(&BB)
+
+Print each collected instruction's name. For the current demoted loop.ll,
+expect i.reload. The stack allocation is deliberately excluded; keeping
+stack storage in the true entry block is part of the dispatcher design.
+This temporary exclusion is not a general proof that every possible alloca
+is safe to move or flatten.
+
+Do not return early just because phis.empty(). Functions without PHIs can
+still contain cross-block values that need inspection. Record whether PHI
+demotion changed the IR, for example:
+
+  bool changed = !phis.empty();
+
+At the end, return PreservedAnalyses::none() if IR changed; otherwise return
+PreservedAnalyses::all(). Merely collecting escapingValues changes nothing.
+Once later transformations modify IR, include those changes in the decision.
+
+Checkpoint: identify the definition of i.reload and its uses in other blocks.
+Explain why a dispatcher can invalidate dominance even after PHIs disappear.
+
+
+5. Check an instruction's result type for void
+============================================
+
+The learner asked how to identify instructions that do not produce values.
+Use:
+
+  I.getType()->isVoidTy()
+
+I.getType() returns a pointer to the instruction's result Type. isVoidTy()
+tests whether that result type is void. Inside the instruction loop:
+
+  if (I.getType()->isVoidTy())
+      continue;
+
+continue advances to the next iteration of the inner instruction loop.
+It does not leave the function or skip all remaining blocks.
+
+Compare these result types:
+
+  %x = add i32 %a, %b          i32
+  %p = alloca i32             ptr
+  store i32 %x, ptr %p        void
+  br label %next             void
+  ret i32 %x                 void
+
+The last example is important. ret i32 %x returns a value from the function,
+but the ret instruction itself produces no value for another instruction
+to use. Its result type is void. Do not confuse an instruction's result
+type with an operand's type or the enclosing function's return type.
+
+Checkpoint: explain why a store and a return are skipped, while an integer
+addition can be a candidate for cross-block value demotion.
+
+
+6. Recognize alloca and choose isa versus dyn_cast
+================================================
+
+The learner next asked how to recognize AllocaInst. Use LLVM's type test:
+
+  if (llvm::isa<llvm::AllocaInst>(I))
+      continue;
+
+An alloca instruction produces a pointer to allocated stack storage. Its
+result type is ptr, not void, so the void check alone does not exclude it.
+
+Combine the two filters when collecting escaping values:
+
+  if (I.getType()->isVoidTy() ||
+      llvm::isa<llvm::AllocaInst>(I))
+      continue;
+
+Then apply isUsedOutsideOfBlock(&BB) to the remaining instructions and
+append their addresses to escapingValues when the test succeeds.
+
+Choose the LLVM casting helper according to what the code needs:
+
+  isa<T>(I)
+    Returns a boolean: is this instruction a T?
+    Appropriate here because the filter only needs to recognize alloca.
+
+  dyn_cast<T>(&I)
+    Returns a pointer to T when the type matches, or nullptr otherwise.
+    Appropriate in PHI collection because the vector needs a PHINode pointer.
+
+Include llvm/IR/Instructions.h for the instruction classes and
+llvm/Support/Casting.h for the casting helpers. The learner already added
+these during the PHI collection exercise.
+
+Checkpoint: explain why alloca survives the void-result filter, why isa is
+sufficient to skip it, and why PHI collection instead kept dyn_cast's result.
+
+The next exercise is to review escapingValues, then use DemoteRegToStack
+to replace suitable cross-block instruction values with memory accesses.
+That transformation has not been implemented by these teaching notes.
+
+
+7. Review the collection loop and remove the premature return
+===========================================================
+
+At the next code review, the void/alloca filter was present, but the loop
+did not yet collect anything after the filter. Declaring escapingValues
+and skipping unsuitable instructions does not append the remaining values.
+
+Immediately after the filter, add:
+
+  if (I.isUsedOutsideOfBlock(&BB)) {
+      escapingValues.push_back(&I);
+  }
+
+Unlike the earlier PHI vector, this vector stores Instruction pointers.
+Here &I already has exactly the required type, llvm::Instruction *. No
+downcast is necessary. The PHI vector needed the PHINode pointer returned
+by dyn_cast because its element type was more specific.
+
+The review also found the earlier unchanged-case return still present:
+
+  if (phis.empty())
+      return llvm::PreservedAnalyses::all();
+
+Remove that early return when adding cross-block processing. A function
+without PHIs can still have an instruction value used in another block,
+so this return would bypass the new stage entirely.
+
+Record whether PHI demotion changes IR before processing the PHI vector:
+
+  bool changed = !phis.empty();
+
+The PHI loop naturally does nothing when the vector is empty. Continue
+into escaping-value collection for every eligible function. At the end,
+while this new stage only collects values, return:
+
+  return changed ? llvm::PreservedAnalyses::none()
+                 : llvm::PreservedAnalyses::all();
+
+Print the collected names to inspect the result:
+
+  for (const auto *value : escapingValues) {
+      llvm::errs() << "cross-block value: " << value->getName() << "\n";
+  }
+
+For the existing loop.ll after PHI demotion, expect i.reload. These name
+diagnostics are a learning aid: LLVM instructions are not required to have
+names, so future automated checks should not rely solely on them.
+
+Checkpoint: explain why &I is correct for escapingValues.push_back but
+was not correct for phis.push_back. Verify the collection before adding
+another mutation step.
+
+
+8. Preview the next transformation: demote escaping instruction values
+=====================================================================
+
+Once the completed collection has been checked, iterate the collected
+pointers after traversal and use the utility already declared by
+llvm/Transforms/Utils/Local.h:
+
+  llvm::DemoteRegToStack(*value);
+
+The first parameter is Instruction &, whereas DemotePHIToStack takes a
+PHINode *. Dereference the stored Instruction pointer with *value to pass
+the existing instruction by reference. This does not copy the instruction.
+
+Record that IR changed whenever a value is demoted. The final preservation
+decision must cover both PHI demotion and escaping-value demotion. Do not
+modify the instruction list inside the collection loop.
+
+This remains the next exercise. The current code review identified an
+incomplete collection loop; it did not establish that this second demotion
+stage had been implemented or tested.
+
+
+9. Demote the collected cross-block values
+=========================================
+
+The next review found the collection completed: the premature PHI-empty
+return was removed, void and alloca instructions were filtered, and
+isUsedOutsideOfBlock(&BB) guarded escapingValues.push_back(&I). The pass
+still only demoted PHIs; collecting the other values had not transformed
+them yet.
+
+Next exercise: after escaping-value collection has finished, add:
+
+  for (auto *value : escapingValues) {
+      llvm::DemoteRegToStack(*value);
+  }
+
+The vector stores Instruction pointers. This utility accepts an Instruction
+reference, so *value accesses the existing instruction that the pointer
+identifies. The Local.h header is already included.
+
+The utility creates stack storage and stores the instruction's result,
+then replaces uses with loads. This prepares cross-block data flow for
+later CFG rewriting. It does not construct the dispatcher or rewrite the
+original branch structure.
+
+Update the changed decision to account for both transformations:
+
+  bool changed = !phis.empty() || !escapingValues.empty();
+
+Return PreservedAnalyses::none() when changed is true, and all() otherwise.
+Checking only the PHI vector would incorrectly preserve analyses for a
+function with no PHIs but with cross-block instruction values.
+
+Rebuild and inspect the demoted loop fixture:
+
+  cmake --build build
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-flatten),verify' \
+    -S tests/ir/loop.ll -o build/loop-demoted.ll
+
+  cat build/loop-demoted.ll
+
+Expect no PHI instructions and additional stack operations. The value
+previously named i.reload should no longer be used directly from body or
+exit; uses obtain the value through loads. Names and exact load counts
+are implementation details, so inspect the data flow rather than matching
+an invented exact output. Verification must succeed.
+
+Also write tests/ir/cross-block.ll to exercise the case without any PHIs:
+
+  define i32 @cross_block(i32 %x) {
+  entry:
+    %sum = add i32 %x, 1
+    br label %exit
+  exit:
+    ret i32 %sum
+  }
+
+The sum is defined in entry but used in exit. Even though the PHI count is
+zero, this value should be demoted and changed must be true. The intended
+result stores sum into a stack slot and returns a load from that slot in
+exit. This fixture guards against the earlier premature-return bug.
+
+Checkpoint: explain why the second utility needs *value, why both vectors
+affect invalidation, and why zero PHIs does not imply unchanged IR. The
+second demotion stage and new fixture remain learner implementation work
+until they have been written and checked.
+
+
+10. Explain what demoting a collected value actually does
+========================================================
+
+The learner asked what demoting the collected values means. Distinguish
+the C++ collection from the IR it identifies: escapingValues is a vector
+of pointers to instructions. DemoteRegToStack rewrites the LLVM IR for each
+pointed-to instruction; it does not turn the C++ vector into stack storage.
+
+Start with this function:
+
+  define i32 @cross_block(i32 %x) {
+  entry:
+    %sum = add i32 %x, 1
+    br label %exit
+  exit:
+    ret i32 %sum
+  }
+
+The instruction in entry defines sum, but exit directly uses that SSA
+value. Demoting sum conceptually produces the following IR; exact generated
+names may differ:
+
+  define i32 @cross_block(i32 %x) {
+  entry:
+    %sum.slot = alloca i32
+    %sum = add i32 %x, 1
+    store i32 %sum, ptr %sum.slot
+    br label %exit
+  exit:
+    %sum.loaded = load i32, ptr %sum.slot
+    ret i32 %sum.loaded
+  }
+
+The calculation remains. Its result is stored into a stack slot, and the
+consumer reads that slot with a load instead of directly referencing the
+original SSA result from another block. The stack-slot pointer still crosses
+blocks; its allocation must remain in an entry block that dominates its uses.
+
+This is why the step helps prepare for flattening. Rewriting control flow
+through a dispatcher may break dominance for values originally defined in
+one block and used in another. Memory provides a way to carry those values
+along the intended execution path without that direct SSA use across blocks.
+The dispatcher must still preserve execution order so stores happen before
+the corresponding loads. Demotion alone does not prove a future dispatcher
+correct.
+
+Here register means an LLVM SSA, register-like value. It does not promise
+that the original value occupied a particular physical CPU register. The
+resulting alloca/load/store representation can be optimized again later.
+
+Checkpoint: identify what stays unchanged (the addition), what is added
+(the slot, store, and load), and why ret now uses sum.loaded instead of sum.
+
+
+11. Compare PHI demotion with ordinary value demotion
+===================================================
+
+The learner next asked how PHI demotion differs. A PHI chooses its result
+according to the edge used to enter its block, rather than performing an
+ordinary calculation such as addition. In the diamond fixture:
+
+  join:
+    %value = phi i32 [ 10, %left ], [ 20, %right ]
+    ret i32 %value
+
+Entering join from left selects 10. Entering from right selects 20. A PHI
+is not a runtime conditional instruction written as an if statement; it
+expresses an SSA merge whose choice follows the incoming control-flow edge.
+
+DemotePHIToStack replaces that merge with memory operations. For this simple
+fixture, the conceptual transformed function is:
+
+  define i32 @merge(i1 %condition) {
+  entry:
+    %value.slot = alloca i32
+    br i1 %condition, label %left, label %right
+  left:
+    store i32 10, ptr %value.slot
+    br label %join
+  right:
+    store i32 20, ptr %value.slot
+    br label %join
+  join:
+    %value.loaded = load i32, ptr %value.slot
+    ret i32 %value.loaded
+  }
+
+Exact generated names may differ. The slot is allocated in entry. Incoming
+paths store their selected values before the merge block reads the slot.
+The utility replaces PHI uses with loads and deletes the original PHI.
+Here there is one return use and one load; more complicated use patterns
+may produce different load placement or counts.
+
+Compare the two transformations:
+
+  DemoteRegToStack(*value)
+    The ordinary value-producing instruction remains, for example add.
+    Store its computed result and replace its uses with loads.
+
+  DemotePHIToStack(phi)
+    The PHI is removed. Stores on incoming paths represent its selection,
+    and loads supply the selected value to its former users.
+
+Both use memory to carry values, but the stored values come from different
+places: an ordinary instruction's computed result versus a PHI's incoming
+values selected by control flow. Function eligibility must already have
+passed, and the eventual dispatcher must preserve the intended path order.
+
+Checkpoint: trace condition=true through left and condition=false through
+right. Identify which store executes and what join loads on each path.
+Explain why only removing PHIs can still leave ordinary cross-block SSA
+values, such as the i.reload result found in the loop fixture.
+
+
+12. Verify demotion and assign dispatcher state IDs
+==================================================
+
+The follow-up review found both transformation loops implemented, with
+changed accounting for both collections. The plugin was rebuilt, and
+minishield-flatten followed by verify succeeded on tests/ir/loop.ll.
+
+The generated IR showed two stack slots: one for the PHI and one for the
+cross-block load result. header stores i.reload into the second slot;
+body and exit each read that slot instead of directly using the header's
+instruction result. No PHI remained. This confirms the observed structure
+and verifier result, not a proof of behavior for every possible input IR.
+
+Next exercise: assign integer state IDs without changing control flow yet.
+Keep the existing function entry block as a one-time setup block. Its
+allocations and initialization must not run again on every dispatcher
+iteration. The dispatcher will route execution among the other blocks.
+
+The intended shape is:
+
+  original entry/setup -> dispatcher -> selected original block
+                              ^                  |
+                              +------------------+
+
+Return and unreachable blocks terminate instead of looping back. The
+dispatcher switch and terminator rewriting will be later steps; assigning
+IDs alone must not change the CFG.
+
+After demotion, introduce these containers in FlatteningPass::run():
+
+  std::vector<llvm::BasicBlock *> stateBlocks;
+  llvm::DenseMap<llvm::BasicBlock *, unsigned> stateIDs;
+
+Include llvm/ADT/DenseMap.h. Obtain the actual entry block with
+&F.getEntryBlock(), then iterate the function in its existing block order.
+Skip that entry block. For every remaining block, assign the next ID
+starting at zero, save its pointer in stateBlocks, and record the mapping
+in stateIDs. Use pointer identity rather than block names.
+
+Print mappings by iterating stateBlocks, not by iterating DenseMap. The
+vector preserves the selected block order; DenseMap iteration order is
+not a stable presentation order.
+
+For phi.ll, expect:
+
+  state 0 -> left
+  state 1 -> right
+  state 2 -> join
+
+For loop.ll, expect:
+
+  state 0 -> header
+  state 1 -> body
+  state 2 -> exit
+
+The entry block gets no state in this design. The eventual entry terminator
+must select the correct successor state; do not assume every entry always
+starts state zero. A conditional entry can choose different states.
+
+Checkpoint: explain why setup executes once, why lookup keys are pointers,
+why the vector is used to print IDs, and why assigning IDs changes no IR.
+State IDs, the dispatcher, and terminator rewriting remain learner exercises
+until they have been implemented and checked.
+
+
+13. Review pointer keys and DenseMap insertion
+=============================================
+
+The first state-mapping draft mixed a BasicBlock reference with a pointer
+in three places. In for (auto &BB : F), BB is a reference to a block.
+entry_ptr is a BasicBlock pointer, and both containers store block pointers.
+
+Compare pointer identity using the block's address:
+
+  if (entry_ptr == &BB)
+      continue;
+
+Append the same address to the pointer vector:
+
+  stateBlocks.push_back(&BB);
+
+Record the ID using the pointer as the map key:
+
+  stateIDs[&BB] = id;
+
+Alternatively, insert a key/value pair with braces:
+
+  stateIDs.insert({&BB, id});
+
+The draft stateIDs.insert(<BB, id>) was not valid C++ pair construction.
+Angle brackets are used for template arguments in declarations such as
+DenseMap<BasicBlock *, unsigned>; braces construct the pair passed to insert.
+Choose one insertion form, then increment id once for each non-entry block.
+
+When printing, the vector elements are already pointers:
+
+  for (auto *BB : stateBlocks) {
+      llvm::errs() << "state " << stateIDs.lookup(BB)
+                   << " -> " << BB->getName() << "\n";
+  }
+
+Use getName() rather than streaming the pointer when a block label is the
+intended output. Copying the vector's pointer element does not copy the
+BasicBlock, so a reference variable is unnecessary in this loop.
+
+Keep lookup pointers compatible with the map's BasicBlock * key type.
+Writing const auto *BB would instead make BB a pointer to const BasicBlock,
+which does not implicitly convert to the map's mutable pointer key type.
+The original const auto BB form makes the copied pointer itself const,
+not the pointed-to block; it is different from const auto *BB.
+
+Checkpoint: explain why &BB is needed while iterating F, but BB is already
+the correct key while iterating stateBlocks. Rebuild and confirm the three
+expected state mappings before adding any dispatcher blocks.
+
+
+14. Construct a complete but unconnected dispatcher
+=================================================
+
+The corrected state mapping was reviewed and run on phi.ll. It printed
+left=0, right=1, join=2 and passed verification. Next, build the dispatcher
+without connecting the original control flow to it yet.
+
+Include llvm/IR/IRBuilder.h. Keep stateBlocks as the snapshot collected
+before adding any new blocks; the dispatcher and invalid-state block must
+not receive ordinary state IDs.
+
+Move the existing changed declaration before the new construction code.
+For functions with nonempty stateBlocks, create an i32 stack slot in the
+original entry block:
+
+  llvm::IRBuilder<> setup(&*entry_ptr->getFirstInsertionPt());
+  auto *stateSlot = setup.CreateAlloca(setup.getInt32Ty(), nullptr, "ms.state");
+
+getFirstInsertionPt() supplies an iterator. Dereference it to obtain an
+instruction, then take its address to give the builder an insertion point.
+The new allocation executes once because the original entry remains setup.
+
+Append blocks named ms.dispatch and ms.invalid using BasicBlock::Create,
+passing F.getContext(), the block name, and &F. Do not insert either before
+the actual entry. A block created this way starts empty and must receive a
+terminator before verification.
+
+Use a builder for ms.invalid and call CreateUnreachable(). Use a builder
+for ms.dispatch to create an i32 load from stateSlot, then a switch whose
+condition is that load and whose default destination is ms.invalid:
+
+  auto *current = dispatchBuilder.CreateLoad(
+      dispatchBuilder.getInt32Ty(), stateSlot, "ms.current");
+  auto *dispatchSwitch = dispatchBuilder.CreateSwitch(
+      current, invalidBlock, stateBlocks.size());
+
+The last argument reserves space for cases; it does not create them.
+For every original state block, add its mapping:
+
+  dispatchSwitch->addCase(
+      dispatchBuilder.getInt32(stateIDs.lookup(BB)), BB);
+
+Record changed=true whenever the new slot and blocks are created. Preserve
+the existing conditional return of none() or all(); do not redeclare changed
+at the end in a way that discards this new mutation. Skip dispatcher creation
+when stateBlocks is empty.
+
+Keep the original terminators unchanged in this stage. The dispatcher is
+unreachable from the original entry, so its state load is not executed.
+There is deliberately no initial state store yet: the entry terminator must
+later choose the state corresponding to its actual successor, not blindly
+assume state zero.
+
+Rebuild, run minishield-flatten followed by verify on phi.ll, and inspect
+the text output. Expect the state slot, a dispatcher load and switch with
+cases 0->left, 1->right, 2->join, and an invalid block ending in unreachable.
+Original branches still form the original diamond. This is a construction
+checkpoint, not a completed flattening transformation.
+
+
+15. Review BasicBlock creation: C++ variables versus LLVM names
+=============================================================
+
+The first dispatcher draft failed compilation. It declared objects using
+ms.dispatch and ms.invalid as though dotted LLVM block names were C++
+variable names, then attempted to take their addresses.
+
+A dot is a member-access operator in C++, not a character allowed inside a
+variable identifier. An LLVM block's display name is a string argument to
+the creation function. BasicBlock::Create returns a BasicBlock pointer;
+store that pointer directly rather than constructing a BasicBlock value:
+
+  auto *dispatcher = llvm::BasicBlock::Create(
+      F.getContext(), "ms.dispatch", &F);
+  auto *invalidBlock = llvm::BasicBlock::Create(
+      F.getContext(), "ms.invalid", &F);
+
+Here dispatcher and invalidBlock are C++ pointer variables. ms.dispatch
+and ms.invalid are string names attached to LLVM IR blocks. The function
+owns the inserted blocks. No separate &ms.dispatch or &ms.invalid variables
+are needed, and the placeholder name argument must be replaced by actual
+string literals.
+
+The draft also left the invalid block empty. Before running the verifier,
+give it a terminator:
+
+  llvm::IRBuilder<> invalidBuilder(invalidBlock);
+  invalidBuilder.CreateUnreachable();
+
+The switch already terminates the dispatcher block. The invalid block
+requires its own unreachable terminator; a switch pointing to the block
+does not terminate that destination block.
+
+Construct the dispatcher builder directly from its pointer:
+
+  llvm::IRBuilder<> dispatchBuilder(dispatcher);
+
+The draft &*dispatcher expression reduces to the same pointer, but is
+unnecessary here. Contrast it with &*entry_ptr->getFirstInsertionPt():
+that expression starts from an iterator, so dereferencing and taking an
+address is how the earlier example obtains an Instruction pointer.
+
+The state slot, switch cases, and changed=true logic were present in the
+draft. Fix the creation statements and invalid-block terminator, rebuild,
+then run the verifier. The failed build did not produce a new plugin, so
+running an older existing shared library would not validate this draft.
+
+Checkpoint: distinguish a C++ identifier, a BasicBlock pointer, and an
+LLVM block name string. Explain why every new block needs its own terminator.
+
+
+16. Verify the dispatcher and connect an unconditional entry
+==========================================================
+
+The corrected construction compiled. Running minishield-flatten followed
+by verify on phi.ll showed an entry state allocation, an ms.dispatch switch
+with states 0->left, 1->right, 2->join, and ms.invalid ending in unreachable.
+The dispatcher had no predecessors, as intended for the construction stage.
+
+Next exercise: connect only an unconditional entry branch first. Use loop.ll,
+whose original entry branches to header. Its header state is zero. Leave
+conditional entry branches and other entry terminators unchanged for now.
+
+Place the rewriting code inside the existing nonempty-stateBlocks branch,
+after constructing the dispatcher, while stateSlot and dispatcher remain
+in scope. Save the original entry terminator pointer, then construct an
+IRBuilder using that instruction as the insertion point.
+
+Switch on the saved terminator's opcode. For Instruction::UncondBr, obtain
+its successor with getSuccessor(0), look up that block's state ID, create an
+i32 constant with the builder's getInt32(), and emit a store to stateSlot.
+Then emit a branch to dispatcher and erase the saved old terminator with
+eraseFromParent(). End the case with break. The default case does nothing
+at this stage, leaving unsupported-yet entry forms as they were.
+
+The intended entry ending in loop.ll becomes:
+
+  store i32 0, ptr %ms.state
+  br label %ms.dispatch
+
+Create the replacement instructions before deleting the old branch. The
+old successor is needed to choose the state, and the old instruction also
+provides the builder's insertion point. Do not use the erased pointer after
+deletion, and never leave the block with both old and new terminators.
+
+Rebuild, then run the pass followed by verify on tests/ir/loop.ll and inspect
+the generated text. Expect ms.dispatch to acquire entry as a predecessor.
+The other original blocks still branch directly to each other: only the
+first hop now passes through the dispatcher. This is not full flattening.
+The existing changed=true from dispatcher construction already covers this
+additional mutation.
+
+Checkpoint: explain why storing the successor ID must precede the branch,
+why zero is correct for this fixture but not a universal initializer, and
+why conditional entries require a separate successor-selection step next.
