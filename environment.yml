@@ -1,0 +1,12 @@
+name: minishield
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - clang=23.1.5
+  - lld=23.1.5
+  - llvmdev=23.1.5
+  - gtest=1.18.0
+  - cmake>=3.15
+  - ninja
+  - libstdcxx-devel_linux-64=16.2.0
