@@ -1,0 +1,953 @@
+MiniShield — Day 1: the step-by-step teaching guide
+Recorded from the study session on 2026-11-11
+
+How to use this guide
+====================
+
+The learner writes the C++ and shell scripts. The guide supplies small
+exercises, explanations, checks, and debugging hints. Read one step, make
+the change yourself, and check the result before moving on.
+
+These notes describe the installed LLVM/Clang 23.1.5 environment. LLVM APIs
+change: when an example conflicts with a compiler error, inspect this
+environment's headers rather than assuming an older tutorial still applies.
+
+At this point, the plugin skeleton and instruction statistics are working.
+Successor traversal has been added to the statistics pass. CFGAnalyzer.h
+has been drafted; implementing, registering, and consuming that analysis
+are the next exercises. Control-flow flattening is still a diagnostic stub.
+
+
+1. Understand what CMake is configuring
+======================================
+
+Task: read CMakeLists.txt and identify the target named MiniShield.
+
+add_library(MiniShield MODULE ...) describes a loadable plugin. The listed
+.cpp files are compiled and linked into build/libMiniShield.so. The MODULE
+library is loaded by opt at runtime through -load-pass-plugin.
+
+We separated three CMake questions:
+
+  target_include_directories: where does the compiler search for headers?
+  target_link_libraries: which compiled libraries does the target depend on?
+  set_target_properties: which named settings apply to the target?
+
+In this project, the include directories contain LLVM's headers and our own
+include/ directory. Linking to LLVM uses an imported target supplied by
+find_package(LLVM REQUIRED CONFIG). That target describes an existing shared
+library; our project does not build LLVM itself.
+
+LIBRARY_OUTPUT_DIRECTORY chooses where the plugin is written. With Ninja
+and the current configuration, that is build/libMiniShield.so.
+
+PRIVATE means a requirement applies to MiniShield without advertising it
+as a requirement for consumers. PUBLIC applies to both; INTERFACE applies
+to consumers. MiniShield's plugin dependencies are private.
+
+Checkpoint: explain why finding a header and linking a library are separate
+operations. Including a declaration does not supply compiled implementation.
+
+
+2. Generate the build instructions before trying to build
+========================================================
+
+Task: from the project root, activate the environment and configure CMake:
+
+  conda activate minishield
+  export LIBRARY_PATH="$CONDA_PREFIX/lib"
+
+  cmake -G Ninja -S . -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER="$CONDA_PREFIX/bin/clang++-23" \
+    -DLLVM_DIR="$CONDA_PREFIX/lib/cmake/llvm"
+
+The options mean:
+
+  -G Ninja: use Ninja as the generated build system.
+  -S .: read the source project's CMakeLists.txt here.
+  -B build: place generated files in build/.
+  CMAKE_BUILD_TYPE: select Release settings.
+  CMAKE_CXX_COMPILER: use this environment's C++ compiler.
+  LLVM_DIR: locate this LLVM installation's CMake configuration.
+
+Wait for CMake to report that configuration and generation succeeded. Then:
+
+  cmake --build build
+
+This second command runs the generated build instructions. It does not
+replace the initial configure/generate step.
+
+Observed error: Ninja could not find build.ninja. The build directory had
+CMakeCache.txt, but generation had not completed. Running the configuration
+command successfully created build.ninja. A cache file alone is insufficient.
+
+Observed result: "ninja: no work to do" means the target is up to date.
+It is not a test result or an indication that the plugin failed.
+
+Environment issue encountered: the compiler could not find <type_traits>.
+The Conda environment had the runtime but lacked its matching C++ development
+headers. Installing libstdcxx-devel_linux-64 16.2.0 supplied those headers.
+The LIBRARY_PATH export addresses the separate linker search for libstdc++.
+
+
+3. Split the plugin into an entry point and a pass
+================================================
+
+Task: create the pass interface, its implementation, and its registration:
+
+  include/minishield/FlatteningPass.h — class and run() declaration
+  lib/FlatteningPass.cpp             — run() definition
+  lib/Plugin.cpp                     — plugin entry point and registration
+
+The header lets other translation units know the pass class exists. Each
+.cpp file is compiled separately, so Plugin.cpp needs to include that header.
+CMake must also list the implementation .cpp file to compile and link it.
+
+For a function pass, run() receives:
+
+  llvm::Function &F
+  llvm::FunctionAnalysisManager &AM
+
+It returns llvm::PreservedAnalyses. The initial implementation only reports
+the function name and block count, so it returns PreservedAnalyses::all().
+
+Observed mistakes: the header was initially named FlatteningPass.cpp, while
+the includes requested FlatteningPass.h. Rename the declaration file to .h.
+Plugin.cpp also needed semicolons after the callback registration expression
+and the returned aggregate initializer. Read the compiler location and check
+the surrounding statement boundaries when diagnosing these syntax errors.
+
+
+4. Choose optional or required pass behavior explicitly
+======================================================
+
+Task: compare PassInfoMixin, OptionalPassInfoMixin, and RequiredPassInfoMixin
+in the installed llvm/IR/PassManager.h.
+
+PassInfoMixin supplies shared metadata such as the pass name and pipeline
+printing. In this installation it retains optional behavior for compatibility.
+The header recommends inheriting from an explicit optional or required mixin.
+
+  OptionalPassInfoMixin<T>: isRequired() is false; the pass may be skipped.
+  RequiredPassInfoMixin<T>: isRequired() is true; normal pass-skipping
+                            mechanisms must not skip the scheduled pass.
+
+For example, an optional function pass may be skipped on an optnone function.
+A required pass still runs there. Required does not automatically schedule
+the pass: pipeline registration and invocation are still necessary.
+
+We used OptionalPassInfoMixin for the flattening stub. We chose
+RequiredPassInfoMixin for statistics because inspection should also report
+functions marked optnone.
+
+
+5. Register the pass name that opt will recognize
+================================================
+
+Task: understand llvmGetPassPluginInfo() in Plugin.cpp.
+
+The exported entry point returns PassPluginLibraryInfo containing the LLVM
+plugin API version, the plugin name, the plugin version, and a callback that
+registers passes with PassBuilder.
+
+Use llvm/Plugins/PassPlugin.h in this installed LLVM version. Return the
+header-provided LLVM_PLUGIN_API_VERSION; no custom plugin-version macro is
+needed. The plugin's own version string is distinct from that API version.
+
+The installed function-pipeline parsing callback takes:
+
+  llvm::StringRef Name
+  llvm::FunctionPassManager &FPM
+  llvm::ArrayRef<llvm::PassBuilder::PipelineElement> InnerPipeline
+
+It recognizes a name, adds the corresponding pass to FPM, and returns true.
+It returns false for a name it does not handle. Our simple passes also reject
+unexpected nested pipelines by checking InnerPipeline.
+
+Checkpoint: trace how the string minishield-flatten results in constructing
+FlatteningPass and adding it to the function pass manager.
+
+
+6. Run a small smoke input and distinguish validity from correctness
+==================================================================
+
+Task: use the repository fixture tests/ir/minishield-input.ll:
+
+  define i32 @add_one(i32 %x) {
+  entry:
+    %result = add i32 %x, 1
+    ret i32 %result
+  }
+
+Run from the project root with the Conda environment activated:
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-flatten),verify' \
+    -S tests/ir/minishield-input.ll \
+    -o build/minishield-output.ll
+
+Expected diagnostic from the stub:
+
+  [MiniShield] function: add_one, blocks: 1
+
+The pipeline runs the flattening pass on functions, then verifies the module.
+-S selects text IR; -o chooses the output file. For diagnostics alone, use
+-disable-output instead of requesting an output IR file.
+
+verify checks LLVM IR structural rules: types, SSA constraints, PHI incoming
+edges, return types, and related invariants. It normally succeeds silently.
+It does not prove that transformed code has the same behavior as the input.
+
+Observed error: function(minishield-flatten)] had an extra closing bracket.
+Pipeline syntax must be valid before LLVM can run any pass.
+
+
+7. Start task 1.2 by declaring StatsPass
+======================================
+
+Task: write include/minishield/StatsPass.h using the earlier header as a model.
+
+  Add #pragma once and include llvm/IR/PassManager.h.
+  Declare StatsPass inside namespace minishield.
+  Inherit publicly from RequiredPassInfoMixin<StatsPass>.
+  Declare the public function-pass run() method.
+
+The method returns PreservedAnalyses and takes Function and
+FunctionAnalysisManager references. The header is an interface, not the
+implementation of the traversal.
+
+Checkpoint: compare the declaration with the later definition. Class name,
+namespace, parameter types, and return type must agree.
+
+
+8. Count blocks and instructions before classifying instructions
+==============================================================
+
+Task: write lib/StatsPass.cpp. Include the StatsPass header, Function.h,
+and raw_ostream.h. Define run() inside namespace minishield.
+
+Skip declarations with F.isDeclaration(); declarations have no function body
+to inspect. Initialize an instruction counter before visiting the body.
+
+The function pass manager already visits functions. Your traversal is:
+
+  for (const llvm::BasicBlock &BB : F) {
+      for (const llvm::Instruction &I : BB) {
+          // Increment the instruction counter.
+      }
+  }
+
+F.size() supplies the block count. Print the function name, blocks, and total
+instructions to llvm::errs(). Return PreservedAnalyses::all() because no IR
+has changed. Using const references makes the read-only intent visible.
+
+Checkpoint using phi.ll: merge has four blocks and five instructions:
+three branches, one PHI, and one return.
+
+
+9. Make the new pass available, then rebuild the plugin
+=====================================================
+
+Task: add lib/StatsPass.cpp to the existing CMake target. Include StatsPass.h
+in Plugin.cpp and extend the parsing callback to recognize minishield-stats.
+
+Keep both pipeline names working:
+
+  minishield-flatten -> add FlatteningPass
+  minishield-stats   -> add StatsPass
+  anything else     -> return false
+
+After changing the sources or registration:
+
+  cmake --build build
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-stats),verify' \
+    -disable-output tests/ir/phi.ll
+
+Observed error: "unknown function pass 'minishield-stats'" meant the loaded
+plugin did not register that name. Defining a class alone does not register it.
+Also check that the plugin was rebuilt after adding the registration.
+
+Observed error: "no member named 'StatsPass' in namespace 'minishield'" came
+from including FlatteningPass.h twice instead of including StatsPass.h.
+The compiler needs the declaration in this translation unit. CMake's source
+list supplies the implementation at link time; it does not replace includes.
+
+
+10. Add instruction classifications in small increments
+======================================================
+
+First exercise: count conditional and unconditional branches separately.
+Then add switches, PHIs, returns, calls, invokes, and indirect branches.
+Initialize all counters before the loops and print them after traversal.
+
+We first discussed isa<T>(I), from llvm/Support/Casting.h, to ask whether
+an instruction has a particular LLVM type. Instruction classes are declared
+in llvm/IR/Instructions.h.
+
+The learner preferred switch/case. Use switch (I.getOpcode()) with these
+opcode names in this installed LLVM 23 version:
+
+  llvm::Instruction::CondBr     — conditional branch
+  llvm::Instruction::UncondBr   — unconditional branch
+  llvm::Instruction::Switch    — multiway branch
+  llvm::Instruction::PHI       — SSA merge
+  llvm::Instruction::Ret       — return
+  llvm::Instruction::Call      — call instruction
+  llvm::Instruction::Invoke    — call with normal/unwind destinations
+  llvm::Instruction::IndirectBr — indirect branch
+
+Increment the appropriate counter and end each case with break. The default
+case can do nothing. Increment total_inst before the switch so instructions
+such as add and icmp remain part of the total even without their own counters.
+
+Observed correction: an earlier teaching example used Instruction::Br,
+which does not exist here. This version has separate CondBr and UncondBr
+opcodes. Consult llvm/IR/Instruction.def to inspect the installed names.
+
+Observed bug: a missing break after a branch case would also increment the
+switch counter through fallthrough. Compilation success alone would not
+detect that counting mistake; the fixture expectations would.
+
+Observed omission: switches was counted but initially absent from the printed
+report. Every requested metric must also appear in the output.
+
+These are static instruction counts. One recursive call instruction can
+execute many times, but its static call count is still one. Count Call and
+Invoke separately. Branch instructions are not the same as successor edges.
+Loop counting is deferred to task 1.3 rather than reporting a false zero.
+
+
+11. Cross-check the supplied fixtures
+====================================
+
+Task: compare each report against the IR and the expected table in README.
+
+  if-else.ll / choose:
+    3 blocks; 1 conditional branch; 2 returns.
+
+  loop.ll / count_to:
+    4 blocks; 1 conditional branch; 2 unconditional branches; 1 PHI; 1 return.
+
+  switch.ll / select_case:
+    4 blocks; 1 switch; 3 returns.
+
+  recursion.ll / factorial:
+    3 blocks; 1 conditional branch; 1 call; 2 returns.
+
+  phi.ll / merge:
+    4 blocks; 1 conditional branch; 2 unconditional branches; 1 PHI; 1 return.
+
+instruction-kinds.ll adds an invoke, an indirect branch, declarations that
+should not produce reports, and an optnone function that should produce one.
+minishield-input.ll remains the simplest load-and-run smoke fixture.
+
+Start with a shell loop to run every .ll file:
+
+  for file in tests/ir/*.ll; do
+    echo "=== $file ==="
+    opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+      -passes='function(minishield-stats),verify' \
+      -disable-output "$file" || break
+  done
+
+Quote "$file" so each path is passed as one argument. This loop runs the pass
+and verifier; it does not automatically compare the reported numeric counts
+against expected values. That is a separate testing responsibility.
+
+
+12. Turn test_all.sh output into a readable table
+===============================================
+
+Task: keep the loop, but capture each opt invocation's diagnostic output:
+
+  if output=$(opt ... 2>&1); then
+      # Parse and print its report lines.
+  else
+      # Show the file and diagnostic, then exit with failure.
+  fi
+
+llvm::errs() writes to stderr, so 2>&1 redirects stderr into captured stdout.
+The if checks opt's exit status. A verifier failure must remain a failure,
+not become a plausible empty table row.
+
+Print the table header once before the loop using printf. The first column
+can use %-24s to left-align names in a minimum width of 24 characters.
+
+For the current report format, awk -F ', ' separates fields at comma-space.
+Only process lines beginning with "[MiniShield] function: ". Strip that
+prefix from the first field to get the function name.
+
+Fields 2 and 3 contain blocks and total instructions. Start at field 4 for
+the nonzero instruction highlights. Split each remaining field at ": ",
+and append key=value only when the numeric value is greater than zero.
+
+Example table content:
+
+  Function                 | Nonzero instruction counts
+  choose                   | returns=2; conditional branches=1
+  select_case              | returns=3; switches=1
+
+This parser depends on the report's field layout. If you rearrange the C++
+report, review the parser too. Successor debug lines are filtered out because
+they do not match the report prefix. The table displays actual measurements;
+it still needs comparisons if it is to assert expected counts automatically.
+
+Observed error: Bash reported "unexpected end of file" because the final
+loop-closing word was written as don instead of done. Bash reached the file's
+end while still expecting the loop to close.
+
+Check syntax without executing, then run:
+
+  bash -n test_all.sh
+  bash test_all.sh
+
+The syntax check is silent on success. It does not validate awk logic or
+whether the counts are correct.
+
+
+13. Check that inspection preserves the IR
+=========================================
+
+Task: produce canonical LLVM output with and without the stats pass:
+
+  opt -passes=verify \
+    -S tests/ir/phi.ll -o build/phi-before.ll
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-stats),verify' \
+    -S tests/ir/phi.ll -o build/phi-after.ll
+
+  diff -u build/phi-before.ll build/phi-after.ll
+
+An empty diff is expected and was reported by the learner. Both paths use
+LLVM's printer so formatting differences between the handwritten source and
+printed IR do not confuse this comparison.
+
+PreservedAnalyses::all() is appropriate for this read-only pass. When the
+future flattening pass restructures the CFG, generally return
+PreservedAnalyses::none() unless particular analyses are explicitly maintained.
+PreservedAnalyses reports cache validity; it does not run the verifier or
+prove semantic equivalence.
+
+
+14. Start task 1.3 by printing successor relationships
+====================================================
+
+Task: include llvm/IR/CFG.h and, inside the existing block loop, print the
+block name followed by names from llvm::successors(&BB). Keep the instruction
+traversal after that small diagnostic exercise.
+
+Run opt directly to see the CFG lines; the table formatter intentionally
+keeps only the one-line statistics reports.
+
+For phi.ll, expect these connections, ignoring extra display whitespace:
+
+  entry -> left right
+  left  -> join
+  right -> join
+  join  ->
+
+entry has two successors because its conditional branch can choose either
+destination. left and right each have one successor. join ends in ret and
+has no successor. The function therefore has three branch instructions but
+four outgoing edges in total.
+
+Checkpoint: predecessors reverse the relationship. join has left and right
+as predecessors; entry has none in this fixture. Printing block names is
+helpful for this exercise, but names are not guaranteed to exist on all LLVM
+blocks and should not be used as the graph's identity.
+
+
+15. Declare a reusable CFGAnalyzer analysis
+=========================================
+
+Task: write include/minishield/CFGAnalyzer.h. This header is now drafted.
+Keep #pragma once and remember the semicolon after the class's closing brace.
+
+Include llvm/IR/PassManager.h, llvm/IR/BasicBlock.h, and <vector>.
+Inside namespace minishield, inherit publicly from:
+
+  llvm::AnalysisInfoMixin<CFGAnalyzer>
+
+Define public BlockInfo and Result structures:
+
+  struct BlockInfo {
+      const llvm::BasicBlock *block;
+      std::vector<const llvm::BasicBlock *> successors;
+      std::vector<const llvm::BasicBlock *> predecessors;
+  };
+
+  struct Result {
+      std::vector<BlockInfo> blocks;
+  };
+
+Declare this public method:
+
+  Result run(
+      llvm::Function &F,
+      llvm::FunctionAnalysisManager &AM);
+
+Add these private members:
+
+  friend llvm::AnalysisInfoMixin<CFGAnalyzer>;
+  static llvm::AnalysisKey Key;
+
+A printing or transformation pass returns PreservedAnalyses. An analysis
+returns computed data, its Result. LLVM's analysis manager can cache that
+result and make it available to other passes.
+
+The analysis key provides a unique identity. The friend declaration lets
+AnalysisInfoMixin access that private key. Declaring the static member in
+the header is separate from defining it in the future implementation file.
+
+The block pointers refer to objects owned by the function. Result neither
+copies nor owns the blocks. If transformations change the IR, consumers
+must respect analysis invalidation rather than continue using stale data.
+
+Checkpoint: explain how returning BlockInfo objects will let a future pass
+use the graph without parsing text printed by StatsPass.
+
+
+16. Next exercise: implement the basic analysis before adding loops
+=================================================================
+
+The next small step is lib/CFGAnalyzer.cpp. The learner should write it.
+
+Plan the work in this order:
+
+  Include the analysis header and llvm/IR/CFG.h.
+  Define CFGAnalyzer::Key once in the implementation file.
+  Define run() with the Result return type declared in the header.
+  Create an empty Result and visit each basic block.
+  For each block, record its address, successors, and predecessors.
+  Append the completed BlockInfo to the result and return the result.
+
+The intended implementation reads the function without changing it.
+After that works, add the implementation to CMake, register the analysis with
+the function analysis manager, and request its result from a consumer pass.
+Those are future steps, not capabilities already supplied by the header.
+
+17. Understand references, pointers, and addresses while implementing the CFG
+===========================================================================
+
+The learner drafted CFGAnalyzer.cpp and assigned BB directly to info.block.
+The review identified a type mismatch: BB is a reference to a block, while
+info.block holds a pointer to a block.
+
+Start by reading the declaration in the block loop:
+
+  for (const llvm::BasicBlock &BB : F)
+
+The & in this declaration makes BB a reference. A reference is another name
+for an existing object; it is not a pointer variable. Use it like the object:
+
+  BB.getName()
+
+Compare that with the member declaration:
+
+  const llvm::BasicBlock *block;
+
+The * declares a pointer, which stores an object's address. To assign the
+address of the block that BB refers to, write:
+
+  info.block = &BB;
+
+Here & is an operator in an expression: it obtains the block's address.
+It does not copy the block or create a separate reference object. A compiler
+may implement references using addresses internally, but that does not make
+a reference interchangeable with a pointer in C++ source code.
+
+Read each form according to its context:
+
+  const llvm::BasicBlock &BB    Declare a reference to a block.
+  &BB                          Obtain the referenced block's address.
+  const llvm::BasicBlock *ptr   Declare a pointer to a block.
+  *ptr                         Access the object that ptr points to.
+  BB.getName()                 Access a member through a reference.
+  ptr->getName()               Access a member through a pointer.
+
+Now compare the successor loop:
+
+  for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
+      info.successors.push_back(successor);
+  }
+
+successor is already a pointer because its declaration uses *. Append it
+directly. Taking &successor would obtain the address of the local pointer
+variable, not the address of the block. That would add another pointer level
+and would not match the vector's element type.
+
+Apply the same reasoning to predecessors. These pointers do not own the
+blocks; the function owns them. They must not be used after the referenced
+blocks have been deleted or the analysis result has become invalid.
+
+The implementation review also supplied three related corrections:
+
+  Use Result result{}; rather than Result result = new Result();.
+  new returns a pointer, while run() returns a Result value.
+
+  Use llvm::BasicBlock with two colons for namespace qualification.
+
+  Use llvm::successors() and llvm::predecessors(), both plural.
+
+Checkpoint: explain why info.block needs &BB, while push_back(successor)
+needs no additional &. Then fix the implementation yourself, add its source
+to CMake, and build before registering the analysis with LLVM.
+
+18. Read pointer and reference syntax in traversal loops
+======================================================
+
+The learner asked why some traversals use * and others use &. Start with
+the type of each range's elements, rather than memorizing one loop pattern.
+
+  for (const llvm::BasicBlock &BB : F)
+
+Iterating a function gives access to its basic block objects by reference.
+BB is a reference to each existing block. It does not copy the block. Use
+BB.getName() to access members. The instruction loop follows the same rule:
+
+  for (const llvm::Instruction &I : BB)
+
+Compare the successor traversal:
+
+  for (const llvm::BasicBlock *successor : llvm::successors(&BB))
+
+The successors range yields block pointers, so successor is a pointer. The
+loop copies an address, not a BasicBlock. Use successor->getName(). The &BB
+inside the function call obtains the block's address because this overload
+of successors() takes a pointer. That expression is distinct from the & in
+the declaration of the outer loop's reference variable.
+
+Now examine the analysis result, whose types you defined yourself:
+
+  for (const auto &info : cfg.blocks)
+
+cfg.blocks is a vector of BlockInfo records. const auto &info refers to
+each stored record. Without &, auto info would copy the record and its
+successor/predecessor vectors on every iteration. Avoid those unnecessary
+copies when only inspecting the records.
+
+  for (const auto *successor : info.successors)
+
+info.successors is a vector of pointers to const blocks. Each element is
+already a pointer, so copying it is appropriate. The block itself is not
+copied. The predecessor loops work the same way.
+
+Likewise, in:
+
+  const auto &cfg = AM.getResult<CFGAnalyzer>(F);
+
+the reference lets StatsPass inspect the cached result without copying its
+records and vectors. The analysis manager owns that cached result.
+
+Checkpoint: annotate these four operations in your own words:
+
+  BB.getName()          Access through an object/reference.
+  &BB                   Obtain that object's address.
+  successor->getName()  Access through a pointer.
+  *successor            Access the object identified by the pointer.
+
+The rule is to follow the element type: references for existing records or
+objects when avoiding copies, pointer variables when the elements already
+hold addresses. There is no rule that every traversal needs * or every
+traversal needs &. Keep const when the traversal is read-only.
+
+19. Understand why auto alone tries to copy a basic block
+=======================================================
+
+During the function eligibility exercise, the learner asked why this loop
+cannot replace the explicit reference declaration:
+
+  for (auto bb : F)
+
+Teach the difference between type deduction and reference binding. auto
+deduces the type, but a plain auto variable does not automatically preserve
+the reference returned by the iterator. It tries to create a new local
+BasicBlock value by copying the existing element. LLVM BasicBlock is
+noncopyable, so that loop does not compile.
+
+The appropriate read-only traversal is:
+
+  for (const auto &bb : F) {
+      // Inspect the existing block without copying it.
+  }
+
+Here const auto &bb is equivalent to const llvm::BasicBlock &bb. The & asks
+for reference binding, while const makes access through that reference
+read-only.
+
+Compare the declarations:
+
+  auto bb          Try to copy the element into a local value.
+  auto &bb         Bind to the existing element, preserving its constness.
+  const auto &bb   Bind to the existing element through a const reference.
+
+There is a useful detail in FunctionEligibility::check: F is declared as
+const llvm::Function &. Iterating it gives const block references. Thus
+auto &bb also deduces a const reference here; it cannot remove constness
+from the block. Writing const auto &bb states the read-only intention
+explicitly and remains clear when reading the loop on its own.
+
+Connect this lesson to the earlier pointer traversal. For a vector whose
+elements are block pointers, auto successor copies only a pointer value.
+It does not copy the pointed-to BasicBlock. Plain auto is therefore not
+always wrong: its suitability depends on the element type and whether a
+copy is intended.
+
+Checkpoint: explain why auto bb fails for F, why const auto &bb succeeds,
+and why auto successor can succeed for info.successors. Keep the eligibility
+checker read-only and write the code yourself.
+
+20. Explain exception-handling pads and personality checks
+=========================================================
+
+During function eligibility work, the learner asked why both
+F.hasPersonalityFn() and BB.isEHPad() check exception handling, then asked
+what the word pad means.
+
+Start with the control-flow picture. Pad comes from landing pad: a
+designated place where execution arrives when an exception interrupts
+normal control flow. An invoke instruction names two destinations:
+
+  %result = invoke i32 @callee()
+      to label %normal
+      unwind label %exception
+
+Normal completion continues at normal. An exceptional unwind transfers
+control to exception. In the landing-pad model, exception begins with a
+landingpad instruction after any PHIs:
+
+  exception:
+    %ex = landingpad { ptr, i32 } cleanup
+    resume { ptr, i32 } %ex
+
+This is a fragment inside a function with a suitable personality routine,
+not a complete standalone IR module. landingpad receives exception
+information. cleanup marks participation in cleanup handling; it does not
+execute destructors or other cleanup work automatically. Such operations
+would be separate instructions. resume continues unwinding.
+
+Teach the broader term next: an EH pad is an exception-handling entry
+instruction. LLVM recognizes landingpad, catchpad, cleanuppad, and
+catchswitch as EH-pad instructions.
+
+Distinguish the two queries by scope:
+
+  F.hasPersonalityFn()
+    Function-level: does this function specify a personality routine?
+    That routine defines language-specific exception-handling behavior.
+
+  BB.isEHPad()
+    Block-level: is the block's first non-PHI instruction an EH pad?
+
+Use tests/ir/instruction-kinds.ll as the concrete example. with_invoke has
+a personality routine, but only its exception block is an EH pad:
+
+  entry      invoke instruction       isEHPad() is false
+  normal     return instruction       isEHPad() is false
+  exception  landingpad instruction   isEHPad() is true
+
+An invoke initiates a call with an exceptional destination; it is not
+itself an EH pad. A pad marks where exception-handling control arrives.
+
+Clarify the overlap in the eligibility checker instead of claiming both
+checks are independently necessary. A function may retain a personality
+routine without having any pad blocks. Conversely, valid EH-pad
+instructions require a personality routine. Rejecting all personality
+functions at the start already rejects functions with valid EH pads.
+The later block-level rejection is therefore redundant for those inputs,
+though it states the unsupported block kind explicitly.
+
+Checkpoint: identify which block receives the unwind edge, explain why
+the block containing invoke is not the pad, and explain why early
+personality rejection prevents reaching the pad check in this fixture.
+
+Reference: https://llvm.org/docs/ExceptionHandling.html
+
+21. Relate intrinsics to instructions during coroutine checks
+===========================================================
+
+The learner asked how an intrinsic relates to an instruction after adding
+coroutine detection to the eligibility checker.
+
+Start with three IR instruction fragments:
+
+  %a = add i32 %x, 1
+  %b = call i32 @my_function(i32 %a)
+  %c = call double @llvm.sqrt.f64(double %value)
+
+All three lines are instructions. The first is an add operation. The second
+calls an ordinary function. The third calls an intrinsic: a special function
+with semantics defined by LLVM itself.
+
+An intrinsic is commonly expressed as a function call rather than a new
+instruction opcode. Its name has the reserved llvm. prefix. For example,
+declare the square-root intrinsic without supplying a function body:
+
+  declare double @llvm.sqrt.f64(double)
+
+LLVM knows the intrinsic's behavior and lowers it to appropriate target
+code. It need not remain a machine-level function call. Distinguish the
+function declaration from the call instruction: the declaration is a
+Function, while the call inside a basic block is an Instruction.
+
+Next connect the concepts to the C++ class hierarchy:
+
+  Instruction
+    CallBase
+      CallInst
+        IntrinsicInst
+
+Each line is derived from the class above it. Every IntrinsicInst is both
+a CallInst and an Instruction. Not every Instruction is a call, and not
+every call invokes an intrinsic. LLVM permits certain intrinsic uses through
+invoke as well; IntrinsicInst specifically represents intrinsic calls with
+the call opcode.
+
+Now explain the eligibility check:
+
+  llvm::dyn_cast<llvm::IntrinsicInst>(&I)
+
+This checks whether I is an intrinsic call instruction. Success yields a
+pointer that exposes intrinsic-specific information; failure yields nullptr.
+For a successful cast, inspect getCalledFunction()->getName(). A name
+starting with llvm.coro. identifies the coroutine family.
+
+Use both checks in the initial coroutine policy: reject a function marked
+isPresplitCoroutine(), and inspect instructions for coroutine intrinsic
+calls. The latter policy is conservative: it also rejects ordinary functions
+that manipulate coroutine handles through these intrinsics. Only accept a
+function after all function, block, terminator, and instruction checks pass.
+
+Connect this back to the statistics exercise. An intrinsic call still has
+opcode Call, so the existing Call case counts it. The counter currently
+means all call instructions, including intrinsic calls, rather than only
+calls to user-defined functions.
+
+Checkpoint: classify add, an ordinary function call, and an intrinsic call.
+Explain why the coroutine name check is needed after dyn_cast succeeds:
+recognizing an intrinsic alone does not establish that it is a coroutine
+operation; llvm.sqrt.f64 is an intrinsic too.
+
+Reference: https://llvm.org/docs/LangRef.html#intrinsic-functions
+
+22. Integrate eligibility decisions into the flattening stub
+==========================================================
+
+After implementing the helper, first replace its temporary final rejection
+with return {true, ""};. Keep that success return after all checks and outside
+both traversal loops. Correct diagnostic spelling so rejection messages are
+clear and stable.
+
+In lib/FlatteningPass.cpp, include minishield/FunctionEligibility.h. After
+the existing declaration check, request a decision:
+
+  const auto eligibility = FunctionEligibility::check(F);
+
+This is a plain helper call returning a small result value. It does not
+require analysis-manager registration. If eligible is false, print the
+function name and rejection reason, then immediately return
+PreservedAnalyses::all(). If eligible is true, print an eligible diagnostic.
+Keep the final PreservedAnalyses::all(): the stub still changes nothing.
+
+Checkpoint: explain why rejecting before transformation is essential, and
+why eligible means passing the current feature checks rather than already
+being transformed or proven safe under every possible future algorithm.
+
+Rebuild and run minishield-flatten on tests/ir/phi.ll. merge should be
+eligible. Then run tests/ir/instruction-kinds.ll:
+
+  with_invoke             Rejected for its exception-handling personality.
+  with_indirectbr         Rejected for the unsupported indirectbr terminator.
+  without_optimization    Skipped because FlatteningPass is optional and the
+                          function has optnone.
+
+The first two decisions were observed in the built plugin, as was merge's
+eligible diagnostic. The optional pass differs from RequiredPassInfoMixin
+on StatsPass, which permits inspection of optnone functions. A skipped
+function has not received an eligibility decision from FlatteningPass.
+
+
+23. Isolate rejection checks with new fixtures
+=============================================
+
+Next teaching task: write fixtures yourself for coroutine intrinsics and
+address-taken blocks. Do not rely only on the existing EH and indirectbr
+examples: an earlier rejection can mask the check being tested.
+
+Create tests/ir/coroutine.ll:
+
+  declare ptr @llvm.coro.noop()
+
+  define ptr @coroutine_handle() {
+  entry:
+    %handle = call ptr @llvm.coro.noop()
+    ret ptr %handle
+  }
+
+Its return is supported, and it has no personality routine. The expected
+rejection is specifically the coroutine-intrinsic check. This is a test of
+the conservative rule rejecting coroutine operations, including handle
+manipulation; it does not claim this function is itself a presplit coroutine.
+
+Create tests/ir/address_taken.ll:
+
+  define ptr @address_taken() {
+  entry:
+    br label %target
+  target:
+    ret ptr blockaddress(@address_taken, %target)
+  }
+
+Both terminators are supported, but target has its address used as a value.
+Expect rejection for the address-taken block. This tests the block property
+independently of the unsupported indirectbr terminator in the other fixture.
+
+After building, run each file through:
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-flatten),verify' \
+    -disable-output tests/ir/coroutine.ll
+
+Repeat using tests/ir/address_taken.ll. Confirm the function name and the
+intended rejection reason, rather than treating any rejection as sufficient.
+
+
+24. Check that rejected functions remain unchanged
+=================================================
+
+The rejection contract requires leaving the function untouched. Verification
+alone only checks IR validity; valid IR can still be different from input.
+
+For the coroutine fixture, generate comparable canonical IR on both paths:
+
+  opt -passes=verify \
+    -S tests/ir/coroutine.ll -o build/before.ll
+
+  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+    -passes='function(minishield-flatten),verify' \
+    -S tests/ir/coroutine.ll -o build/after.ll
+
+  diff -u build/before.ll build/after.ll
+
+Expect a rejection diagnostic and an empty diff. Repeat for address_taken.ll
+and the existing negative cases. LLVM prints both outputs, so differences
+between handwritten input formatting and LLVM's formatting do not interfere.
+
+The learner wrote both fixtures. The follow-up review ran both through the
+plugin: coroutine_handle was rejected for its coroutine intrinsic, and
+address_taken was rejected for its address-taken block. Both canonical IR
+comparisons were unchanged. The steps above remain the repeatable exercises
+for reviewing this rejection contract.
+
+The next negative test should isolate isPresplitCoroutine() separately from
+intrinsic detection. After completing the remaining Day 1 checks, review
+the roadmap before starting any flattening transformations.
+
+Only then extend the data with terminator information and study dominators
+and loop detection. Function eligibility and control-flow flattening come
+later in the roadmap. Do not mark them complete based on a statistics table
+or a successful verifier run.
