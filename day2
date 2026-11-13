@@ -4855,7 +4855,7 @@ Task: Write only the file, method body, and early guard for this checkpoint. Lea
 
 A header declaration is sufficient to compile a call, but linking that call requires the matching definition. Missing definitions or a source omitted from the target can therefore produce undefined-reference errors later. For now keep the placeholder disconnected: do not call it from FlatteningPass or remove the existing construction code until the helper implements the complete intended behavior.
 
-Checkpoint: Expect the new source to compile and the current pass’s emitted LLVM program to stay unchanged, because it still uses the existing implementation. The scaffold itself contains no mutation and returns false. Next, snapshot original prepared blocks, IDs, and terminators before adding any dispatcher blocks; otherwise a traversal could accidentally include and rewrite its own new routing machinery.
+Checkpoint: Expect the new source to compile and the current pass’s emitted LLVM program to stay unchanged, because it still uses the existing implementation. The scaffold itself contains no mutation and returns false. Why must the snapshot of prepared blocks, IDs, and terminators be taken before any dispatcher block is created?
 
 ### Model answer
 

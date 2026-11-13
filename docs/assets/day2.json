@@ -8019,7 +8019,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Expect the new source to compile and the current pass’s emitted LLVM program to stay unchanged, because it still uses the existing implementation. The scaffold itself contains no mutation and returns false. Next, snapshot original prepared blocks, IDs, and terminators before adding any dispatcher blocks; otherwise a traversal could accidentally include and rewrite its own new routing machinery.",
+          "text": "Checkpoint: Expect the new source to compile and the current pass’s emitted LLVM program to stay unchanged, because it still uses the existing implementation. The scaffold itself contains no mutation and returns false. Why must the snapshot of prepared blocks, IDs, and terminators be taken before any dispatcher block is created?",
           "builderImplementationWalkthrough": true,
           "answers": [
             {
@@ -8262,7 +8262,7 @@
           "irComparison": true
         }
       ],
-      "words": 3165,
+      "words": 3157,
       "quiz": {
         "q": "Why snapshot terminators before creating new blocks?",
         "choices": [
