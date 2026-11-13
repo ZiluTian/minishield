@@ -403,7 +403,7 @@ Checkpoint: What does the vector own? Why do we retain pointers rather than copi
 
 ### LLVM program before and after this checkpoint
 
-This lesson only collects PHINode pointers. The after listing is the expected output before adding demotion.
+This lesson only collects PHINode pointers. The listing is the expected output before adding demotion.
 
 The program is unchanged at this checkpoint. The worklist and its count exist in the C++ pass, outside the target program. The PHI stays in join.
 
@@ -453,26 +453,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -660,30 +642,12 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
-Follow the values and edges: The checked pointer refers to the existing PHI shown in both listings.
+Follow the values and edges: The checked pointer refers to the existing PHI shown in the listing.
 
 ### Check your understanding
 
@@ -1172,31 +1136,8 @@ exit:                                             ; preds = %header
 }
 ```
 
-### After — loop phi
 
-```llvm
-define i32 @count_to(i32 %limit) {
-entry:
-  %i.reg2mem = alloca i32, align 4
-  store i32 0, ptr %i.reg2mem, align 4
-  br label %header
-
-header:                                           ; preds = %body, %entry
-  %i.reload = load i32, ptr %i.reg2mem, align 4
-  %continue = icmp slt i32 %i.reload, %limit
-  br i1 %continue, label %body, label %exit
-
-body:                                             ; preds = %header
-  %next = add i32 %i.reload, 1
-  store i32 %next, ptr %i.reg2mem, align 4
-  br label %header
-
-exit:                                             ; preds = %header
-  ret i32 %i.reload
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1383,31 +1324,8 @@ exit:                                             ; preds = %header
 }
 ```
 
-### After — loop phi
 
-```llvm
-define i32 @count_to(i32 %limit) {
-entry:
-  %i.reg2mem = alloca i32, align 4
-  store i32 0, ptr %i.reg2mem, align 4
-  br label %header
-
-header:                                           ; preds = %body, %entry
-  %i.reload = load i32, ptr %i.reg2mem, align 4
-  %continue = icmp slt i32 %i.reload, %limit
-  br i1 %continue, label %body, label %exit
-
-body:                                             ; preds = %header
-  %next = add i32 %i.reload, 1
-  store i32 %next, ptr %i.reg2mem, align 4
-  br label %header
-
-exit:                                             ; preds = %header
-  ret i32 %i.reload
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1579,31 +1497,8 @@ exit:                                             ; preds = %header
 }
 ```
 
-### After — loop phi
 
-```llvm
-define i32 @count_to(i32 %limit) {
-entry:
-  %i.reg2mem = alloca i32, align 4
-  store i32 0, ptr %i.reg2mem, align 4
-  br label %header
-
-header:                                           ; preds = %body, %entry
-  %i.reload = load i32, ptr %i.reg2mem, align 4
-  %continue = icmp slt i32 %i.reload, %limit
-  br i1 %continue, label %body, label %exit
-
-body:                                             ; preds = %header
-  %next = add i32 %i.reload, 1
-  store i32 %next, ptr %i.reg2mem, align 4
-  br label %header
-
-exit:                                             ; preds = %header
-  ret i32 %i.reload
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1790,20 +1685,8 @@ exit:                                             ; preds = %entry
 }
 ```
 
-### After — cross inspect
 
-```llvm
-define i32 @cross_block(i32 %x) {
-entry:
-  %sum = add i32 %x, 1
-  br label %exit
-
-exit:                                             ; preds = %entry
-  ret i32 %sum
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -2904,29 +2787,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi prepare
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  %value.reg2mem = alloca i32, align 4
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  store i32 10, ptr %value.reg2mem, align 4
-  br label %join
-
-right:                                            ; preds = %entry
-  store i32 20, ptr %value.reg2mem, align 4
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value.reload = load i32, ptr %value.reg2mem, align 4
-  ret i32 %value.reload
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -3135,29 +2997,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi prepare
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  %value.reg2mem = alloca i32, align 4
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  store i32 10, ptr %value.reg2mem, align 4
-  br label %join
-
-right:                                            ; preds = %entry
-  store i32 20, ptr %value.reg2mem, align 4
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value.reload = load i32, ptr %value.reg2mem, align 4
-  ret i32 %value.reload
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -4685,20 +4526,8 @@ done:                                             ; preds = %entry
 }
 ```
 
-### After — dynamic full
 
-```llvm
-define i32 @dynamic(i32 %n) {
-entry:
-  %storage = alloca i8, i32 %n, align 1
-  br label %done
-
-done:                                             ; preds = %entry
-  ret i32 %n
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -4889,7 +4718,7 @@ Checkpoint: Which responsibilities remain in the pass, which in eligibility, and
 
 ### LLVM program before and after this checkpoint
 
-This compares the monolithic complete reference with the same algorithm behind StateMachineBuilder. It is a C++ responsibility split, not a new IR transformation.
+This listing is the monolithic complete reference, emitted identically by the same algorithm behind StateMachineBuilder. It is a C++ responsibility split, not a new IR transformation.
 
 The program is unchanged at this checkpoint. The helper boundary does not add another dispatcher or change any state choice. This is the final-shape reference, not an intermediate scaffold to run.
 
@@ -4968,45 +4797,8 @@ ms.invalid:                                       ; preds = %ms.dispatch
 }
 ```
 
-### After — phi full
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  %ms.state = alloca i32, align 4
-  %value.reg2mem = alloca i32, align 4
-  %ms.next = select i1 %condition, i32 0, i32 1
-  store i32 %ms.next, ptr %ms.state, align 4
-  br label %ms.dispatch
-
-left:                                             ; preds = %ms.dispatch
-  store i32 10, ptr %value.reg2mem, align 4
-  store i32 2, ptr %ms.state, align 4
-  br label %ms.dispatch
-
-right:                                            ; preds = %ms.dispatch
-  store i32 20, ptr %value.reg2mem, align 4
-  store i32 2, ptr %ms.state, align 4
-  br label %ms.dispatch
-
-join:                                             ; preds = %ms.dispatch
-  %value.reload = load i32, ptr %value.reg2mem, align 4
-  ret i32 %value.reload
-
-ms.dispatch:                                      ; preds = %right, %left, %entry
-  %ms.current = load i32, ptr %ms.state, align 4
-  switch i32 %ms.current, label %ms.invalid [
-    i32 0, label %left
-    i32 1, label %right
-    i32 2, label %join
-  ]
-
-ms.invalid:                                       ; preds = %ms.dispatch
-  unreachable
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
