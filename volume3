@@ -1130,3 +1130,720 @@ Checkpoint: (a) The -no-pie and -pie builds of the fixture have byte-identical I
 2. (b) `R_X86_64_RELATIVE`: the loader writes `load_base + offset` (the records read `*ABS*+0x16e0` and so on) into the executable's own writable slots — here the `.fini_array` entry at `0x27c0`, the `.init_array` entry at `0x27c8`, and a `.data` slot at `0x39b0`; the `.got` is not among them, its library slots still coming from the `GLOB_DAT` records both builds carry. The self-relocations exist only in the PIE executable, because its own base — and therefore its own addresses — is randomized at load time.
 
 3. (c) `.got.plt`, the jump table lazy binding fills: in the default build it sits at `0x39c0` next to `.data`, outside the RELRO segment, so it stays writable. The full-RELRO linker moves it to `0x29b8`, inside the widened `PT_GNU_RELRO` segment (whose end is exactly `.got.plt`'s end), and the dynamic section gains `BIND_NOW`, so every jump slot is resolved eagerly at load. After load, the whole RELRO range — both GOT tables — is read-only, and a write to a jump slot faults.
+
+3.6.1 Fuzzing the flattening pass
+=================================
+
+Every lesson so far has proved its point with a fixture: a chosen input that exercises exactly one behavior, and a diff that shows exactly one difference. A fixture proves a point. A fuzzer proves a region: it starts from a handful of seeds, mutates them, and explores the space around them - so 'this pass preserves behavior' becomes a measurement over the explored region, not a claim about a chosen example. This lesson builds that fuzzer for the artifact you have been producing all week: the `minishield-flatten` pass in `build/libMiniShield.so`. The test it runs is the one the pass contract states: flatten the function, then check that the function still computes the same thing.
+
+### The input contract
+
+The fuzzer's input is not a C program; it is the text of an LLVM IR module. That module has to be runnable in isolation, or the comparison is not of the pass but of everything around it. The contract the harness enforces before it touches the pass: `@f` is defined, returns `i32`, and takes exactly one `i32` - the value space the battery probes is known; there is no defined `@main` - the harness links its own wrapper `main` that reads one argument and prints `f(x)`; and there are no non-intrinsic declares - a call to a function whose body the harness does not have either would not link or would make the output depend on code the pass never touches. Intrinsic declares are allowed. Everything else - a wrong signature, an external call, a defined `main` - is rejected at the gate and counts as a clean run: not a bug, just outside the region.
+
+### The harness
+
+Each run does five things. It parses and verifies the input (a failure ends the run quietly). It applies the contract gate. It runs the real plugin's `function(minishield-flatten)` pipeline on a copy of the module - the plugin is loaded once, at the first run, via `PassPlugin::Load`, and the pipeline is built through `PassBuilder` with its standard analysis registration. It verifies the flattened module - a pass that emits invalid IR is a regression in its own right, before behavior is even considered. And it runs the behavioral differential: it compiles the original and the flattened module, each into a native binary with the wrapper `main` linked in, and runs both on a fixed 16-argument battery - `INT_MIN` and `INT_MAX`, zero, negatives, and the small values branch conditions flip on.
+
+The trap semantics are the subtle part. If the original binary traps on a battery argument (a signal, or a nonzero exit), the input is undefined behavior before the pass ever ran - an out-of-range shift, a division by zero, an overflow on a battery edge value - and the pass is not blamed for it; the harness skips the input and returns 0. If the original was healthy and the flattened binary traps, or prints a different value, the divergence is the pass's: the harness reports it - the input, the pass's diagnostics, the first divergent argument with both values, and the flattened module's `ms.state` store - and returns 1, which libFuzzer marks interesting, keeping the input in the corpus.
+
+```cpp
+// minishield-fuzz.cpp — fuzz the learner's minishield-flatten pass.
+//
+// Each libFuzzer input is the text of an LLVM IR module. Per run:
+//   1. parse and verify it (most mutations die here);
+//   2. check the input contract: a defined i32 @f(i32), no @main, and no
+//      non-intrinsic declares — a self-contained pure function;
+//   3. run the plugin's function(minishield-flatten) pipeline on a clone
+//      (the real plugin from build/libMiniShield.so, loaded once via
+//      PassPlugin::Load);
+//   4. verify the flattened module;
+//   5. behavioral differential: compile the original and the flattened
+//      module into native binaries (each linked with a wrapper main that
+//      prints f(x) for a fixed argument battery) and compare the output
+//      on every argument.
+//
+// Trap semantics:
+//   - the original binary traps on some argument -> the input is
+//     undefined behavior even before the pass -> skip, not a bug;
+//   - the flattened binary traps or disagrees where the original was
+//     healthy -> behavioral regression -> report and return 1 (libFuzzer
+//     marks the input interesting and keeps it in the corpus).
+
+#include "llvm/IR/Function.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/IRReader/IRReader.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Plugins/PassPlugin.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+using namespace llvm;
+
+namespace {
+
+// The plugin under test: build/libMiniShield.so by default, or the
+// MINISHIELD_PLUGIN environment variable (the negative control points it
+// at the mutant build).
+std::string pluginPath() {
+    if (const char *env = getenv("MINISHIELD_PLUGIN"))
+        return env;
+    return "build/libMiniShield.so";
+}
+
+// The argument battery: fixed, nothing excluded — INT_MIN and INT_MAX,
+// zero, negatives, and the small values a branch condition flips on.
+const int kBattery[] = {
+    -2147483648, -1000, -42, -8, -1, 0, 1, 2, 7, 8, 42, 127, 128, 1000,
+    4096, 2147483647};
+const int kBatteryN = sizeof(kBattery) / sizeof(kBattery[0]);
+
+const char *kWorkdir = "/tmp/minishield-fuzz";
+
+// The wrapper main: a separate translation unit so the module under test
+// never needs to provide one.
+const char *kWrapper = R"WRAP(
+#include <stdio.h>
+#include <stdlib.h>
+extern int f(int);
+int main(int argc, char **argv) {
+    if (argc != 2)
+        return 98;
+    int x = atoi(argv[1]);
+    printf("%d\n", f(x));
+    return 0;
+}
+)WRAP";
+
+void writeFile(const std::string &path, const std::string &content) {
+    FILE *fp = fopen(path.c_str(), "w");
+    if (!fp)
+        return;
+    fputs(content.c_str(), fp);
+    fclose(fp);
+}
+
+std::string moduleText(const Module &M) {
+    std::string out;
+    raw_string_ostream OS(out);
+    M.print(OS, nullptr);
+    return out;
+}
+
+// Run a command, capturing stdout; pclose returns the wait status.
+struct RunResult {
+    int status;
+    std::string output;
+};
+RunResult runCapture(const std::string &cmd) {
+    RunResult r;
+    FILE *p = popen(cmd.c_str(), "r");
+    if (!p) {
+        r.status = -1;
+        return r;
+    }
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), p)) > 0)
+        r.output.append(buf, n);
+    r.status = pclose(p);
+    return r;
+}
+
+// A trap: killed by a signal, or a nonzero exit (the wrapper returns 0
+// on every healthy call).
+bool trapped(const RunResult &r) {
+    return r.status == -1 || WIFSIGNALED(r.status) ||
+           (WIFEXITED(r.status) && WEXITSTATUS(r.status) != 0);
+}
+
+// Redirect fd 2 to /dev/null (and back) around the plugin's run, so a
+// fuzzing session stays readable.
+void silenceStderr(bool on) {
+    static int saved = -1;
+    if (on) {
+        if (saved == -1)
+            saved = dup(2);
+        int fd = open("/dev/null", O_WRONLY);
+        dup2(fd, 2);
+        close(fd);
+    } else if (saved != -1) {
+        dup2(saved, 2);
+        close(saved);
+        saved = -1;
+    }
+}
+
+// ---- plugin + PassBuilder, initialized once ----------------------------
+// gPB is deliberately leaked: the plugin's pass-plugin is linked against the
+// system libstdc++ while this harness uses the conda one, so destroying the
+// PassBuilder's cross-world std::function callbacks at exit is not safe.
+// The fuzzer process is short-lived, so a one-off leak is harmless.
+PassBuilder *gPB;
+bool gInit = false;
+void initOnce() {
+    if (gInit)
+        return;
+    gInit = true;
+    system("mkdir -p /tmp/minishield-fuzz");
+    std::string path = pluginPath();
+    Expected<PassPlugin> plugin = PassPlugin::Load(path);
+    if (!plugin) {
+        fprintf(stderr, "[fuzz] cannot load plugin '%s': %s\n", path.c_str(),
+                toString(plugin.takeError()).c_str());
+        exit(2);
+    }
+    gPB = new PassBuilder(); // leaked on purpose (see above)
+    plugin->registerPassBuilderCallbacks(*gPB);
+}
+
+// Parse and verify; null on any failure. The context must outlive the
+// module (the module's destructor reaches back into it).
+std::unique_ptr<Module> parseModule(const std::string &irText,
+                                    LLVMContext &Ctx) {
+    MemoryBufferRef MBR(irText, "<fuzz-input>");
+    SMDiagnostic Err;
+    std::unique_ptr<Module> M = parseIR(MBR, Err, Ctx);
+    if (!M)
+        return nullptr;
+    std::string V;
+    raw_string_ostream OS(V);
+    if (verifyModule(*M, &OS))
+        return nullptr;
+    return M;
+}
+
+// Parse, verify, and apply the input contract. Returns null for any
+// input that is not a self-contained pure i32 @f(i32).
+std::unique_ptr<Module> parseGate(const std::string &irText,
+                                  LLVMContext &Ctx) {
+    std::unique_ptr<Module> M = parseModule(irText, Ctx);
+    if (!M)
+        return nullptr;
+    // (Module::getFunction is not used: name-map lookups are unreliable for
+    // parser-built modules in this LLVM; iteration is version-proof.)
+    Function *F = nullptr;
+    for (const Function &Fn : *M) {
+        if (Fn.getName() == "f")
+            F = const_cast<Function *>(&Fn);
+        if (Fn.getName() == "main" && !Fn.isDeclaration())
+            return nullptr; // the wrapper provides main
+    }
+    if (!F || F->isDeclaration())
+        return nullptr;
+    if (!F->getReturnType()->isIntegerTy(32) || F->arg_size() != 1 ||
+        !F->arg_begin()->getType()->isIntegerTy(32))
+        return nullptr;
+    for (const Function &Fn : *M)
+        if (Fn.isDeclaration() && !Fn.isIntrinsic())
+            return nullptr;
+    return M;
+}
+
+// Run function(minishield-flatten) on the module. Returns false (with a
+// message in errOut) if the pipeline fails or the result does not verify.
+bool runPipeline(Module &M, bool live, std::string &errOut) {
+    // The standard PassBuilder setup: register the known analyses and
+    // cross-register the proxies before running any pipeline.
+    LoopAnalysisManager LAM;
+    FunctionAnalysisManager FAM;
+    CGSCCAnalysisManager CGAM;
+    ModuleAnalysisManager MAM;
+    gPB->registerModuleAnalyses(MAM);
+    gPB->registerFunctionAnalyses(FAM);
+    gPB->registerLoopAnalyses(LAM);
+    gPB->registerCGSCCAnalyses(CGAM);
+    gPB->crossRegisterProxies(LAM, FAM, CGAM, MAM);
+    ModulePassManager MPM;
+    Error E = gPB->parsePassPipeline(MPM, "function(minishield-flatten)");
+    if (E) {
+        errOut = toString(std::move(E));
+        return false;
+    }
+    if (!live)
+        silenceStderr(true);
+    MPM.run(M, MAM);
+    if (!live)
+        silenceStderr(false);
+    std::string V;
+    raw_string_ostream OS(V);
+    if (verifyModule(M, &OS)) {
+        errOut = "verify failed after the pass:\n" + V;
+        return false;
+    }
+    return true;
+}
+
+enum class DiffResult { kOk, kSkip, kRegression };
+
+struct Diff {
+    std::vector<RunResult> before, after;
+    size_t firstBad;
+};
+
+// Compile both modules and run the battery.
+DiffResult differential(const std::string &beforeText,
+                        const std::string &afterText, Diff &diff) {
+    writeFile(std::string(kWorkdir) + "/before.ll", beforeText);
+    writeFile(std::string(kWorkdir) + "/after.ll", afterText);
+    writeFile(std::string(kWorkdir) + "/wrapper.c", kWrapper);
+
+    auto compile = [](const std::string &ll, const std::string &bin) {
+        std::string cmd = "clang-23 -o " + bin + " " + ll + " " +
+                          std::string(kWorkdir) + "/wrapper.c 2>/dev/null";
+        return system(cmd.c_str()) == 0;
+    };
+    if (!compile(std::string(kWorkdir) + "/before.ll",
+                 std::string(kWorkdir) + "/before_bin"))
+        return DiffResult::kSkip; // the original does not even build
+    if (!compile(std::string(kWorkdir) + "/after.ll",
+                 std::string(kWorkdir) + "/after_bin")) {
+        diff.firstBad = 0;
+        return DiffResult::kRegression; // the flattening broke compilation
+    }
+
+    for (int i = 0; i < kBatteryN; ++i) {
+        char arg[24];
+        snprintf(arg, sizeof(arg), "%d", kBattery[i]);
+        diff.before.push_back(
+            runCapture(std::string(kWorkdir) + "/before_bin " + arg));
+        diff.after.push_back(
+            runCapture(std::string(kWorkdir) + "/after_bin " + arg));
+        if (trapped(diff.before.back()))
+            return DiffResult::kSkip; // undefined behavior before the pass
+        if (trapped(diff.after.back()) ||
+            diff.before.back().output != diff.after.back().output) {
+            diff.firstBad = i;
+            return DiffResult::kRegression;
+        }
+    }
+    return DiffResult::kOk;
+}
+
+// The first whole line of text containing needle ("" when absent).
+std::string findLine(const std::string &text, const char *needle) {
+    size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        size_t start = (pos == 0) ? 0 : text.rfind('\n', pos - 1) + 1;
+        size_t end = text.find('\n', pos);
+        std::string line = text.substr(start, end - start);
+        size_t a = line.find_first_not_of(" \t");
+        if (a != std::string::npos)
+            return line.substr(a);
+        pos = end + 1;
+    }
+    return "";
+}
+
+void report(const std::string &irText, const std::string &afterText,
+            const Diff &d, const std::string &pipelineErr) {
+    fprintf(stderr,
+            "\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed "
+            "the behavior of @f\n");
+    fprintf(stderr, "[fuzz] input module (%zu bytes):\n%s\n", irText.size(),
+            irText.c_str());
+    if (!pipelineErr.empty()) {
+        fprintf(stderr, "[fuzz] %s\n", pipelineErr.c_str());
+        return;
+    }
+    // Re-run the pass with stderr live so its diagnostics are visible.
+    LLVMContext Ctx;
+    std::unique_ptr<Module> M = parseGate(irText, Ctx);
+    if (M) {
+        std::string liveErr;
+        fprintf(stderr, "[fuzz] pass diagnostics (re-run live):\n");
+        runPipeline(*M, /*live=*/true, liveErr);
+    }
+    for (size_t i = 0; i <= d.firstBad && i < d.before.size(); ++i) {
+        char arg[24];
+        snprintf(arg, sizeof(arg), "%d", kBattery[(int)i]);
+        if (i == d.firstBad) {
+            if (trapped(d.after[i]))
+                fprintf(stderr,
+                        "[fuzz] battery arg %s: original healthy, flattened "
+                        "traps (signal %d)\n",
+                        arg, WTERMSIG(d.after[i].status));
+            else {
+                std::string b = d.before[i].output, a = d.after[i].output;
+                while (!b.empty() && b.back() == '\n')
+                    b.pop_back();
+                while (!a.empty() && a.back() == '\n')
+                    a.pop_back();
+                fprintf(stderr,
+                        "[fuzz] battery arg %s: original=%s flattened=%s\n",
+                        arg, b.c_str(), a.c_str());
+            }
+            break;
+        }
+    }
+    std::string store = findLine(afterText, "ptr %ms.state");
+    if (!store.empty())
+        fprintf(stderr, "[fuzz] flattened module carries: %s\n",
+                store.c_str());
+}
+
+} // namespace
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    initOnce();
+    std::string irText(reinterpret_cast<const char *>(data), size);
+
+    // One context for the whole run; it must outlive every module.
+    LLVMContext Ctx;
+
+    // 1. + 2. parse, verify, shape gate.
+    std::unique_ptr<Module> M = parseGate(irText, Ctx);
+    if (!M)
+        return 0;
+
+    // 3. + 4. the pass on a clone (re-parsed from the canonical text,
+    // since this LLVM has no Module::clone).
+    std::string beforeText = moduleText(*M);
+    std::unique_ptr<Module> M2 = parseModule(beforeText, Ctx);
+    if (!M2)
+        return 0;
+    std::string pipelineErr;
+    if (!runPipeline(*M2, /*live=*/false, pipelineErr)) {
+        report(irText, "", Diff{}, pipelineErr);
+        return 1;
+    }
+
+    // 5. the behavioral differential.
+    std::string afterText = moduleText(*M2);
+    Diff diff;
+    DiffResult r = differential(beforeText, afterText, diff);
+    if (r == DiffResult::kSkip)
+        return 0;
+    if (r == DiffResult::kRegression) {
+        report(irText, afterText, diff, "");
+        return 1;
+    }
+    return 0;
+}
+```
+
+### Build and run
+
+From the repository root - where `build/libMiniShield.so` lives - the harness builds against the same LLVM that loads the plugin. The `-fsanitize=fuzzer` flag links libFuzzer's runtime; in this toolchain that bundles ASan/UBSan as well, so a bug in the harness itself does not pass quietly.
+
+```bash
+$ clang++-23 -fsanitize=fuzzer -std=gnu++20 -O2 -D_GLIBCXX_USE_CXX11_ABI=1 -fPIC \
+    -I$CONDA_PREFIX/include minishield-fuzz.cpp -o minishield-fuzz \
+    -L$CONDA_PREFIX/lib -lLLVM-23 -Wl,-rpath,$CONDA_PREFIX/lib
+$ ./minishield-fuzz seeds -runs=600
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO:        7 files found in seeds
+INFO: seed corpus: files: 7 min: 128b max: 354b total: 1722b rss: 60Mb
+#8	pulse  cov: 185 ft: 187 corp: 3/498b exec/s: 4 rss: 63Mb
+#8	INITED cov: 185 ft: 187 corp: 3/498b exec/s: 4 rss: 63Mb
+#9	NEW    cov: 189 ft: 201 corp: 4/663b lim: 191 exec/s: 4 rss: 63Mb L: 165/191 MS: 1 EraseBytes-
+...
+#156	NEW    cov: 192 ft: 205 corp: 6/842b lim: 191 exec/s: 78 rss: 63Mb L: 13/191 MS: 5 ShuffleBytes-CrossOver-ChangeASCIIInt-EraseBytes-CrossOver-
+#192	NEW    cov: 195 ft: 208 corp: 7/1033b lim: 191 exec/s: 96 rss: 63Mb L: 191/191 MS: 1 ChangeASCIIInt-
+...
+#600	DONE   cov: 195 ft: 208 corp: 7/913b lim: 191 exec/s: 150 rss: 63Mb
+Done 600 runs in 4 second(s)
+
+```
+
+No report, clean exit. The progress lines tell the story of the gate: a handful of mutated inputs reach new code - coverage climbs from 185 to 195 - and all of that new code is in the parser and the gate, the error branches the mutations trip. A mutated module that survives parse, verify, and the contract is rare under pure random mutation, so the pass itself is exercised mostly on the seeds; the differential is what stands ready - the moment a valid mutated input appears, the pass is judged on behavior, not shape. The session also left the corpus directory grown: libFuzzer keeps every interesting input it finds in `seeds/` beside the seven seeds, so a later run starts from a wider region.
+
+### The seeds
+
+The seven seeds span the shapes the flattening pass can see: `seed01`, an UncondBr entry - the only shape the state machine's entry rewiring actually rewires; `seed02`, a CondBr entry with no phis - the builder runs and builds scaffolding nothing reaches; `seed03`, a phi loop with an UncondBr entry - the full pipeline, phi demotion and entry rewiring; `seed04`, a switch in the body; `seed05`, a single-block function where the builder does nothing at all; `seed06`, an intrinsic call - the harness's gate allows the declare, the plugin's eligibility guard rejects the call; and `seed07`, a phi join with a CondBr entry - phi demotion without entry rewiring.
+
+```llvm
+# ---- seeds/seed01_uncondbr.ll ----
+source_filename = "seed01_uncondbr.c"
+
+define i32 @f(i32 %x) {
+entry:
+  br label %h
+
+h:
+  %c = icmp sgt i32 %x, 0
+  br i1 %c, label %t, label %e
+
+t:
+  ret i32 1
+
+e:
+  ret i32 2
+}
+
+# ---- seeds/seed02_branchy.ll ----
+source_filename = "seed02_branchy.c"
+
+define i32 @f(i32 %x) {
+entry:
+  %c = icmp sgt i32 %x, 10
+  br i1 %c, label %t, label %e
+
+t:
+  %a = mul i32 %x, 3
+  %b = add i32 %a, 1
+  ret i32 %b
+
+e:
+  %c2 = icmp sgt i32 %x, 0
+  br i1 %c2, label %p, label %n
+
+p:
+  ret i32 100
+
+n:
+  ret i32 -100
+}
+
+# ---- seeds/seed03_loop.ll ----
+source_filename = "seed03_loop.c"
+
+define i32 @f(i32 %x) {
+entry:
+  br label %h
+
+h:
+  %i = phi i32 [ 0, %entry ], [ %nx, %b ]
+  %c = icmp slt i32 %i, %x
+  br i1 %c, label %b, label %e
+
+b:
+  %nx = add i32 %i, 1
+  br label %h
+
+e:
+  ret i32 %i
+}
+
+# ---- seeds/seed04_switch.ll ----
+source_filename = "seed04_switch.c"
+
+define i32 @f(i32 %x) {
+entry:
+  %c = icmp sgt i32 %x, 0
+  br i1 %c, label %body, label %zero
+
+zero:
+  ret i32 0
+
+body:
+  switch i32 %x, label %def [
+    i32 1, label %one
+    i32 2, label %two
+    i32 3, label %three
+  ]
+
+one:
+  ret i32 10
+
+two:
+  ret i32 20
+
+three:
+  ret i32 30
+
+def:
+  ret i32 40
+}
+
+# ---- seeds/seed05_straight.ll ----
+source_filename = "seed05_straight.c"
+
+define i32 @f(i32 %x) {
+entry:
+  %a = mul i32 %x, %x
+  %b = add i32 %a, 1
+  ret i32 %b
+}
+
+# ---- seeds/seed06_intrinsic.ll ----
+source_filename = "seed06_intrinsic.c"
+
+declare i32 @llvm.abs.i32(i32, i1)
+
+define i32 @f(i32 %x) {
+entry:
+  %a = call i32 @llvm.abs.i32(i32 %x, i1 false)
+  %b = add i32 %a, 5
+  ret i32 %b
+}
+
+# ---- seeds/seed07_phi_join.ll ----
+source_filename = "seed07_phi_join.c"
+
+define i32 @f(i32 %x) {
+entry:
+  %c = icmp sgt i32 %x, 0
+  br i1 %c, label %t, label %e
+
+t:
+  %a = mul i32 %x, 2
+  br label %j
+
+e:
+  %b = add i32 %x, 10
+  br label %j
+
+j:
+  %v = phi i32 [ %a, %t ], [ %b, %e ]
+  %c2 = icmp sgt i32 %v, 50
+  br i1 %c2, label %big, label %small
+
+big:
+  ret i32 1
+
+small:
+  ret i32 0
+}
+
+```
+
+### The negative control
+
+A fuzzer that finds nothing has proved nothing: its silence could be 'there is no bug' or it could be 'the harness cannot see bugs of this kind'. The way to tell the difference is to plant a known bug - a mutant. Copy the plugin's six sources to a scratch directory and change one line in `StateMachineBuilder.cpp`: the initial state the entry block stores is the id of the entry's successor; the mutant stores the next id instead.
+
+```bash
+$ mkdir -p mutant/src && cp lib/*.cpp mutant/src/
+$ diff lib/StateMachineBuilder.cpp mutant/src/StateMachineBuilder.cpp
+54c54
+<                 auto *initialState = entryBuilder.getInt32(successorId);
+---
+>                 auto *initialState = entryBuilder.getInt32(successorId + 1)
+
+$ clang++-23 -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -D_GLIBCXX_USE_CXX11_ABI=1 \
+    -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS \
+    -D__STDC_LIMIT_MACROS -Iinclude -I$CONDA_PREFIX/include \
+    mutant/src/*.cpp -o mutant/libMiniShieldMutant.so \
+    -L$CONDA_PREFIX/lib -lLLVM-23 -Wl,-rpath,$CONDA_PREFIX/lib
+```
+
+The mutant is built with the learner's own build flags (the ones from `build/compile_commands.json`), the same include tree, one line apart. Now point the harness at the mutant - the `MINISHIELD_PLUGIN` override exists for exactly this - and run the same seeds:
+
+```bash
+$ MINISHIELD_PLUGIN=mutant/libMiniShieldMutant.so ./minishield-fuzz seeds -runs=7
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO:        7 files found in seeds
+INFO: seed corpus: files: 7 min: 128b max: 354b total: 1722b rss: 60Mb
+
+[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed the behavior of @f
+[fuzz] input module (179 bytes):
+source_filename = "seed01_uncondbr.c"
+
+define i32 @f(i32 %x) {
+entry:
+  br label %h
+
+h:
+  %c = icmp sgt i32 %x, 0
+  br i1 %c, label %t, label %e
+
+t:
+  ret i32 1
+
+e:
+  ret i32 2
+}
+
+[fuzz] pass diagnostics (re-run live):
+[MiniShield] eligible: f
+Number of Phis: 0
+[fuzz] battery arg -2147483648: original=2 flattened=1
+[fuzz] flattened module carries: store i32 1, ptr %ms.state, align 4
+
+[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed the behavior of @f
+[fuzz] input module (243 bytes):
+source_filename = "seed03_loop.c"
+
+define i32 @f(i32 %x) {
+entry:
+  br label %h
+
+h:
+  %i = phi i32 [ 0, %entry ], [ %nx, %b ]
+  %c = icmp slt i32 %i, %x
+  br i1 %c, label %b, label %e
+
+b:
+  %nx = add i32 %i, 1
+  br label %h
+
+e:
+  ret i32 %i
+}
+
+[fuzz] pass diagnostics (re-run live):
+[MiniShield] eligible: f
+Number of Phis: 1
+[fuzz] battery arg -2147483648: original=0 flattened=-1721230799
+[fuzz] flattened module carries: store i32 1, ptr %ms.state, align 4
+#8	INITED cov: 185 ft: 187 corp: 3/607b exec/s: 0 rss: 63Mb
+#8	DONE   cov: 185 ft: 187 corp: 3/607b lim: 288 exec/s: 0 rss: 63Mb
+Done 8 runs in 0 second(s)
+
+```
+
+Both mutant-killers fire, on the first battery argument. For `seed01` the mutant's wrong initial state sends the dispatch straight to `%t`, so `f` returns 1 for every input - the differential catches `original=2` (at `x = INT_MIN`) against `flattened=1`. For `seed03` the wrong state lands the dispatch in the loop body before the demoted phi's stack slot is ever written, so the flattened binary reads an uninitialized slot: `flattened=-1721230799`. The exact number changes from run to run; that variance is what an uninitialized read looks like. (libFuzzer also runs one empty unit first, hence the 8 runs.)
+
+### Reading the regression in the IR
+
+```llvm
+source_filename = "seed01_uncondbr.c"
+
+define i32 @f(i32 %x) {
+entry:
+  %ms.state = alloca i32, align 4
+  store i32 0, ptr %ms.state, align 4
+  br label %ms.dispatch
+
+h:                                                ; preds = %ms.dispatch
+  %c = icmp sgt i32 %x, 0
+  br i1 %c, label %t, label %e
+
+t:                                                ; preds = %ms.dispatch, %h
+  ret i32 1
+
+e:                                                ; preds = %ms.dispatch, %h
+  ret i32 2
+
+ms.dispatch:                                      ; preds = %entry
+  %ms.current = load i32, ptr %ms.state, align 4
+  switch i32 %ms.current, label %ms.invalid [
+    i32 0, label %h
+    i32 1, label %t
+    i32 2, label %e
+  ]
+
+ms.invalid:                                       ; preds = %ms.dispatch
+  unreachable
+}
+
+```
+
+The report's last line points at the evidence. The flattened `seed01` stores the initial state in the entry block and switches on it in the dispatcher: state `0` is `%h`, `1` is `%t`, `2` is `%e` - the ids the builder assigned in block order. The mutant's flattening differs by exactly one token: the entry block stores `1` instead of `0` (in the mutant's flattened module the same line reads `store i32 1, ptr %ms.state, align 4`), so the first dispatch lands on `%t` instead of `%h`. Same scaffolding, one wrong id, and every argument to `f` answers 1. That is the whole class of bug the differential is built for: the IR still parses, still verifies, the scaffolding is still shape-correct; only the behavior moved. A verify-only test never sees it.
+
+With the negative control established, the clean session's verdict stands: the learner's `minishield-flatten`, as it stands, reports no behavioral regression over the region it was probed - the capstone's exit criterion for this volume. The fuzzer is a standing instrument, not a one-off test: every time the pass changes - the CondBr entry rewiring that comes next, the terminator work after that - the same harness, the same seeds, and one extra build line tell you whether behavior held.
+
+Checkpoint: (a) The input contract rejects a module that defines `@main` or declares a non-intrinsic function. Why must each of those two clauses hold for the differential to mean anything? (b) The harness skips an input when the original binary traps on a battery argument, but reports one when the flattened binary traps or disagrees. What does a trap in the original tell you about the input, and why is skipping - not reporting - the right call? (c) What does the negative control establish that the 600-run clean session cannot, on its own?
+
+### Model answer
+
+1. (a) The harness links its own wrapper `main` (reads one argument, prints `f(x)`); a module that defines its own `main` collides with it, and the comparison is no longer between 'the pass ran' and 'it did not'. A non-intrinsic declare is a call to a function whose body the harness does not have: the binary would not link, or its output would depend on code the pass never touched, and a divergence could no longer be attributed to the flattening. The contract keeps the comparison closed: two binaries that differ only in whether `minishield-flatten` ran between parse and compile.
+
+2. (b) A trap in the original - the unmodified input, compiled as-is - is undefined behavior the input carried before the pass ever ran: an out-of-range shift, a division by zero, an integer overflow on a battery edge value. The pass is not responsible for UB it did not introduce, and reporting it would be a false positive; the fuzzer's job is to find behavior the pass changes, not to police the inputs. So the harness discards that input (returns 0) and moves on. A trap - or a disagreement where the original was healthy - is attributed to the pass and reported.
+
+3. (c) The clean session only shows that nothing was found in the explored region - but 'found nothing' is compatible with 'the harness cannot see bugs of this kind'. The negative control plants a known behavioral bug (the one-line off-by-one in the initial state) and shows the harness catches it on the first battery argument, with the exact diff and the exact IR line. Only then does the clean session's silence become evidence: the pass preserved behavior over the explored region, rather than the test being too weak to notice otherwise.
