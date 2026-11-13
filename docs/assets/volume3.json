@@ -42,7 +42,7 @@
       "originalTitle": "The code-hardening landscape",
       "summary": "Place control-flow flattening in the threat model, name the hardening families this volume covers, and set the standard for claiming a hardening technique works.",
       "takeaway": "Flattening is one family — obfuscation. Each technique answers a different threat at a different cost, and obfuscation is the only family whose value the final optimizer can remove.",
-      "source": "day3",
+      "source": "volume3",
       "blocks": [
         {
           "type": "paragraph",
@@ -144,7 +144,7 @@
       "originalTitle": "The indirect call check",
       "summary": "Forward CFI guards indirect calls: read the llvm.type.test + llvm.ubsantrap IR that clang 23.1.5 emits under -fsanitize=cfi-icall -flto, understand why the guard exists only where LTO cannot resolve the target, and verify at runtime that a wrong-type call aborts with SIGILL.",
       "takeaway": "CFI-ICALL is a type test on the callee pointer, inserted by LTO only where the target is genuinely unknown: it aborts wrong-type targets with SIGILL and says nothing about a wrong function of the right type.",
-      "source": "day3",
+      "source": "volume3",
       "blocks": [
         {
           "type": "paragraph",
@@ -247,7 +247,7 @@
       "originalTitle": "The vtable check",
       "summary": "Backward CFI guards virtual calls: read the vtable-pointer llvm.type.test that clang++ 23.1.5 emits under -fsanitize=cfi-vcall, understand which corruptions it catches and which it misses, and verify at runtime that a wrong-class vtable aborts while a derived-class vtable passes.",
       "takeaway": "CFI-VCALL tests the vtable pointer against the static base-class descriptor before dispatch: it catches an object with the wrong class's vtable, not a legitimate vtable with corrupted slots.",
-      "source": "day3",
+      "source": "volume3",
       "blocks": [
         {
           "type": "paragraph",

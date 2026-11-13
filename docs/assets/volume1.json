@@ -5014,7 +5014,7 @@
       "originalTitle": "LLVM’s in-memory object model",
       "summary": "See how a module, function, block, instruction, value, and type fit together in LLVM’s C++ API.",
       "takeaway": "Follow the ownership tree and distinguish an IR label, a C++ object, and a value.",
-      "source": "day1",
+      "source": "volume1",
       "group": "build",
       "blocks": [
         {
@@ -5262,7 +5262,7 @@
       "originalTitle": "LLVM types and values",
       "summary": "Understand the i1, i32, void, ptr, and aggregate types that determine what MiniShield can transform.",
       "takeaway": "Types describe values; an address, a loaded value, and an instruction result are different things.",
-      "source": "day1",
+      "source": "volume1",
       "group": "build",
       "blocks": [
         {
@@ -5522,7 +5522,7 @@
       "originalTitle": "LLVM control flow",
       "summary": "Read basic blocks, terminators, CFG edges, PHIs, and the state transitions that flattening must preserve.",
       "takeaway": "Terminators create the graph edges; state updates must preserve the destination each original edge selected.",
-      "source": "day1",
+      "source": "volume1",
       "group": "build",
       "blocks": [
         {
@@ -5751,7 +5751,7 @@
       "originalTitle": "Create instructions with IRBuilder",
       "summary": "Understand the IRBuilder model and build a short typed instruction sequence that replaces a placeholder return.",
       "takeaway": "Choose where instructions go, create a value, use it, and explicitly remove obsolete instructions.",
-      "source": "day1",
+      "source": "volume1",
       "group": "build",
       "blocks": [
         {
@@ -5898,7 +5898,7 @@
       "originalTitle": "Build a dispatcher with IRBuilder",
       "summary": "Use IRBuilder to load the current state and create a switch that maps state IDs to basic blocks.",
       "takeaway": "Create the selector, terminate the dispatcher with one switch, then attach each case to that switch.",
-      "source": "day1",
+      "source": "volume1",
       "group": "build",
       "blocks": [
         {
@@ -6355,7 +6355,7 @@
       "originalTitle": "Glossary. Terms used in the README and Volume 1",
       "summary": "The working glossary for the README and Volume 1: every term used in the guide, defined in one to three sentences with a pointer to the lesson where it appears.",
       "takeaway": "If a term is new, the glossary is the fastest detour.",
-      "source": "day1",
+      "source": "volume1",
       "blocks": [
         {
           "type": "paragraph",

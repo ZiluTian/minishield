@@ -29,7 +29,7 @@ but you may not use them for commercial purposes without prior written
 permission from the author.
 
 Covered files:
-  - day1, day2, day3           (teaching source / book text)
+  - volume1, volume2, volume3    (teaching source / book text)
   - docs/**                     (the rendered book site)
   - PLAN.md                     (the study roadmap)
 

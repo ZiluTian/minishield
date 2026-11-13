@@ -12,7 +12,7 @@ exercises and complete reference examples.
 
 **[Read the Volume 1 book](https://zilutian.github.io/minishield/)** — step-by-step
 lessons, diagrams, code, explanations, and checkpoints. The editable teaching
-source is [day1](day1); the roadmap is [PLAN.md](PLAN.md).
+source is [volume1](volume1); the roadmap is [PLAN.md](PLAN.md).
 
 **Volume 1 roadmap.** Volume 1 ends with one decision — which functions a
 control-flow-flattening pass may touch. You build a read-only stats pass and a
@@ -21,12 +21,12 @@ The flattening rewrite itself is Volume 2.
 [Volume 2: transformations](https://zilutian.github.io/minishield/#day2) adds
 PHI and cross-block value demotion, then dispatcher construction, then the
 testing, measurement, and demo chapters that prove it. Its teaching notes are
-in [day2](day2).
+in [volume2](volume2).
 [Volume 3: hardening techniques](https://zilutian.github.io/minishield/#day3)
 is a crash course on the techniques flattening leaves out — control-flow
 integrity, stack canaries, OLLVM-style obfuscation, position independence, and
 the fuzzing that proves each one still behaves; its teaching source is
-[day3](day3). Both books are complete drafts, with implementation exercises
+[volume3](volume3). Both books are complete drafts, with implementation exercises
 and measurements still to be done.
 
 ## Beyond flattening: a framework for hardening
@@ -103,8 +103,8 @@ This repository uses a split license; see [LICENSE](LICENSE) for the full text.
 
 - **Code** — the pass-plugin source (`include/`, `lib/`), build files, tests,
   and scripts are licensed under the [MIT License](LICENSE).
-- **Book and teaching content** — the teaching sources ([day1](day1),
-  [day2](day2), [day3](day3)), the rendered book site ([docs](docs)), and the
+- **Book and teaching content** — the teaching sources ([volume1](volume1),
+  [volume2](volume2), [volume3](volume3)), the rendered book site ([docs](docs)), and the
   roadmap ([PLAN.md](PLAN.md)) are licensed under
   [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). You may
   share and adapt them for non-commercial purposes with attribution, but

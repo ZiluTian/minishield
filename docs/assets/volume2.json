@@ -6737,7 +6737,7 @@
       "originalTitle": "Define the supported input before mutation",
       "summary": "Tighten the Volume 1 guard before turning the prototype into a complete dispatcher. Scope is a correctness decision.",
       "takeaway": "Reject unsupported input before the first edit.",
-      "source": "day2",
+      "source": "volume2",
       "group": "complete",
       "blocks": [
         {
@@ -7818,7 +7818,7 @@
       "originalTitle": "Give state-machine construction its own class",
       "summary": "Extract the builder from the orchestrating pass and make its preconditions explicit.",
       "takeaway": "A small interface separates policy, preparation, and construction.",
-      "source": "day2",
+      "source": "volume2",
       "group": "complete",
       "blocks": [
         {
@@ -8247,7 +8247,7 @@
       "originalTitle": "Choose states for conditional branches",
       "summary": "Use select to compute the next state without introducing another conditional branch.",
       "takeaway": "Condition, true destination, false destination: preserve their order.",
-      "source": "day2",
+      "source": "volume2",
       "group": "complete",
       "blocks": [
         {
@@ -8604,7 +8604,7 @@
       "originalTitle": "Lower original switches to state selection",
       "summary": "Preserve default behavior and each integer case while replacing the original multi-way terminator.",
       "takeaway": "Start from the default state, then override it on matching cases.",
-      "source": "day2",
+      "source": "volume2",
       "group": "complete",
       "blocks": [
         {
@@ -8961,7 +8961,7 @@
       "originalTitle": "Rewrite every original terminator",
       "summary": "Combine the branch forms into one complete, carefully bounded state-machine builder.",
       "takeaway": "Rewrite the snapshot, never the dispatcher’s new switch.",
-      "source": "day2",
+      "source": "volume2",
       "group": "complete",
       "blocks": [
         {
@@ -9314,7 +9314,7 @@
       "originalTitle": "Orchestrate policy, preparation, and construction",
       "summary": "Finish the pass as an ordered pipeline and account for every mutation in analysis invalidation.",
       "takeaway": "One pass coordinates; each helper has a focused job.",
-      "source": "day2",
+      "source": "volume2",
       "group": "complete",
       "blocks": [
         {
@@ -9669,7 +9669,7 @@
       "originalTitle": "Inspect the final shape with LLVM tools",
       "summary": "Learn to diagnose a transformation from IR, pass traces, and verifier errors before relying on runtime comparisons.",
       "takeaway": "The verifier catches structure; inspection explains how it was built.",
-      "source": "day2",
+      "source": "volume2",
       "group": "verify",
       "blocks": [
         {
@@ -9988,7 +9988,7 @@
       "originalTitle": "Compare observable behavior on a defined domain",
       "summary": "Build original and transformed functions from the same front-end IR, then compare outputs for bounded inputs.",
       "takeaway": "Equivalent behavior is stronger than valid IR, but testing is still finite evidence.",
-      "source": "day2",
+      "source": "volume2",
       "group": "verify",
       "blocks": [
         {
@@ -10392,7 +10392,7 @@
       "originalTitle": "Add difficult CFG fixtures deliberately",
       "summary": "Exercise nested loops, PHI cycles, multiple returns, shared switch destinations, and the unchanged rejection contract.",
       "takeaway": "One fixture should isolate one failure mode.",
-      "source": "day2",
+      "source": "volume2",
       "group": "verify",
       "blocks": [
         {
@@ -10751,7 +10751,7 @@
       "originalTitle": "Account for optimizers, debug data, and limitations",
       "summary": "Understand where the transformation sits in a compilation pipeline and what the prototype does not guarantee.",
       "takeaway": "Measure the artifact you actually ship, not the intermediate picture you like.",
-      "source": "day2",
+      "source": "volume2",
       "group": "verify",
       "blocks": [
         {
@@ -11082,7 +11082,7 @@
       "originalTitle": "Close Volume 2 with an evidence checklist",
       "summary": "Separate a completed book draft from a completed learner implementation, then prepare the handoff to the test-and-measurement work.",
       "takeaway": "A checklist is a claim only after its evidence exists.",
-      "source": "day2",
+      "source": "volume2",
       "group": "verify",
       "blocks": [
         {
@@ -11390,7 +11390,7 @@
       "originalTitle": "What evidence will make the pass trustworthy?",
       "summary": "Turn the Volume 2 implementation into a set of independently checkable claims before measuring it.",
       "takeaway": "Each kind of test answers a different question.",
-      "source": "day2",
+      "source": "volume2",
       "group": "design",
       "blocks": [
         {
@@ -11710,7 +11710,7 @@
       "originalTitle": "Build one core that the plugin and tests can use",
       "summary": "Factor your own implementation into a position-independent static library while keeping one shared LLVM in the process.",
       "takeaway": "A MODULE is loaded by opt; a test executable links a reusable core.",
-      "source": "day2",
+      "source": "volume2",
       "group": "design",
       "blocks": [
         {
@@ -11858,7 +11858,7 @@
       "originalTitle": "Parse tiny IR in a C++ unit test",
       "summary": "Learn ownership and lifetime while creating the smallest useful eligibility test.",
       "takeaway": "The context outlives the module; borrowed functions outlive neither.",
-      "source": "day2",
+      "source": "volume2",
       "group": "unit",
       "blocks": [
         {
@@ -12113,7 +12113,7 @@
       "originalTitle": "Test the graph and the analysis manager",
       "summary": "Assert edges and dominance through LLVM APIs rather than relying on diagnostic order.",
       "takeaway": "Register dependencies before requesting cached analysis results.",
-      "source": "day2",
+      "source": "volume2",
       "group": "unit",
       "blocks": [
         {
@@ -12358,7 +12358,7 @@
       "originalTitle": "Assert that the dispatcher really controls the function",
       "summary": "Turn the complete builder’s design into structural assertions independent of temporary names.",
       "takeaway": "A switch merely existing is weaker than every transition using it.",
-      "source": "day2",
+      "source": "volume2",
       "group": "unit",
       "blocks": [
         {
@@ -12669,7 +12669,7 @@
       "originalTitle": "Make rejection tests prove that nothing changed",
       "summary": "Check the intended reason and canonical IR equality, with a valid unsupported fixture.",
       "takeaway": "A rejection is useful only if it occurs before mutation.",
-      "source": "day2",
+      "source": "volume2",
       "group": "unit",
       "blocks": [
         {
@@ -12919,7 +12919,7 @@
       "originalTitle": "Run differential cases with a reproducible seed",
       "summary": "Compare actual process observations on a bounded, defined input domain and report the smallest useful failure record.",
       "takeaway": "Equal nonzero exits or equal crashes are still failures here.",
-      "source": "day2",
+      "source": "volume2",
       "group": "integration",
       "blocks": [
         {
@@ -13302,7 +13302,7 @@
       "originalTitle": "Run the whole suite through CTest",
       "summary": "Connect unit discovery and plugin verification to one command without hiding stale builds or absent tests.",
       "takeaway": "CTest runs registered tests; it does not replace configuration and compilation.",
-      "source": "day2",
+      "source": "volume2",
       "group": "integration",
       "blocks": [
         {
@@ -13620,7 +13620,7 @@
       "originalTitle": "Prove the tests can fail, then minimize a failure",
       "summary": "Practice fault injection and reduction on a disposable reference, preserving the failing property.",
       "takeaway": "A regression fixture records a specific bug, not a large accidental context.",
-      "source": "day2",
+      "source": "volume2",
       "group": "integration",
       "blocks": [
         {
@@ -13951,7 +13951,7 @@
       "originalTitle": "Design measurements before writing a timing loop",
       "summary": "Choose workloads, artifact boundaries, and a fair comparison that answer an actual question.",
       "takeaway": "Measure final artifacts under a recorded pipeline; do not invent expected numbers.",
-      "source": "day2",
+      "source": "volume2",
       "group": "measure",
       "blocks": [
         {
@@ -14312,7 +14312,7 @@
       "originalTitle": "Time useful work, not process startup",
       "summary": "Use a common driver, defined modular arithmetic, observable checksums, warmups, and repeated paired trials.",
       "takeaway": "A checksum guards the workload; a timing distribution describes its cost.",
-      "source": "day2",
+      "source": "volume2",
       "group": "measure",
       "blocks": [
         {
@@ -14660,7 +14660,7 @@
       "originalTitle": "Write a report whose claims match the evidence",
       "summary": "Connect raw observations to limits, architecture, and reproducible commands.",
       "takeaway": "Report measured costs and observed structure without claiming security proof.",
-      "source": "day2",
+      "source": "volume2",
       "group": "finish",
       "blocks": [
         {
@@ -15017,7 +15017,7 @@
       "originalTitle": "Build a reproducible demo from a fresh directory",
       "summary": "Make the setup, generation, comparison, and evidence visible enough for someone else to repeat.",
       "takeaway": "A demo should fail at the first broken prerequisite.",
-      "source": "day2",
+      "source": "volume2",
       "group": "finish",
       "blocks": [
         {
@@ -15395,7 +15395,7 @@
       "originalTitle": "Handle the simulated O2 bug and close out the project",
       "summary": "Practice a support workflow, then audit the evidence before claiming completion.",
       "takeaway": "The book can be finished while its exercises remain unfinished.",
-      "source": "day2",
+      "source": "volume2",
       "group": "finish",
       "blocks": [
         {
@@ -15719,7 +15719,7 @@
       "originalTitle": "Look up a term",
       "summary": "A compact reference for the general compiler and project vocabulary used in Volume 2; LLVM-specific and C++-specific terms each have their own document.",
       "takeaway": "Look up the word, then return to the concrete IR example.",
-      "source": "day2",
+      "source": "volume2",
       "group": "reference",
       "blocks": [
         {
@@ -16135,7 +16135,7 @@
       "originalTitle": "LLVM concepts",
       "summary": "The LLVM-specific terms of Volume 2: the IR constructs the pass reads and writes, the call and function properties the guard checks, and the C++ API surface the pass uses.",
       "takeaway": "Name the construct, then name the API that reads or writes it.",
-      "source": "day2",
+      "source": "volume2",
       "group": "reference",
       "blocks": [
         {
@@ -17047,7 +17047,7 @@
       "originalTitle": "C++ concepts",
       "summary": "The C++ language concepts the Volume 2 lessons rely on: pointers and references, casts, classes, and translation units.",
       "takeaway": "Say whether a value is borrowed, copied, or owned before you write the expression.",
-      "source": "day2",
+      "source": "volume2",
       "group": "reference",
       "blocks": [
         {
@@ -17454,7 +17454,7 @@
       "originalTitle": "Testing and measurement concepts",
       "summary": "A reference for ownership, test design, reproducibility, and performance vocabulary.",
       "takeaway": "Use a precise term to name the claim you are checking.",
-      "source": "day2",
+      "source": "volume2",
       "group": "reference",
       "blocks": [
         {
