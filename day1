@@ -2657,7 +2657,307 @@ was left untouched.
 2. `PreservedAnalyses::all()` is correct on the rejected path because nothing was edited: the rejection only prints the function name and reason to `llvm::errs()`, so the promise that every cached analysis remains valid is true — the same reasoning that makes `all()` correct for the read-only `StatsPass`. (A real flattening rewrite, by contrast, generally returns `none()` unless it explicitly maintains particular analyses.)
 3. An empty canonical diff, not a successful `verify`, proves the function was left untouched because `verify` proves only validity — that the IR obeys structural rules — and a module can be valid yet changed: a well-formed wrong transformation passes `verify` too. The rejection contract is byte-for-byte identity in canonical form: print the rejected function's IR with and without the pass (for example `tests/ir/coroutine.ll`) through LLVM's printer and require `diff -u build/before.ll build/after.ll` to be empty. Only that check rules out partial edits.
 
-1.6.1 Create instructions with IRBuilder
+1.6.1 LLVM’s in-memory object model
+===================================
+
+A pass does not edit a printed `.ll` file as text. It walks LLVM's in-memory
+C++ objects. Knowing which object contains which other object tells you where
+to start, what a loop gives you, and which parent owns an instruction you may
+erase.
+
+| LLVM object | Contains or represents | How MiniShield uses it |
+| --- | --- | --- |
+| `LLVMContext` | Shared, uniqued types and constants plus IR-wide support data | Get it from `F.getContext()` when creating types, constants, or blocks. |
+| `Module` | A whole IR unit: functions, globals, declarations, and module metadata | `opt` loads a `.ll` file into a Module before the pass pipeline runs. |
+| `Function` | A function definition or declaration, with its arguments and basic blocks; it is also a module-level `GlobalValue` and a `Value` | Function passes receive a Function; declarations have no body to flatten. |
+| `BasicBlock` | An ordered list of instructions with one entry and a final terminator | The flattener assigns state IDs to blocks and rewrites their terminators. |
+| `Instruction` | One operation in a basic block; result-producing instructions are also Values | The pass scans instructions for PHIs, calls, allocations, and values crossing block boundaries. |
+| `Value` | The common interface for typed operands such as arguments, constants, globals, and instruction results | IRBuilder returns Values that later instructions consume; Values also have uses. |
+| `Type` | The description of a value's shape, such as `i32`, `ptr`, or `void` | The eligibility guard checks result types; the state slot is i32 storage. |
+
+The containment chain is `Module → Function → BasicBlock → Instruction`. It is
+a useful starting point, but not every object is stored in that chain:
+arguments belong to a Function, constants are shared/uniqued through an
+`LLVMContext`, and types describe values rather than being executable objects.
+
+### Walk the objects in the same order
+
+```cpp
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+
+void inspectModule(llvm::Module &M) {
+    for (llvm::Function &F : M) {
+        if (F.isDeclaration())
+            continue;
+
+        for (llvm::BasicBlock &BB : F) {
+            for (llvm::Instruction &I : BB) {
+                llvm::Type *resultType = I.getType();
+                (void)resultType; // Ask what shape this instruction returns.
+            }
+        }
+    }
+}
+```
+
+Each range supplies a reference to an existing object: the Module yields
+Functions, a Function yields BasicBlocks, and a BasicBlock yields Instructions.
+The loops do not copy the IR objects. The nested traversal mirrors the parent
+structure, which is why a Function pass naturally starts at `F` and visits its
+blocks and instructions.
+
+### Read one LLVM function as C++ objects
+
+```llvm
+define i32 @add_one(i32 %x) {
+entry:
+  %sum = add i32 %x, 1
+  ret i32 %sum
+}
+```
+
+`@add_one` is a Function object and module-level symbol. `%x` is an Argument;
+arguments are Values. `entry:` names a BasicBlock. In C++, `BasicBlock`
+derives from `Value`, but the printed label is a control-flow destination, not
+an ordinary integer or pointer datum. `%sum = add ...` is an Instruction;
+because `add` produces an i32 result, it is also a Value used by `ret`. The
+literal `1` is a typed constant Value, not an Instruction. `i32` is a Type
+describing the shape of values; it is not a value itself.
+
+LLVM printer punctuation does not map one-to-one to C++ classes. `@` names a
+module-level symbol; `%` names local values and block labels, disambiguated by
+syntax and position. A Value's type describes its operand or result shape,
+and its use-list records where it is consumed. Parent containers own their
+child IR nodes, so erasing an Instruction invalidates that instruction
+pointer. A pass must not reuse a collected pointer after erasure.
+
+A `BasicBlock *` is an address of the block object owned by its Function; it
+is not a copy of the block and not its printed name. The string `entry` is a
+label for humans and IR references, while pointer identity is what a
+`DenseMap` uses to key state IDs. A C++ reference such as `BasicBlock &BB` is
+an alias for an existing object; a pointer-taking API needs `&BB` to receive
+that object's address.
+
+Task: For the function above, name the Function, BasicBlock, Argument,
+Instruction, Constant, Type, and Value objects. Then trace which range
+supplies each loop variable in `inspectModule`.
+
+Checkpoint: Why is a `BasicBlock *` suitable as a state-map key while the
+printed label `entry` is only a display name? Why must a collected
+`Instruction *` be discarded after that instruction is erased?
+
+### Model answer
+
+`BasicBlock *` identifies the actual object owned by the Function, independent
+of its optional printed name. A label helps read output but is not the block's
+C++ identity. The parent owns its instructions; erasing one destroys that
+object, so any pointer to it is invalid and must not be dereferenced or reused.
+
+1.6.2 LLVM types and values
+===========================
+
+Every argument, constant, and instruction result has an LLVM Type. Types tell
+LLVM how to interpret an operand and which operations are legal. For a
+transformation, matching types is part of preserving meaning: state IDs must
+fit the state slot, load/store types must agree with addresses, and branch
+conditions must be `i1`.
+
+| LLVM type | Meaning | Project connection |
+| --- | --- | --- |
+| `void` | No returned value | A store and a return from a void function produce no SSA result; skip void instructions when collecting ordinary values. |
+| `i1` | A one-bit integer value, conventionally false/true in conditions | A conditional `br` tests i1; `CreateSelect` also takes an i1 condition. |
+| `i32` | A 32-bit integer bit pattern | The dispatcher state slot stores i32 IDs. The guard accepts scalar instruction result types, including i32. |
+| `ptr` | An opaque pointer value: an address, without a pointee type in the spelling | `alloca` produces a ptr; `load` and `store` spell out the accessed type separately. |
+| `{ ... }` / `[N x T]` | Aggregate shapes, such as a struct or array | Aggregate values are outside the prototype's scalar-value preparation path. |
+| Function type | The parameter and return types that form a callable signature | A call's result type and a function's return type affect the support guard. |
+
+LLVM integer types are not signed or unsigned by themselves. `i32` is 32
+bits; signedness comes from an operation or predicate such as `icmp slt`
+versus `icmp ult`. The same bit pattern can be interpreted according to the
+operation using it.
+
+### A type is not a value
+
+The type `i32` describes the shape; the constant `7` is an i32 value. A C++
+`llvm::Type *` declares a C++ pointer to a Type object; LLVM's printed `ptr`
+is instead an IR type for an address value in the program.
+
+```cpp
+llvm::IRBuilder<> B(block);
+llvm::Type *i32Type = B.getInt32Ty();       // type description
+llvm::ConstantInt *stateID = B.getInt32(7); // i32 constant value
+llvm::AllocaInst *slot =
+    B.CreateAlloca(i32Type, nullptr, "ms.state"); // instruction/value
+B.CreateStore(stateID, slot);                // void-returning instruction
+```
+
+`getInt32Ty()` supplies a type. `getInt32(7)` supplies a constant value of
+that type. `CreateAlloca` inserts an instruction whose result is an LLVM value
+of pointer type: it names an address in the program. `CreateStore` inserts a
+side-effecting instruction but returns `void` in C++; there is no stored result
+to feed into another instruction.
+
+### Read types in a small memory example
+
+This complete function uses a condition, an integer argument, a stack slot,
+and a selected result. No transformation is performed in this example; read
+it once as a complete module:
+
+```llvm
+define i32 @choose_value(i1 %condition, i32 %input) {
+entry:
+  %slot = alloca i32, align 4
+  store i32 %input, ptr %slot, align 4
+  %loaded = load i32, ptr %slot, align 4
+  %chosen = select i1 %condition, i32 %loaded, i32 0
+  ret i32 %chosen
+}
+```
+
+`alloca i32` reserves stack storage and produces its address, whose opaque
+pointer type is `ptr`. `store i32 %input, ptr %slot` writes an i32 through
+that address and has no SSA result. `load i32, ptr %slot` reads an i32; the
+access type appears on `load` because `ptr` does not encode a pointee type.
+`select i1` chooses one of two already-available i32 values. It does not add
+control-flow edges or conditionally execute its operands. `ret i32` returns
+the chosen value from a function declared to return i32.
+
+In C++, `I.getType()` asks for an instruction's result type. A void-returning
+instruction has the `void` type even though it still exists as an Instruction.
+An `AllocaInst` is also an Instruction and a Value, but its result is an
+address. These distinctions explain why the ordinary cross-block worklist
+skips void instructions and the allocation instruction itself.
+
+Task: For each instruction in the function, name its result type if it has
+one. For the alloca, load, and store, separately identify the address and the
+value read or written.
+
+Checkpoint: Why is the type of `%slot` `ptr` even though it reserves i32
+storage? Why does `store` have no `%name` on its left while `load` does?
+
+### Model answer
+
+Opaque `ptr` represents an address and does not encode its pointee type.
+`alloca i32` reserves i32 storage, while `load i32` and `store i32` state the
+accessed type explicitly. `load` produces the value read from memory and
+defines an SSA result. `store` changes memory but produces no SSA result.
+
+1.6.3 LLVM control flow
+======================
+
+LLVM does not represent an if/else or loop as nested syntax. It represents
+possible execution paths as a control-flow graph (CFG): basic blocks are
+nodes, and terminators at block ends define edges. The flattener's job is to
+change these edges while keeping the same computation and return values.
+
+### Basic blocks and terminators
+
+A BasicBlock is a straight-line sequence: execution enters at its first
+instruction and proceeds in order until its final terminator transfers control
+or returns. A terminator must be last.
+
+| Terminator | Control-flow effect | Why it matters here |
+| --- | --- | --- |
+| `br label %next` | Unconditionally transfers to one block. | The simplest edge to replace with a state store and dispatcher branch. |
+| `br i1 %c, label %yes, label %no` | Chooses one of two successors using an i1 condition. | One branch instruction creates two CFG edges; the builder must select the corresponding next state. |
+| `switch i32 %id, label %default [...]` | Chooses one case destination or its default. | The dispatcher uses a switch to turn each state ID into a block destination. |
+| `ret i32 %v` | Returns a value and ends this invocation; no successor. | Returns remain terminal and should not loop back to the dispatcher. |
+| `unreachable` | No successor; reaching it is undefined behavior. | A dispatcher default can use it only when the state is truly impossible under the pass invariant. |
+
+### A conditional branch gives the graph its edges
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:
+  br label %join
+
+right:
+  br label %join
+
+join:
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+The entry branch tests the i1 value: true transfers to `left`, false to
+`right`. It creates two possible edges, not two executions at once. Each arm
+branches unconditionally to `join`. At that block's entry, the PHI chooses
+the incoming value paired with the predecessor edge just taken: 10 from left
+or 20 from right. The return ends the call and yields the selected value.
+
+The graph is `entry → left → join` and `entry → right → join`. With condition
+true, execution takes left and returns 10; with false, it takes right and
+returns 20. The PHI carries path-specific data across the merge. Demoting it
+to a stack slot replaces this edge-based choice with a store on each arm and
+a load at join.
+
+### Inspect graph edges in C++
+
+```cpp
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
+
+void inspectCFG(llvm::Function &F) {
+    for (llvm::BasicBlock &BB : F) {
+        llvm::Instruction *terminator = BB.getTerminator();
+        (void)terminator;
+
+        for (llvm::BasicBlock *successor : llvm::successors(&BB)) {
+            (void)successor; // Address of a destination block.
+        }
+    }
+}
+```
+
+`getTerminator()` returns the final instruction. `llvm::successors(&BB)`
+walks destinations encoded by that terminator; the range yields `BasicBlock *`
+values, while iterating `F` yields `BasicBlock &` references. A return block
+has no successors. A conditional branch has two; predecessor iteration gives
+the reverse relation.
+
+### From an ordinary CFG to a dispatcher CFG
+
+A flattened function keeps its work blocks but changes how execution moves
+between them. The pass assigns a state ID to each prepared non-entry block,
+stores the next ID before entering the dispatcher, and lets the dispatch
+switch select a block. Correctness depends on updating the state on every
+transition: the switch must route to exactly the block the original
+terminator would have selected. Entry setup runs once, and return blocks
+still return instead of dispatching again.
+
+- Original conditional branch: test the condition and select the true or
+  false destination's state ID.
+- Original switch: select the matching case destination's state ID, or the
+  default destination's ID.
+- Original unconditional branch: store its sole successor's ID.
+- Original return: keep the return terminator; it has no next state.
+
+Task: Draw the diamond's four edges before reading the PHI. Predict how the
+chosen predecessor determines the returned value, then explain how the state
+ID must encode that same choice after flattening.
+
+Checkpoint: Why does one conditional `br` create two graph edges? Why must
+the flattener set the state before branching to the dispatcher?
+
+### Model answer
+
+The branch has two label destinations, one selected for true and one for
+false, so the CFG records both possible outgoing edges. The dispatcher reads
+the stored state to choose the next block. If the pass branches there before
+writing the correct successor's ID, it can route to a stale or uninitialized
+state and fail to preserve the original branch choice.
+
+1.6.4 Create instructions with IRBuilder
 ========================================
 
 LLVM IRBuilder is the API this book uses to create and place LLVM IR
@@ -2759,7 +3059,7 @@ Checkpoint: Why does `CreateAdd` return something `CreateRet` can use, while
 creates a constant, not an operation to execute. LLVM prints the constant
 inline as the add's operand, so there is no separate constant instruction.
 
-1.6.2 Build a dispatcher with IRBuilder
+1.6.5 Build a dispatcher with IRBuilder
 =======================================
 
 Volume 2 uses IRBuilder to build the control-flow dispatcher. The high-level

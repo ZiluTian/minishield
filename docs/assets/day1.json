@@ -67,13 +67,16 @@
       "description": "Map blocks and edges into a reusable analysis, then make the eligibility decision that decides which functions a future pass may transform."
     },
     {
-      "name": "Build LLVM IR",
-      "label": "BUILD IR",
+      "name": "LLVM Crash Course",
+      "label": "CRASH COURSE",
       "ids": [
+        75,
+        76,
+        77,
         73,
         74
       ],
-      "description": "Start with IRBuilder’s value-building model, then use it to construct the dispatcher instructions and control flow."
+      "description": "Build the LLVM object model, types, and control-flow graph concepts that the transformations in Volume 2 rely on, then use IRBuilder to construct instructions."
     },
     {
       "name": "Reference",
@@ -4806,6 +4809,1026 @@
       }
     },
     {
+      "id": 75,
+      "day": 1,
+      "number": 1,
+      "title": "LLVM’s in-memory object model",
+      "originalTitle": "LLVM’s in-memory object model",
+      "summary": "See how a module, function, block, instruction, value, and type fit together in LLVM’s C++ API.",
+      "takeaway": "Follow the ownership tree and distinguish an IR label, a C++ object, and a value.",
+      "source": "day1",
+      "group": "build",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "A pass does not edit a printed .ll file as text. It walks LLVM's in-memory C++ objects. Knowing which object contains which other object tells you where to start, what a loop gives you, and which parent owns an instruction you may erase.",
+          "conceptualIntro": true
+        },
+        {
+          "type": "heading",
+          "text": "The object tree for one module"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "LLVM object",
+              "Contains or represents",
+              "How MiniShield uses it"
+            ],
+            [
+              "LLVMContext",
+              "Shared, uniqued types and constants plus IR-wide support data",
+              "Get it from F.getContext() when creating types, constants, or blocks."
+            ],
+            [
+              "Module",
+              "A whole IR unit: functions, globals, declarations, and module metadata",
+              "opt loads a .ll file into a Module before the pass pipeline runs."
+            ],
+            [
+              "Function",
+              "A function definition or declaration, with its arguments and basic blocks",
+              "Function passes receive a Function; declarations have no body to flatten."
+            ],
+            [
+              "BasicBlock",
+              "An ordered list of instructions with one entry and a final terminator",
+              "The flattener assigns state IDs to blocks and rewrites their terminators."
+            ],
+            [
+              "Instruction",
+              "One operation in a basic block; result-producing instructions are also Values",
+              "The pass scans instructions for PHIs, calls, allocations, and values crossing block boundaries."
+            ],
+            [
+              "Value",
+              "The common interface for typed operands such as arguments, constants, globals, and instruction results",
+              "IRBuilder returns Values that later instructions consume; Values also have uses."
+            ],
+            [
+              "Type",
+              "The description of a value's shape, such as i32, ptr, or void",
+              "The eligibility guard checks result types; the state slot is i32 storage."
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The containment chain is Module → Function → BasicBlock → Instruction. It is a useful starting point, but not every object is stored in that chain: arguments belong to a Function, constants are shared/uniqued through an LLVMContext, and types describe values rather than being executable objects."
+        },
+        {
+          "type": "heading",
+          "text": "Walk the objects in the same order"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/Instruction.h\"\n#include \"llvm/IR/Module.h\"\n#include \"llvm/IR/Type.h\"\n\nvoid inspectModule(llvm::Module &M) {\n    for (llvm::Function &F : M) {\n        if (F.isDeclaration())\n            continue;\n\n        for (llvm::BasicBlock &BB : F) {\n            for (llvm::Instruction &I : BB) {\n                llvm::Type *resultType = I.getType();\n                (void)resultType; // Ask what shape this instruction returns.\n            }\n        }\n    }\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Each range supplies a reference to an existing object: the Module yields Functions, a Function yields BasicBlocks, and a BasicBlock yields Instructions. The loops do not copy the IR objects. The nested traversal mirrors the parent structure, which is why a Function pass naturally starts at F and visits its blocks and instructions."
+        },
+        {
+          "type": "deep",
+          "title": "Read one LLVM function as C++ objects",
+          "blocks": [
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @add_one(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  ret i32 %sum\n}"
+            },
+            {
+              "type": "table",
+              "rows": [
+                [
+                  "Printed spelling",
+                  "In-memory object or role"
+                ],
+                [
+                  "@add_one",
+                  "A Function object and module-level symbol."
+                ],
+                [
+                  "@add_one",
+                  "A Function object, module-level symbol, and GlobalValue; functions can also be Values when used as call operands."
+                ],
+                [
+                  "%x",
+                  "An Argument object; arguments are Values."
+                ],
+                [
+                  "entry:",
+                  "A BasicBlock object. In C++, BasicBlock derives from Value, but its IR label is a control-flow destination, not an ordinary integer or pointer datum."
+                ],
+                [
+                  "%sum = add ...",
+                  "An Instruction object. Because add produces an i32 result, it is also a Value used by ret."
+                ],
+                [
+                  "1",
+                  "A typed integer constant Value; it is not an Instruction and executes no separate step."
+                ],
+                [
+                  "i32",
+                  "A Type object describing the width/shape of the values; it is not a value itself."
+                ]
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "The LLVM printer's punctuation is not a one-to-one map to C++ classes. @ names a module-level symbol; % names local values and block labels, disambiguated by syntax and position. A Value's type describes its operand/result shape, and its use-list records where it is consumed. Parent containers own their child IR nodes, so erasing an Instruction invalidates that instruction pointer; a pass collects pointers before mutation and does not use an erased PHINode afterward."
+            },
+            {
+              "type": "paragraph",
+              "text": "Ownership and use are different relationships. A User (such as an Instruction) contains operands; each operand is represented by a Use that points to a Value. For example, ret uses %sum. The block owns the ret instruction, while the Use links ret to the value defined by add. This use-def chain lets a transformation ask where a value is consumed without confusing that relation with which parent owns each instruction."
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Ownership, identity, and pointers"
+        },
+        {
+          "type": "paragraph",
+          "text": "A BasicBlock pointer is an address of the block object owned by its Function; it is not a copy of the block and not its printed name. The string entry is a label for humans and IR references, while pointer identity is what DenseMap uses to key state IDs. C++ references such as BasicBlock &BB are aliases for objects supplied by a range; APIs that expect BasicBlock* need &BB to receive the object's address."
+        },
+        {
+          "type": "paragraph",
+          "text": "This distinction matters during transformations. A vector<BasicBlock*> can store addresses of existing blocks, but it does not own them. A vector<Instruction*> can be a worklist, but after an instruction is erased its pointer is invalid. The pass must understand the parent object and the lifetime of each child it records."
+        },
+        {
+          "type": "task",
+          "text": "Task: For the function in the deep dive, name the Function, BasicBlock, Argument, Instruction, Constant, Type, and Value objects. Then trace which C++ range supplies each loop variable in inspectModule."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why is a BasicBlock* suitable as a state-map key while the printed label entry is only a display name? Why must a collected Instruction* be discarded after that instruction is erased? How does a Use differ from ownership?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The BasicBlock* identifies the actual object owned by the Function, independent of its optional printed name. A label is useful for reading output but is not the block's C++ identity.",
+                "The parent owns its instructions. Erasing an instruction destroys that object, so any pointer to it becomes invalid. A worklist must not dereference or reuse it after erasure.",
+                "A Use records an operand link from a User (for example, ret) to a Value (for example, %sum). The parent BasicBlock owns the instruction; the def-use link describes how its result is consumed."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 952
+    },
+    {
+      "id": 76,
+      "day": 1,
+      "number": 2,
+      "title": "LLVM types and values",
+      "originalTitle": "LLVM types and values",
+      "summary": "Understand the i1, i32, void, ptr, and aggregate types that determine what MiniShield can transform.",
+      "takeaway": "Types describe values; an address, a loaded value, and an instruction result are different things.",
+      "source": "day1",
+      "group": "build",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Every argument, constant, and instruction result has an LLVM Type. Types tell LLVM how to interpret an operand and which operations are legal. For a transformation, matching types is part of preserving meaning: state IDs must fit the state slot, load/store types must agree with addresses, and branch conditions must be i1.",
+          "conceptualIntro": true
+        },
+        {
+          "type": "heading",
+          "text": "Types the MiniShield prototype handles"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "LLVM type",
+              "Meaning",
+              "Project connection"
+            ],
+            [
+              "void",
+              "No returned value",
+              "A store and a return from a void function produce no SSA result; skip void instructions when collecting ordinary values."
+            ],
+            [
+              "i1",
+              "A one-bit integer value, conventionally false/true in conditions",
+              "A conditional br tests i1; CreateSelect also takes an i1 condition."
+            ],
+            [
+              "i32",
+              "A 32-bit integer bit pattern",
+              "The dispatcher state slot stores i32 IDs. The guard accepts scalar instruction result types, including i32."
+            ],
+            [
+              "ptr",
+              "An opaque pointer value: an address, without a pointee type in the spelling",
+              "alloca produces a ptr; load/store spell out the accessed type separately."
+            ],
+            [
+              "{ ... } / [N x T]",
+              "Aggregate shapes, such as a struct or array",
+              "Aggregate values such as structs are outside the prototype’s scalar-value preparation path."
+            ],
+            [
+              "Function type",
+              "The parameter and return types that form a callable signature",
+              "A call's result type and a function's return type affect the support guard."
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "LLVM integer types are not signed or unsigned by themselves. i32 is 32 bits; signedness comes from an operation or predicate such as icmp slt versus icmp ult. The same bit pattern can be interpreted according to the operation using it."
+        },
+        {
+          "type": "heading",
+          "text": "A type is not a value"
+        },
+        {
+          "type": "paragraph",
+          "text": "The type i32 describes the shape; the constant 7 is an i32 value. A C++ llvm::Type* declares a C++ pointer to a Type object; LLVM’s printed ptr is instead an IR type for an address value in the program."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::IRBuilder<> B(block);\nllvm::Type *i32Type = B.getInt32Ty();       // type description\nllvm::ConstantInt *stateID = B.getInt32(7); // i32 constant value\nllvm::AllocaInst *slot =\n    B.CreateAlloca(i32Type, nullptr, \"ms.state\"); // instruction/value\nB.CreateStore(stateID, slot);                // void-returning instruction"
+        },
+        {
+          "type": "paragraph",
+          "text": "getInt32Ty() supplies a type. getInt32(7) supplies a constant value of that type. CreateAlloca inserts an instruction whose result is an LLVM value of pointer type: it names an address in the program. CreateStore inserts a side-effecting instruction but returns void in C++; there is no stored result to feed into a later instruction."
+        },
+        {
+          "type": "heading",
+          "text": "Read types in a small memory example"
+        },
+        {
+          "type": "paragraph",
+          "text": "This complete function uses a condition, an integer argument, a stack slot, and a selected result. Reading each type first makes the data flow easier to follow:"
+        },
+        {
+          "type": "deep",
+          "title": "Complete LLVM module: values, types, and memory",
+          "blocks": [
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @choose_value(i1 %condition, i32 %input) {\nentry:\n  %slot = alloca i32, align 4\n  store i32 %input, ptr %slot, align 4\n  %loaded = load i32, ptr %slot, align 4\n  %chosen = select i1 %condition, i32 %loaded, i32 0\n  ret i32 %chosen\n}"
+            },
+            {
+              "type": "table",
+              "rows": [
+                [
+                  "Instruction",
+                  "Types and meaning"
+                ],
+                [
+                  "%slot = alloca i32",
+                  "Reserves stack storage for one i32 and produces its address, whose opaque pointer type is ptr."
+                ],
+                [
+                  "store i32 %input, ptr %slot",
+                  "Writes an i32 value through a ptr address. store returns no SSA value."
+                ],
+                [
+                  "%loaded = load i32, ptr %slot",
+                  "Reads an i32 through that address. The accessed type is written on load because ptr does not encode a pointee type."
+                ],
+                [
+                  "%chosen = select i1 %condition, i32 %loaded, i32 0",
+                  "Selects one of two i32 values using an i1 condition. Both candidate values are already available; select does not create control-flow edges or execute only one arm."
+                ],
+                [
+                  "ret i32 %chosen",
+                  "Returns an i32 value from a function whose declared return type is i32."
+                ]
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "In the C++ API, I.getType() asks for an instruction's result type. A void-returning instruction has the void type even though it still exists as an Instruction. An AllocaInst is also an Instruction and a Value, but its result is a pointer to storage. These distinctions explain why the ordinary cross-block worklist skips void instructions and the allocation instruction itself."
+            }
+          ]
+        },
+        {
+          "type": "task",
+          "text": "Task: For each line in the module, name the instruction's result type if it has a result. For the alloca, load, and store, separately identify the address and the value read or written."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why is the type of %slot ptr even though it reserves i32 storage? Why does store have no %name on its left, while load does?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Opaque ptr represents an address and does not encode its pointee type. alloca i32 reserves storage for an i32; load i32 and store i32 state the accessed value type explicitly.",
+                "load produces the value read from memory, so it defines an SSA result. store changes memory and produces no SSA result, so it has no left-hand name and the C++ CreateStore method returns void."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 760
+    },
+    {
+      "id": 77,
+      "day": 1,
+      "number": 3,
+      "title": "LLVM control flow",
+      "originalTitle": "LLVM control flow",
+      "summary": "Read basic blocks, terminators, CFG edges, PHIs, and the state transitions that flattening must preserve.",
+      "takeaway": "Terminators create the graph edges; state updates must preserve the destination each original edge selected.",
+      "source": "day1",
+      "group": "build",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "LLVM does not represent an if/else or loop as nested syntax. It represents possible execution paths as a control-flow graph (CFG): basic blocks are nodes, and terminators at block ends define edges. The flattener's job is to change these edges while keeping the same computation and return values.",
+          "conceptualIntro": true
+        },
+        {
+          "type": "heading",
+          "text": "Basic blocks and terminators"
+        },
+        {
+          "type": "paragraph",
+          "text": "A BasicBlock is a straight-line sequence: execution enters at its first instruction and proceeds in order until its final terminator transfers control or returns. A terminator must be last. A branch chooses successor blocks; ret exits the function; unreachable asserts that this point cannot execute in a defined program."
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Terminator",
+              "Control-flow effect",
+              "Why it matters here"
+            ],
+            [
+              "br label %next",
+              "Unconditionally transfers to one block.",
+              "The simplest edge to replace with a state store and dispatcher branch."
+            ],
+            [
+              "br i1 %c, label %yes, label %no",
+              "Chooses one of two successors using an i1 condition.",
+              "One branch instruction creates two CFG edges, and the builder must select the corresponding next state."
+            ],
+            [
+              "switch i32 %id, label %default [...]",
+              "Chooses one case destination or its default.",
+              "The dispatcher uses a switch to turn each state ID into a block destination."
+            ],
+            [
+              "ret i32 %v",
+              "Returns a value and ends this invocation; no successor.",
+              "Returns remain terminal and should not loop back to the dispatcher."
+            ],
+            [
+              "unreachable",
+              "No successor; reaching it is undefined behavior.",
+              "A dispatcher default can use it only when the state is truly impossible under the pass's invariant."
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "A conditional branch gives the graph its edges"
+        },
+        {
+          "type": "deep",
+          "title": "Complete LLVM module: a diamond with a PHI",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "This lesson observes the module without editing it. The listing is therefore shown once; the CFG and concrete paths below are facts read from these exact instructions."
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:\n  br label %join\n\nright:\n  br label %join\n\njoin:\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "table",
+              "rows": [
+                [
+                  "IR line",
+                  "How it controls or carries execution"
+                ],
+                [
+                  "br i1 %condition, label %left, label %right",
+                  "The entry terminator tests the i1 value: true transfers to left, false to right. It creates two possible edges, not two executions at once."
+                ],
+                [
+                  "br label %join",
+                  "Each arm unconditionally transfers to the shared join block."
+                ],
+                [
+                  "%value = phi i32 [ 10, %left ], [ 20, %right ]",
+                  "At block entry, PHI chooses the incoming value paired with the predecessor edge just taken: 10 from left or 20 from right."
+                ],
+                [
+                  "ret i32 %value",
+                  "Ends the call and returns the value selected by the PHI."
+                ]
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "The graph is entry → left → join and entry → right → join. With condition true, execution takes left and join returns 10; with false, it takes right and returns 20. The PHI is important because it carries path-specific data across the merge. Demoting it to a stack slot replaces that edge-based value selection with a store on each arm and a load at join."
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Inspect graph edges in C++"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/CFG.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/Instruction.h\"\n\nvoid inspectCFG(llvm::Function &F) {\n    for (llvm::BasicBlock &BB : F) {\n        llvm::Instruction *terminator = BB.getTerminator();\n        (void)terminator;\n\n        for (llvm::BasicBlock *successor : llvm::successors(&BB)) {\n            (void)successor; // This is an address of a destination block.\n        }\n    }\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "getTerminator() returns the final instruction. llvm::successors(&BB) walks the destinations encoded by that terminator; the range yields BasicBlock* values, while iterating F yields BasicBlock references. A return block has no successors. A conditional branch has two; predecessor iteration gives the reverse relation."
+        },
+        {
+          "type": "heading",
+          "text": "From ordinary CFG to dispatcher CFG"
+        },
+        {
+          "type": "paragraph",
+          "text": "A flattened function keeps its original work blocks but changes how execution moves between them. The pass assigns a state ID to each prepared non-entry block, stores the next ID before entering the dispatcher, and lets the dispatch switch select a block. Correctness depends on updating the state on every transition: the switch must route to exactly the block the original terminator would have selected. Entry setup runs once, and ret blocks still return rather than dispatch again."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Original conditional branch: test the condition and select the true or false destination's state ID.",
+            "Original switch: select the matching case destination's state ID, or the default destination's ID.",
+            "Original unconditional branch: store its sole successor's ID.",
+            "Original return: keep the return terminator; it has no next state."
+          ]
+        },
+        {
+          "type": "task",
+          "text": "Task: Draw the diamond's four edges before reading the PHI. Then predict how the chosen predecessor determines the returned value, and explain how the state ID must encode the same choice after flattening."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why does one conditional br create two graph edges? Why must the flattener set the state before branching to the dispatcher?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The branch has two label destinations, one selected for true and one for false, so the CFG records both possible outgoing edges from entry.",
+                "The dispatcher reads the state to choose the next block. If the pass branches to it before writing the correct successor's ID, it may route to a stale or uninitialized state and no longer follow the original branch choice."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 819
+    },
+    {
+      "id": 73,
+      "day": 1,
+      "number": 4,
+      "title": "Create instructions with IRBuilder",
+      "originalTitle": "Create instructions with IRBuilder",
+      "summary": "Understand the IRBuilder model and build a short typed instruction sequence that replaces a placeholder return.",
+      "takeaway": "Choose where instructions go, create a value, use it, and explicitly remove obsolete instructions.",
+      "source": "day1",
+      "group": "build",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "LLVM IRBuilder is the API this book uses to create and place LLVM IR instructions. A pass often needs more than a description of a change: it must create typed values, attach them to a basic block, and keep the function structurally valid. IRBuilder provides methods for constructing common instructions at a chosen insertion point. The pass still decides what the new instructions should mean and where control should go.",
+          "conceptualIntro": true
+        },
+        {
+          "type": "heading",
+          "text": "A simple way to think about it: position, create, use"
+        },
+        {
+          "type": "paragraph",
+          "text": "A builder remembers an insertion point, which is the position where the next instruction will be placed. A Create... method builds an LLVM value or instruction there. If it returns a value, the next builder call can use that result as an operand. This lets a transformation build a small instruction sequence in execution order."
+        },
+        {
+          "type": "paragraph",
+          "text": "IRBuilder does not decide whether a transformation is correct and does not erase old instructions for you. It also does not promise that every Create... call inserts an instruction: when operands are constants, LLVM may fold the operation into a constant value."
+        },
+        {
+          "type": "heading",
+          "text": "Example: replace a return with x + 1"
+        },
+        {
+          "type": "paragraph",
+          "text": "Assume the function has one i32 argument and currently returns a placeholder constant. This helper inserts an add and a new return before the old terminator, then erases the old return:"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/IR/Instruction.h\"\n\nvoid replaceReturnWithAdd(llvm::Function &F) {\n    llvm::BasicBlock &entry = F.getEntryBlock();\n    llvm::Instruction *oldTerminator = entry.getTerminator();\n    llvm::IRBuilder<> B(oldTerminator);\n\n    llvm::Value *x = F.getArg(0);\n    llvm::Value *sum = B.CreateAdd(x, B.getInt32(1), \"sum\");\n    B.CreateRet(sum);\n    oldTerminator->eraseFromParent();\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "The builder is positioned before the existing return. CreateAdd inserts %sum and returns a Value* that CreateRet can use. CreateRet inserts the new terminator before the old one; eraseFromParent then removes the placeholder return. A later lesson focuses on choosing insertion points safely."
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "C++ expression",
+              "What it means"
+            ],
+            [
+              "IRBuilder<> B(oldTerminator)",
+              "Construct a builder that inserts before the existing return."
+            ],
+            [
+              "B.getInt32(1)",
+              "Create the typed i32 constant 1. A constant is an operand, not an instruction."
+            ],
+            [
+              "B.CreateAdd(x, ..., \"sum\")",
+              "Insert an i32 add. Its result is an LLVM Value* and can feed another instruction."
+            ],
+            [
+              "B.CreateRet(sum)",
+              "Insert a return terminator that returns the computed value."
+            ],
+            [
+              "oldTerminator->eraseFromParent()",
+              "Remove the old return instruction from its parent basic block. IRBuilder does not do this automatically."
+            ]
+          ]
+        },
+        {
+          "type": "deep",
+          "title": "LLVM IR before and after this builder step",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Before: the function returns a placeholder value."
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @add_one(i32 %x) {\nentry:\n  ret i32 0\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "After: the new add defines %sum, and ret returns that value."
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @add_one(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  ret i32 %sum\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "define starts a function definition; @add_one is its module-level name. The function accepts an i32 argument named %x and returns i32. i32 is a 32-bit integer type. entry: names a basic block. In the after module, add combines %x and the constant 1 and defines the local SSA value %sum. ret i32 %sum ends this function call and returns that value to its caller. The type on add makes the literal 1 an i32 operand. The builder's constant helper supplies that typed constant; it does not print as a separate instruction."
+            }
+          ]
+        },
+        {
+          "type": "task",
+          "text": "Task: Read the helper in order. Mark the insertion point, the instruction-creating calls, the returned Value*, and the operation that removes the old terminator."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why does CreateAdd return something that CreateRet can use, while getInt32(1) does not appear as its own instruction?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "CreateAdd inserts an add instruction and returns its resulting LLVM value as a Value*. CreateRet takes that value as its return operand.",
+                "getInt32(1) creates an i32 constant, not an operation to execute. The constant is printed inline as an operand of add, so there is no separate constant instruction."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 605
+    },
+    {
+      "id": 74,
+      "day": 1,
+      "number": 5,
+      "title": "Build a dispatcher with IRBuilder",
+      "originalTitle": "Build a dispatcher with IRBuilder",
+      "summary": "Use IRBuilder to load the current state and create a switch that maps state IDs to basic blocks.",
+      "takeaway": "Create the selector, terminate the dispatcher with one switch, then attach each case to that switch.",
+      "source": "day1",
+      "group": "build",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "A dispatcher block, built one instruction at a time"
+        },
+        {
+          "type": "paragraph",
+          "text": "Suppose the pass has already created a dispatcher block, a default invalid block, an i32 state slot, and a list of blocks with state IDs 0, 1, and so on. This helper builds the dispatch block. It loads the current state and creates a switch whose cases map IDs to destination blocks:"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/ADT/ArrayRef.h\"\n#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/IR/Instructions.h\"\n\nvoid buildDispatcher(\n    llvm::BasicBlock *dispatcher,\n    llvm::BasicBlock *invalidBlock,\n    llvm::Value *stateSlot,\n    llvm::ArrayRef<llvm::BasicBlock *> stateBlocks) {\n    llvm::IRBuilder<> B(dispatcher);\n\n    llvm::LoadInst *current =\n        B.CreateLoad(B.getInt32Ty(), stateSlot, \"ms.current\");\n    llvm::SwitchInst *dispatch = B.CreateSwitch(\n        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));\n\n    for (unsigned id = 0; id < stateBlocks.size(); ++id)\n        dispatch->addCase(B.getInt32(id), stateBlocks[id]);\n}"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// The caller creates the block, then asks the helper to fill it.\nllvm::BasicBlock *dispatcher =\n    llvm::BasicBlock::Create(F.getContext(), \"ms.dispatch\", &F);\nbuildDispatcher(dispatcher, invalidBlock, stateSlot, stateBlocks);"
+        },
+        {
+          "type": "paragraph",
+          "text": "This complete helper assumes its arguments are valid: the slot points to i32 storage, each state block belongs to the same function, and IDs are assigned in the vector's order. It builds one block; another part of the pass must initialize the slot and branch to the dispatcher."
+        },
+        {
+          "type": "heading",
+          "text": "What each builder call contributes"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "C++ builder call",
+              "LLVM IR it creates",
+              "Meaning"
+            ],
+            [
+              "IRBuilder<> B(dispatcher)",
+              "No instruction",
+              "Selects the end of the empty dispatcher block as the insertion point."
+            ],
+            [
+              "B.getInt32Ty()",
+              "No instruction",
+              "Gets the i32 type from the builder's LLVM context; it describes a type, not the number 32 or an i32 value."
+            ],
+            [
+              "B.CreateLoad(type, address, name)",
+              "%ms.current = load i32, ptr %ms.state",
+              "Reads the current i32 value from the memory address held by stateSlot. The pointer is the address; the explicit i32 argument says what type to load."
+            ],
+            [
+              "B.CreateSwitch(value, default, count)",
+              "switch i32 %ms.current, label %ms.invalid [...]",
+              "Ends the block with a terminator. It compares the value with case constants, branches to the matching block, or takes the default destination."
+            ],
+            [
+              "dispatch->addCase(B.getInt32(id), block)",
+              "i32 0, label %state0",
+              "Adds one typed integer case and its destination to the switch already created."
+            ],
+            [
+              "B.getInt32(id)",
+              "No instruction",
+              "Makes an i32 constant used as a switch case; constants are values, not executable instructions."
+            ]
+          ]
+        },
+        {
+          "type": "deep",
+          "title": "LLVM IR before and after constructing the dispatcher block",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "The caller has the state slot and case blocks. Before this construction step, the function has no dispatcher block:"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @dispatch_demo(i32 %state) {\nentry:\n  %ms.state = alloca i32, align 4\n  store i32 %state, ptr %ms.state, align 4\n  br label %left\n\nleft:\n  ret i32 10\n\nright:\n  ret i32 20\n\nms.invalid:\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "The caller creates ms.dispatch, then the helper inserts a load and switch with two cases. The complete module after that construction step is:"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @dispatch_demo(i32 %state) {\nentry:\n  %ms.state = alloca i32, align 4\n  store i32 %state, ptr %ms.state, align 4\n  br label %left\n\nleft:\n  ret i32 10\n\nright:\n  ret i32 20\n\nms.invalid:\n  unreachable\n\nms.dispatch:\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n  ]\n}"
+            },
+            {
+              "type": "heading",
+              "text": "Read the instructions and syntax"
+            },
+            {
+              "type": "table",
+              "rows": [
+                [
+                  "Spelling",
+                  "Meaning in this module"
+                ],
+                [
+                  "define i32 @dispatch_demo(i32 %state)",
+                  "Defines a function named @dispatch_demo. It accepts one i32 argument and returns an i32."
+                ],
+                [
+                  "%ms.state = alloca i32, align 4",
+                  "Reserves stack storage for an i32 and produces a pointer to that address. align 4 is an alignment promise in bytes."
+                ],
+                [
+                  "store i32 %state, ptr %ms.state, align 4",
+                  "Writes the argument value to the address in %ms.state. A store has no SSA result."
+                ],
+                [
+                  "br label %left",
+                  "Transfers control to left. A label is a block destination, not an instruction or data value."
+                ],
+                [
+                  "ret i32 10 / ret i32 20",
+                  "Ends this function call and returns the selected integer to its caller."
+                ],
+                [
+                  "unreachable",
+                  "Marks a point that must not execute in a defined program; it is not a fallback return."
+                ],
+                [
+                  "%ms.current = load i32, ptr %ms.state, align 4",
+                  "Reads one i32 from the address and defines the SSA result %ms.current."
+                ],
+                [
+                  "switch i32 %ms.current, label %ms.invalid [...]",
+                  "Chooses one destination by comparing %ms.current with the typed cases; unmatched values take the default invalid block."
+                ]
+              ]
+            },
+            {
+              "type": "paragraph",
+              "text": "The function signature define i32 @dispatch_demo(i32 %state) defines a function named with @; it accepts one i32 input and returns an i32. Here i32 is a 32-bit integer type. %state is the argument value; %ms.state and %ms.current are local SSA names, while left, right, and ms.dispatch name basic blocks. The % prefix is shared, so syntax and position tell you whether a name refers to a value or a block. The %state argument is stored to the address produced by alloca i32. store writes a value to that address. br label %left transfers control to left, where ret i32 10 ends the call and returns 10. The right block similarly returns 20. unreachable says the invalid block cannot execute in a defined program; it is not a fallback return."
+            },
+            {
+              "type": "paragraph",
+              "text": "In the after module, load i32, ptr %ms.state reads the saved state into the SSA value %ms.current. The pointer type ptr names the address; the following i32 tells load which value type to read. The switch compares the loaded value with typed constants 0 and 1, transfers to the corresponding case block, and sends every other value to ms.invalid. Labels are destinations, not instructions."
+            },
+            {
+              "type": "paragraph",
+              "text": "The switch cases add CFG edges to left and right, and the default adds an edge to ms.invalid. No edge enters ms.dispatch yet: entry still branches directly to left, so this newly constructed switch is disconnected and does not affect execution. That is an intentional intermediate stage. A later step stores a state ID and rewrites the entry edge to reach the dispatcher. Both complete modules are well-formed, but verify alone proves neither completed flattening nor behavior preservation."
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Where the builder writes matters"
+        },
+        {
+          "type": "paragraph",
+          "text": "When adding instructions to an existing entry block, inserting at its end may put an instruction after the terminator, which is invalid. Instead, construct the builder before the old terminator:"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::Instruction *oldTerminator = entry->getTerminator();\nllvm::IRBuilder<> setup(oldTerminator);\nllvm::AllocaInst *stateSlot =\n    setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\");"
+        },
+        {
+          "type": "paragraph",
+          "text": "This inserts the alloca before the old terminator. An alloca i32 reserves stack storage for an i32 and returns a pointer to it; it does not itself store the current state. A later CreateStore writes an ID there. For the special entry-block setup rule used in this project, entry->getFirstInsertionPt() is another way to choose the first legal insertion point, after any PHIs."
+        },
+        {
+          "type": "paragraph",
+          "text": "Use a separate builder for a separate block, or call SetInsertPoint when you intentionally move one builder. A builder remembers its insertion point; it does not infer the desired block from the operands."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — construct and inspect a dispatcher"
+        },
+        {
+          "type": "paragraph",
+          "text": "Start with the intended graph on paper: a state value is loaded, the switch chooses one block, and its default edge goes to the invalid block. Then match each edge in that plan to one API call: CreateLoad makes the selector, CreateSwitch creates the terminator and default edge, and addCase attaches each state-to-block mapping. Check that the chosen insertion point is before any existing terminator and that no instruction is appended after the switch."
+        },
+        {
+          "type": "task",
+          "text": "Task: In StateMachineBuilder, use one builder for the dispatcher. Add the load and switch, then attach a case for every (state ID, block) pair. Keep slot initialization and entry rewrites as separate steps."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Explain which call inserts an instruction, which calls only provide a type or constant, and why addCase does not append a second terminator. Inspect the resulting block with opt and run the verifier.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "CreateLoad inserts the load and returns its LoadInst*; CreateSwitch inserts the switch terminator and returns its SwitchInst*. getInt32Ty() returns a type and getInt32(id) returns a constant, so neither is an instruction. addCase mutates the already-created switch's case list; the block still has one terminator.",
+                "The insertion point determines where CreateLoad and CreateSwitch go. A builder for a new empty dispatcher starts at its end; for an existing block, use an insertion point before its terminator. The switch must remain last. The verifier checks structural validity, while inspecting the cases confirms the intended state mapping."
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Check your understanding"
+        },
+        {
+          "type": "paragraph",
+          "text": "If B.getInt32(2) returns a value, why does it not appear as an instruction in the printed block?"
+        },
+        {
+          "type": "paragraph",
+          "text": "Answer: It is a constant operand, not a computation to execute. The switch uses the constant as a case label; LLVM prints the value inline in the switch."
+        }
+      ],
+      "words": 1359
+    },
+    {
+      "id": 18,
+      "day": 1,
+      "number": 1,
+      "title": "C++ concepts",
+      "originalTitle": "C++ concepts behind the LLVM calls",
+      "summary": "Reference cards for the C++ behind the LLVM calls: references versus pointers, the two jobs of &, and how a range-based loop variable gets its type.",
+      "takeaway": "References bind existing objects; pointers hold addresses. & declares in a type, addresses in an expression.",
+      "source": "include/minishield/CFGAnalyzer.h",
+      "widget": "memory",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Reference cards for the C++ the Volume 1 lessons rely on: references versus pointers, the two jobs of `&`, and how a range-based loop variable is typed. Look these up when a construct matters; each entry states the idea, shows it in this project's code, and links the language reference."
+        },
+        {
+          "type": "heading",
+          "text": "Reference versus pointer"
+        },
+        {
+          "type": "paragraph",
+          "text": "A **reference** is another name for an existing object; a **pointer** is a variable whose value is an object's address. A reference must always name a real object, so it can never be null or reseated; a pointer can start empty and be assigned. In the CFG analysis you walk a function's blocks by reference and store their addresses as pointers."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (const llvm::BasicBlock &BB : F) {      // reference: another name for the block\n    const llvm::BasicBlock *block = &BB;      // pointer: a variable holding the block's address\n    llvm::errs() << BB.getName() << block->getName();\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Use `BB.getName()` through the reference and `block->getName()` through the pointer. `BlockInfo` stores pointers, not references, because a result is plain data that can start empty and be assigned; a reference would not fit a `std::vector` or a default-initialized member."
+        },
+        {
+          "type": "heading",
+          "text": "`&` in a type versus `&` in an expression"
+        },
+        {
+          "type": "paragraph",
+          "text": "The same glyph does two different jobs depending on where it sits. In a type, `&` declares a reference; in an expression, `&` is the address-of operator."
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "const llvm::BasicBlock &BB     in a TYPE:       & declares a reference\n&BB                            in an EXPRESSION: & is address-of, yields BasicBlock *"
+        },
+        {
+          "type": "paragraph",
+          "text": "In `info.block = &BB;`, the `&` asks for the address of the block that `BB` names, producing a `BasicBlock *`, which is exactly what the pointer member holds. Storing a reference where a pointer is expected (`info.block = BB;`) is a type mismatch."
+        },
+        {
+          "type": "heading",
+          "text": "Storing an address, versus storing a pointer as-is"
+        },
+        {
+          "type": "paragraph",
+          "text": "Take the address to fill a pointer member, but do not re-take the address of a value that is already a pointer."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "info.block = &BB;                        // BB is a reference; &BB obtains its address\ninfo.successors.push_back(successor);    // successor is already a BasicBlock *; store as-is\ninfo.successors.push_back(&successor);   // wrong: a BasicBlock **, one level too deep"
+        },
+        {
+          "type": "heading",
+          "text": "`auto` and loop-variable copying"
+        },
+        {
+          "type": "paragraph",
+          "text": "`auto` deduces a type but does not preserve the reference the iterator supplies. A plain `auto` variable copies the element; when the element is noncopyable, that copy fails to compile."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto bb : F) {            // tries to copy each BasicBlock; noncopyable, so it will not compile\n    }\nfor (const auto &bb : F) {     // bind to the existing block; equivalent to const BasicBlock &bb\n    // inspect the block without copying it\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "This is why `for (auto bb : F)` fails: `llvm::BasicBlock` is noncopyable. But `auto` is not always wrong. For a range whose elements are already pointers, a plain `auto` copies only the pointer value, not the pointed-to block."
+        },
+        {
+          "type": "heading",
+          "text": "Follow the range's element type"
+        },
+        {
+          "type": "paragraph",
+          "text": "There is no rule that every traversal uses `&` or every traversal uses `*`. The loop variable's type follows what the range supplies: references for existing objects you inspect without copying, and pointer variables when the elements already hold addresses."
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "for (const llvm::BasicBlock &BB : F)                     // F yields block references\n    for (const llvm::BasicBlock *s : llvm::successors(&BB))  // successors() yields block pointers"
+        },
+        {
+          "type": "paragraph",
+          "text": "See the C++ reference for [references](https://en.cppreference.com/w/cpp/language/reference.html), the [address-of operator](https://en.cppreference.com/w/cpp/language/operator_other.html), [auto](https://en.cppreference.com/w/cpp/language/auto.html), and the [range-based for loop](https://en.cppreference.com/w/cpp/language/expressions.html)."
+        }
+      ],
+      "words": 546,
+      "quiz": {
+        "q": "What does &BB mean in info.block = &BB?",
+        "choices": [
+          "Copy the BasicBlock",
+          "Declare a new reference",
+          "Obtain the address of the block that BB refers to"
+        ],
+        "answer": 2,
+        "why": "In this expression, & is address-of. In a declaration such as BasicBlock &BB, it declares a reference."
+      }
+    },
+    {
+      "id": 19,
+      "day": 1,
+      "number": 2,
+      "title": "LLVM concepts",
+      "originalTitle": "LLVM concepts the guard relies on",
+      "summary": "Reference cards for the LLVM constructs the eligibility decision mentions: exception-handling pads, personality routines, and intrinsics.",
+      "takeaway": "Pads receive the unwind; a personality routine enables them; an intrinsic call keeps opcode Call.",
+      "source": "tests/ir/instruction-kinds.ll",
+      "widget": "memory",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Reference cards for the LLVM IR constructs the eligibility decision mentions: exception-handling pads, personality routines, and intrinsics. Each entry states what the construct is, how it appears in IR, and the guard rule that involves it."
+        },
+        {
+          "type": "heading",
+          "text": "Exception-handling pad (EH pad)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The word **pad** comes from **landing pad**: a place where control arrives when an exception interrupts normal flow. An `invoke` names two destinations, `to label %normal` and `unwind label %exception`. The unwind destination begins with a landing pad, after any PHIs."
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "%result = invoke i32 @callee()\n    to label %normal\n    unwind label %exception\n\nexception:\n  %ex = landingpad { ptr, i32 } cleanup\n  resume { ptr, i32 } %ex"
+        },
+        {
+          "type": "paragraph",
+          "text": "LLVM recognizes `landingpad`, `catchpad`, `cleanuppad`, and `catchswitch` as EH-pad instructions. `cleanup` marks participation in cleanup handling; it does not run destructors by itself. `resume` continues unwinding. The guard rejects any function that contains an EH pad, because rewriting EH edges as ordinary dispatcher edges would require semantics the prototype does not implement."
+        },
+        {
+          "type": "heading",
+          "text": "Personality routine"
+        },
+        {
+          "type": "paragraph",
+          "text": "A personality routine defines a function's language-specific exception-handling behavior. Two queries inspect different levels: `F.hasPersonalityFn()` asks whether the function specifies one (function-level), while `BB.isEHPad()` asks whether a block's first non-PHI instruction is an EH pad (block-level). A block containing `invoke` is not itself a pad; the pad is the unwind destination."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (F.hasPersonalityFn())\n    return {false, \"exception handling is unsupported\"};\nfor (const auto &BB : F)\n    if (BB.isEHPad())\n        return {false, \"EH pad is unsupported\"};"
+        },
+        {
+          "type": "paragraph",
+          "text": "Valid EH-pad instructions require a personality routine, so rejecting every personality function up front already rejects functions with valid pads. The later block-level check is therefore redundant for those inputs; it states the unsupported block kind explicitly."
+        },
+        {
+          "type": "heading",
+          "text": "Intrinsic"
+        },
+        {
+          "type": "paragraph",
+          "text": "An **intrinsic** is a special function whose meaning LLVM itself defines. Its name has the reserved `llvm.` prefix and it is declared without a body. It is commonly written as a `call` rather than a new opcode."
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "declare double @llvm.sqrt.f64(double)\n\ndefine double @use_sqrt(double %value) {\nentry:\n  %result = call double @llvm.sqrt.f64(double %value)\n  ret double %result\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "In the C++ API the class chain is `Instruction` to `CallBase` to `CallInst` to `IntrinsicInst`: every intrinsic call is a call and an instruction, but most instructions and calls are not intrinsic. The statistics pass's `Call` counter still counts intrinsic calls, because the invoking instruction's opcode is `Call`; recognizing an intrinsic does not change that opcode."
+        },
+        {
+          "type": "paragraph",
+          "text": "The guard conservatively rejects coroutine intrinsics: after `llvm::dyn_cast<llvm::IntrinsicInst>(&I)`, a callee name starting with `llvm.coro.` is rejected. See [LLVM's exception-handling docs](https://llvm.org/docs/ExceptionHandling.html), the [intrinsic reference](https://llvm.org/docs/LangRef.html#intrinsic-functions), and [coroutines](https://llvm.org/docs/Coroutines.html)."
+        }
+      ],
+      "words": 409,
+      "quiz": {
+        "q": "Why does the successor loop use a pointer while the block loop uses a reference?",
+        "choices": [
+          "Pointers are faster than references in any loop",
+          "The range supplies the element type: F gives blocks by reference, successors() gives block pointers",
+          "The & in &BB inside successors() declares a reference"
+        ],
+        "answer": 1,
+        "why": "Follow the element type, not the punctuation. Iterating F yields references to existing blocks; llvm::successors(&BB) yields block pointers, so the variable is a pointer. &BB there is address-of, not a declaration."
+      }
+    },
+    {
       "id": 26,
       "day": 1,
       "number": 3,
@@ -5114,541 +6137,6 @@
         }
       ],
       "words": 2507
-    },
-    {
-      "id": 18,
-      "day": 1,
-      "number": 1,
-      "title": "C++ concepts",
-      "originalTitle": "C++ concepts behind the LLVM calls",
-      "summary": "Reference cards for the C++ behind the LLVM calls: references versus pointers, the two jobs of &, and how a range-based loop variable gets its type.",
-      "takeaway": "References bind existing objects; pointers hold addresses. & declares in a type, addresses in an expression.",
-      "source": "include/minishield/CFGAnalyzer.h",
-      "widget": "memory",
-      "blocks": [
-        {
-          "type": "paragraph",
-          "text": "Reference cards for the C++ the Volume 1 lessons rely on: references versus pointers, the two jobs of `&`, and how a range-based loop variable is typed. Look these up when a construct matters; each entry states the idea, shows it in this project's code, and links the language reference."
-        },
-        {
-          "type": "heading",
-          "text": "Reference versus pointer"
-        },
-        {
-          "type": "paragraph",
-          "text": "A **reference** is another name for an existing object; a **pointer** is a variable whose value is an object's address. A reference must always name a real object, so it can never be null or reseated; a pointer can start empty and be assigned. In the CFG analysis you walk a function's blocks by reference and store their addresses as pointers."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "for (const llvm::BasicBlock &BB : F) {      // reference: another name for the block\n    const llvm::BasicBlock *block = &BB;      // pointer: a variable holding the block's address\n    llvm::errs() << BB.getName() << block->getName();\n}"
-        },
-        {
-          "type": "paragraph",
-          "text": "Use `BB.getName()` through the reference and `block->getName()` through the pointer. `BlockInfo` stores pointers, not references, because a result is plain data that can start empty and be assigned; a reference would not fit a `std::vector` or a default-initialized member."
-        },
-        {
-          "type": "heading",
-          "text": "`&` in a type versus `&` in an expression"
-        },
-        {
-          "type": "paragraph",
-          "text": "The same glyph does two different jobs depending on where it sits. In a type, `&` declares a reference; in an expression, `&` is the address-of operator."
-        },
-        {
-          "type": "code",
-          "language": "text",
-          "text": "const llvm::BasicBlock &BB     in a TYPE:       & declares a reference\n&BB                            in an EXPRESSION: & is address-of, yields BasicBlock *"
-        },
-        {
-          "type": "paragraph",
-          "text": "In `info.block = &BB;`, the `&` asks for the address of the block that `BB` names, producing a `BasicBlock *`, which is exactly what the pointer member holds. Storing a reference where a pointer is expected (`info.block = BB;`) is a type mismatch."
-        },
-        {
-          "type": "heading",
-          "text": "Storing an address, versus storing a pointer as-is"
-        },
-        {
-          "type": "paragraph",
-          "text": "Take the address to fill a pointer member, but do not re-take the address of a value that is already a pointer."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "info.block = &BB;                        // BB is a reference; &BB obtains its address\ninfo.successors.push_back(successor);    // successor is already a BasicBlock *; store as-is\ninfo.successors.push_back(&successor);   // wrong: a BasicBlock **, one level too deep"
-        },
-        {
-          "type": "heading",
-          "text": "`auto` and loop-variable copying"
-        },
-        {
-          "type": "paragraph",
-          "text": "`auto` deduces a type but does not preserve the reference the iterator supplies. A plain `auto` variable copies the element; when the element is noncopyable, that copy fails to compile."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "for (auto bb : F) {            // tries to copy each BasicBlock; noncopyable, so it will not compile\n    }\nfor (const auto &bb : F) {     // bind to the existing block; equivalent to const BasicBlock &bb\n    // inspect the block without copying it\n}"
-        },
-        {
-          "type": "paragraph",
-          "text": "This is why `for (auto bb : F)` fails: `llvm::BasicBlock` is noncopyable. But `auto` is not always wrong. For a range whose elements are already pointers, a plain `auto` copies only the pointer value, not the pointed-to block."
-        },
-        {
-          "type": "heading",
-          "text": "Follow the range's element type"
-        },
-        {
-          "type": "paragraph",
-          "text": "There is no rule that every traversal uses `&` or every traversal uses `*`. The loop variable's type follows what the range supplies: references for existing objects you inspect without copying, and pointer variables when the elements already hold addresses."
-        },
-        {
-          "type": "code",
-          "language": "text",
-          "text": "for (const llvm::BasicBlock &BB : F)                     // F yields block references\n    for (const llvm::BasicBlock *s : llvm::successors(&BB))  // successors() yields block pointers"
-        },
-        {
-          "type": "paragraph",
-          "text": "See the C++ reference for [references](https://en.cppreference.com/w/cpp/language/reference.html), the [address-of operator](https://en.cppreference.com/w/cpp/language/operator_other.html), [auto](https://en.cppreference.com/w/cpp/language/auto.html), and the [range-based for loop](https://en.cppreference.com/w/cpp/language/expressions.html)."
-        }
-      ],
-      "words": 546,
-      "quiz": {
-        "q": "What does &BB mean in info.block = &BB?",
-        "choices": [
-          "Copy the BasicBlock",
-          "Declare a new reference",
-          "Obtain the address of the block that BB refers to"
-        ],
-        "answer": 2,
-        "why": "In this expression, & is address-of. In a declaration such as BasicBlock &BB, it declares a reference."
-      }
-    },
-    {
-      "id": 19,
-      "day": 1,
-      "number": 2,
-      "title": "LLVM concepts",
-      "originalTitle": "LLVM concepts the guard relies on",
-      "summary": "Reference cards for the LLVM constructs the eligibility decision mentions: exception-handling pads, personality routines, and intrinsics.",
-      "takeaway": "Pads receive the unwind; a personality routine enables them; an intrinsic call keeps opcode Call.",
-      "source": "tests/ir/instruction-kinds.ll",
-      "widget": "memory",
-      "blocks": [
-        {
-          "type": "paragraph",
-          "text": "Reference cards for the LLVM IR constructs the eligibility decision mentions: exception-handling pads, personality routines, and intrinsics. Each entry states what the construct is, how it appears in IR, and the guard rule that involves it."
-        },
-        {
-          "type": "heading",
-          "text": "Exception-handling pad (EH pad)"
-        },
-        {
-          "type": "paragraph",
-          "text": "The word **pad** comes from **landing pad**: a place where control arrives when an exception interrupts normal flow. An `invoke` names two destinations, `to label %normal` and `unwind label %exception`. The unwind destination begins with a landing pad, after any PHIs."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "%result = invoke i32 @callee()\n    to label %normal\n    unwind label %exception\n\nexception:\n  %ex = landingpad { ptr, i32 } cleanup\n  resume { ptr, i32 } %ex"
-        },
-        {
-          "type": "paragraph",
-          "text": "LLVM recognizes `landingpad`, `catchpad`, `cleanuppad`, and `catchswitch` as EH-pad instructions. `cleanup` marks participation in cleanup handling; it does not run destructors by itself. `resume` continues unwinding. The guard rejects any function that contains an EH pad, because rewriting EH edges as ordinary dispatcher edges would require semantics the prototype does not implement."
-        },
-        {
-          "type": "heading",
-          "text": "Personality routine"
-        },
-        {
-          "type": "paragraph",
-          "text": "A personality routine defines a function's language-specific exception-handling behavior. Two queries inspect different levels: `F.hasPersonalityFn()` asks whether the function specifies one (function-level), while `BB.isEHPad()` asks whether a block's first non-PHI instruction is an EH pad (block-level). A block containing `invoke` is not itself a pad; the pad is the unwind destination."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "if (F.hasPersonalityFn())\n    return {false, \"exception handling is unsupported\"};\nfor (const auto &BB : F)\n    if (BB.isEHPad())\n        return {false, \"EH pad is unsupported\"};"
-        },
-        {
-          "type": "paragraph",
-          "text": "Valid EH-pad instructions require a personality routine, so rejecting every personality function up front already rejects functions with valid pads. The later block-level check is therefore redundant for those inputs; it states the unsupported block kind explicitly."
-        },
-        {
-          "type": "heading",
-          "text": "Intrinsic"
-        },
-        {
-          "type": "paragraph",
-          "text": "An **intrinsic** is a special function whose meaning LLVM itself defines. Its name has the reserved `llvm.` prefix and it is declared without a body. It is commonly written as a `call` rather than a new opcode."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "declare double @llvm.sqrt.f64(double)\n\ndefine double @use_sqrt(double %value) {\nentry:\n  %result = call double @llvm.sqrt.f64(double %value)\n  ret double %result\n}"
-        },
-        {
-          "type": "paragraph",
-          "text": "In the C++ API the class chain is `Instruction` to `CallBase` to `CallInst` to `IntrinsicInst`: every intrinsic call is a call and an instruction, but most instructions and calls are not intrinsic. The statistics pass's `Call` counter still counts intrinsic calls, because the invoking instruction's opcode is `Call`; recognizing an intrinsic does not change that opcode."
-        },
-        {
-          "type": "paragraph",
-          "text": "The guard conservatively rejects coroutine intrinsics: after `llvm::dyn_cast<llvm::IntrinsicInst>(&I)`, a callee name starting with `llvm.coro.` is rejected. See [LLVM's exception-handling docs](https://llvm.org/docs/ExceptionHandling.html), the [intrinsic reference](https://llvm.org/docs/LangRef.html#intrinsic-functions), and [coroutines](https://llvm.org/docs/Coroutines.html)."
-        }
-      ],
-      "words": 409,
-      "quiz": {
-        "q": "Why does the successor loop use a pointer while the block loop uses a reference?",
-        "choices": [
-          "Pointers are faster than references in any loop",
-          "The range supplies the element type: F gives blocks by reference, successors() gives block pointers",
-          "The & in &BB inside successors() declares a reference"
-        ],
-        "answer": 1,
-        "why": "Follow the element type, not the punctuation. Iterating F yields references to existing blocks; llvm::successors(&BB) yields block pointers, so the variable is a pointer. &BB there is address-of, not a declaration."
-      }
-    },
-    {
-      "id": 73,
-      "day": 1,
-      "number": 1,
-      "title": "Create instructions with IRBuilder",
-      "originalTitle": "Create instructions with IRBuilder",
-      "summary": "Understand the IRBuilder model and build a short typed instruction sequence that replaces a placeholder return.",
-      "takeaway": "Choose where instructions go, create a value, use it, and explicitly remove obsolete instructions.",
-      "source": "day1",
-      "group": "build",
-      "blocks": [
-        {
-          "type": "paragraph",
-          "text": "LLVM IRBuilder is the API this book uses to create and place LLVM IR instructions. A pass often needs more than a description of a change: it must create typed values, attach them to a basic block, and keep the function structurally valid. IRBuilder provides methods for constructing common instructions at a chosen insertion point. The pass still decides what the new instructions should mean and where control should go.",
-          "conceptualIntro": true
-        },
-        {
-          "type": "heading",
-          "text": "A simple way to think about it: position, create, use"
-        },
-        {
-          "type": "paragraph",
-          "text": "A builder remembers an insertion point, which is the position where the next instruction will be placed. A Create... method builds an LLVM value or instruction there. If it returns a value, the next builder call can use that result as an operand. This lets a transformation build a small instruction sequence in execution order."
-        },
-        {
-          "type": "paragraph",
-          "text": "IRBuilder does not decide whether a transformation is correct and does not erase old instructions for you. It also does not promise that every Create... call inserts an instruction: when operands are constants, LLVM may fold the operation into a constant value."
-        },
-        {
-          "type": "heading",
-          "text": "Example: replace a return with x + 1"
-        },
-        {
-          "type": "paragraph",
-          "text": "Assume the function has one i32 argument and currently returns a placeholder constant. This helper inserts an add and a new return before the old terminator, then erases the old return:"
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/IR/Instruction.h\"\n\nvoid replaceReturnWithAdd(llvm::Function &F) {\n    llvm::BasicBlock &entry = F.getEntryBlock();\n    llvm::Instruction *oldTerminator = entry.getTerminator();\n    llvm::IRBuilder<> B(oldTerminator);\n\n    llvm::Value *x = F.getArg(0);\n    llvm::Value *sum = B.CreateAdd(x, B.getInt32(1), \"sum\");\n    B.CreateRet(sum);\n    oldTerminator->eraseFromParent();\n}"
-        },
-        {
-          "type": "paragraph",
-          "text": "The builder is positioned before the existing return. CreateAdd inserts %sum and returns a Value* that CreateRet can use. CreateRet inserts the new terminator before the old one; eraseFromParent then removes the placeholder return. A later lesson focuses on choosing insertion points safely."
-        },
-        {
-          "type": "table",
-          "rows": [
-            [
-              "C++ expression",
-              "What it means"
-            ],
-            [
-              "IRBuilder<> B(oldTerminator)",
-              "Construct a builder that inserts before the existing return."
-            ],
-            [
-              "B.getInt32(1)",
-              "Create the typed i32 constant 1. A constant is an operand, not an instruction."
-            ],
-            [
-              "B.CreateAdd(x, ..., \"sum\")",
-              "Insert an i32 add. Its result is an LLVM Value* and can feed another instruction."
-            ],
-            [
-              "B.CreateRet(sum)",
-              "Insert a return terminator that returns the computed value."
-            ],
-            [
-              "oldTerminator->eraseFromParent()",
-              "Remove the old return instruction from its parent basic block. IRBuilder does not do this automatically."
-            ]
-          ]
-        },
-        {
-          "type": "deep",
-          "title": "LLVM IR before and after this builder step",
-          "blocks": [
-            {
-              "type": "paragraph",
-              "text": "Before: the function returns a placeholder value."
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @add_one(i32 %x) {\nentry:\n  ret i32 0\n}"
-            },
-            {
-              "type": "paragraph",
-              "text": "After: the new add defines %sum, and ret returns that value."
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @add_one(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  ret i32 %sum\n}"
-            },
-            {
-              "type": "paragraph",
-              "text": "define starts a function definition; @add_one is its module-level name. The function accepts an i32 argument named %x and returns i32. i32 is a 32-bit integer type. entry: names a basic block. In the after module, add combines %x and the constant 1 and defines the local SSA value %sum. ret i32 %sum ends this function call and returns that value to its caller. The type on add makes the literal 1 an i32 operand. The builder's constant helper supplies that typed constant; it does not print as a separate instruction."
-            }
-          ]
-        },
-        {
-          "type": "task",
-          "text": "Task: Read the helper in order. Mark the insertion point, the instruction-creating calls, the returned Value*, and the operation that removes the old terminator."
-        },
-        {
-          "type": "checkpoint",
-          "text": "Checkpoint: Why does CreateAdd return something that CreateRet can use, while getInt32(1) does not appear as its own instruction?",
-          "answers": [
-            {
-              "type": "list",
-              "ordered": true,
-              "items": [
-                "CreateAdd inserts an add instruction and returns its resulting LLVM value as a Value*. CreateRet takes that value as its return operand.",
-                "getInt32(1) creates an i32 constant, not an operation to execute. The constant is printed inline as an operand of add, so there is no separate constant instruction."
-              ]
-            }
-          ]
-        }
-      ],
-      "words": 605
-    },
-    {
-      "id": 74,
-      "day": 1,
-      "number": 2,
-      "title": "Build a dispatcher with IRBuilder",
-      "originalTitle": "Build a dispatcher with IRBuilder",
-      "summary": "Use IRBuilder to load the current state and create a switch that maps state IDs to basic blocks.",
-      "takeaway": "Create the selector, terminate the dispatcher with one switch, then attach each case to that switch.",
-      "source": "day1",
-      "group": "build",
-      "blocks": [
-        {
-          "type": "heading",
-          "text": "A dispatcher block, built one instruction at a time"
-        },
-        {
-          "type": "paragraph",
-          "text": "Suppose the pass has already created a dispatcher block, a default invalid block, an i32 state slot, and a list of blocks with state IDs 0, 1, and so on. This helper builds the dispatch block. It loads the current state and creates a switch whose cases map IDs to destination blocks:"
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/ADT/ArrayRef.h\"\n#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/IR/Instructions.h\"\n\nvoid buildDispatcher(\n    llvm::BasicBlock *dispatcher,\n    llvm::BasicBlock *invalidBlock,\n    llvm::Value *stateSlot,\n    llvm::ArrayRef<llvm::BasicBlock *> stateBlocks) {\n    llvm::IRBuilder<> B(dispatcher);\n\n    llvm::LoadInst *current =\n        B.CreateLoad(B.getInt32Ty(), stateSlot, \"ms.current\");\n    llvm::SwitchInst *dispatch = B.CreateSwitch(\n        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));\n\n    for (unsigned id = 0; id < stateBlocks.size(); ++id)\n        dispatch->addCase(B.getInt32(id), stateBlocks[id]);\n}"
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "// The caller creates the block, then asks the helper to fill it.\nllvm::BasicBlock *dispatcher =\n    llvm::BasicBlock::Create(F.getContext(), \"ms.dispatch\", &F);\nbuildDispatcher(dispatcher, invalidBlock, stateSlot, stateBlocks);"
-        },
-        {
-          "type": "paragraph",
-          "text": "This complete helper assumes its arguments are valid: the slot points to i32 storage, each state block belongs to the same function, and IDs are assigned in the vector's order. It builds one block; another part of the pass must initialize the slot and branch to the dispatcher."
-        },
-        {
-          "type": "heading",
-          "text": "What each builder call contributes"
-        },
-        {
-          "type": "table",
-          "rows": [
-            [
-              "C++ builder call",
-              "LLVM IR it creates",
-              "Meaning"
-            ],
-            [
-              "IRBuilder<> B(dispatcher)",
-              "No instruction",
-              "Selects the end of the empty dispatcher block as the insertion point."
-            ],
-            [
-              "B.getInt32Ty()",
-              "No instruction",
-              "Gets the i32 type from the builder's LLVM context; it describes a type, not the number 32 or an i32 value."
-            ],
-            [
-              "B.CreateLoad(type, address, name)",
-              "%ms.current = load i32, ptr %ms.state",
-              "Reads the current i32 value from the memory address held by stateSlot. The pointer is the address; the explicit i32 argument says what type to load."
-            ],
-            [
-              "B.CreateSwitch(value, default, count)",
-              "switch i32 %ms.current, label %ms.invalid [...]",
-              "Ends the block with a terminator. It compares the value with case constants, branches to the matching block, or takes the default destination."
-            ],
-            [
-              "dispatch->addCase(B.getInt32(id), block)",
-              "i32 0, label %state0",
-              "Adds one typed integer case and its destination to the switch already created."
-            ],
-            [
-              "B.getInt32(id)",
-              "No instruction",
-              "Makes an i32 constant used as a switch case; constants are values, not executable instructions."
-            ]
-          ]
-        },
-        {
-          "type": "deep",
-          "title": "LLVM IR before and after constructing the dispatcher block",
-          "blocks": [
-            {
-              "type": "paragraph",
-              "text": "The caller has the state slot and case blocks. Before this construction step, the function has no dispatcher block:"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @dispatch_demo(i32 %state) {\nentry:\n  %ms.state = alloca i32, align 4\n  store i32 %state, ptr %ms.state, align 4\n  br label %left\n\nleft:\n  ret i32 10\n\nright:\n  ret i32 20\n\nms.invalid:\n  unreachable\n}"
-            },
-            {
-              "type": "paragraph",
-              "text": "The caller creates ms.dispatch, then the helper inserts a load and switch with two cases. The complete module after that construction step is:"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @dispatch_demo(i32 %state) {\nentry:\n  %ms.state = alloca i32, align 4\n  store i32 %state, ptr %ms.state, align 4\n  br label %left\n\nleft:\n  ret i32 10\n\nright:\n  ret i32 20\n\nms.invalid:\n  unreachable\n\nms.dispatch:\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n  ]\n}"
-            },
-            {
-              "type": "heading",
-              "text": "Read the instructions and syntax"
-            },
-            {
-              "type": "table",
-              "rows": [
-                [
-                  "Spelling",
-                  "Meaning in this module"
-                ],
-                [
-                  "define i32 @dispatch_demo(i32 %state)",
-                  "Defines a function named @dispatch_demo. It accepts one i32 argument and returns an i32."
-                ],
-                [
-                  "%ms.state = alloca i32, align 4",
-                  "Reserves stack storage for an i32 and produces a pointer to that address. align 4 is an alignment promise in bytes."
-                ],
-                [
-                  "store i32 %state, ptr %ms.state, align 4",
-                  "Writes the argument value to the address in %ms.state. A store has no SSA result."
-                ],
-                [
-                  "br label %left",
-                  "Transfers control to left. A label is a block destination, not an instruction or data value."
-                ],
-                [
-                  "ret i32 10 / ret i32 20",
-                  "Ends this function call and returns the selected integer to its caller."
-                ],
-                [
-                  "unreachable",
-                  "Marks a point that must not execute in a defined program; it is not a fallback return."
-                ],
-                [
-                  "%ms.current = load i32, ptr %ms.state, align 4",
-                  "Reads one i32 from the address and defines the SSA result %ms.current."
-                ],
-                [
-                  "switch i32 %ms.current, label %ms.invalid [...]",
-                  "Chooses one destination by comparing %ms.current with the typed cases; unmatched values take the default invalid block."
-                ]
-              ]
-            },
-            {
-              "type": "paragraph",
-              "text": "The function signature define i32 @dispatch_demo(i32 %state) defines a function named with @; it accepts one i32 input and returns an i32. Here i32 is a 32-bit integer type. %state is the argument value; %ms.state and %ms.current are local SSA names, while left, right, and ms.dispatch name basic blocks. The % prefix is shared, so syntax and position tell you whether a name refers to a value or a block. The %state argument is stored to the address produced by alloca i32. store writes a value to that address. br label %left transfers control to left, where ret i32 10 ends the call and returns 10. The right block similarly returns 20. unreachable says the invalid block cannot execute in a defined program; it is not a fallback return."
-            },
-            {
-              "type": "paragraph",
-              "text": "In the after module, load i32, ptr %ms.state reads the saved state into the SSA value %ms.current. The pointer type ptr names the address; the following i32 tells load which value type to read. The switch compares the loaded value with typed constants 0 and 1, transfers to the corresponding case block, and sends every other value to ms.invalid. Labels are destinations, not instructions."
-            },
-            {
-              "type": "paragraph",
-              "text": "The switch cases add CFG edges to left and right, and the default adds an edge to ms.invalid. No edge enters ms.dispatch yet: entry still branches directly to left, so this newly constructed switch is disconnected and does not affect execution. That is an intentional intermediate stage. A later step stores a state ID and rewrites the entry edge to reach the dispatcher. Both complete modules are well-formed, but verify alone proves neither completed flattening nor behavior preservation."
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "text": "Where the builder writes matters"
-        },
-        {
-          "type": "paragraph",
-          "text": "When adding instructions to an existing entry block, inserting at its end may put an instruction after the terminator, which is invalid. Instead, construct the builder before the old terminator:"
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "llvm::Instruction *oldTerminator = entry->getTerminator();\nllvm::IRBuilder<> setup(oldTerminator);\nllvm::AllocaInst *stateSlot =\n    setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\");"
-        },
-        {
-          "type": "paragraph",
-          "text": "This inserts the alloca before the old terminator. An alloca i32 reserves stack storage for an i32 and returns a pointer to it; it does not itself store the current state. A later CreateStore writes an ID there. For the special entry-block setup rule used in this project, entry->getFirstInsertionPt() is another way to choose the first legal insertion point, after any PHIs."
-        },
-        {
-          "type": "paragraph",
-          "text": "Use a separate builder for a separate block, or call SetInsertPoint when you intentionally move one builder. A builder remembers its insertion point; it does not infer the desired block from the operands."
-        },
-        {
-          "type": "heading",
-          "text": "Study-session walkthrough — construct and inspect a dispatcher"
-        },
-        {
-          "type": "paragraph",
-          "text": "Start with the intended graph on paper: a state value is loaded, the switch chooses one block, and its default edge goes to the invalid block. Then match each edge in that plan to one API call: CreateLoad makes the selector, CreateSwitch creates the terminator and default edge, and addCase attaches each state-to-block mapping. Check that the chosen insertion point is before any existing terminator and that no instruction is appended after the switch."
-        },
-        {
-          "type": "task",
-          "text": "Task: In StateMachineBuilder, use one builder for the dispatcher. Add the load and switch, then attach a case for every (state ID, block) pair. Keep slot initialization and entry rewrites as separate steps."
-        },
-        {
-          "type": "checkpoint",
-          "text": "Checkpoint: Explain which call inserts an instruction, which calls only provide a type or constant, and why addCase does not append a second terminator. Inspect the resulting block with opt and run the verifier.",
-          "answers": [
-            {
-              "type": "list",
-              "ordered": true,
-              "items": [
-                "CreateLoad inserts the load and returns its LoadInst*; CreateSwitch inserts the switch terminator and returns its SwitchInst*. getInt32Ty() returns a type and getInt32(id) returns a constant, so neither is an instruction. addCase mutates the already-created switch's case list; the block still has one terminator.",
-                "The insertion point determines where CreateLoad and CreateSwitch go. A builder for a new empty dispatcher starts at its end; for an existing block, use an insertion point before its terminator. The switch must remain last. The verifier checks structural validity, while inspecting the cases confirms the intended state mapping."
-              ]
-            }
-          ]
-        },
-        {
-          "type": "heading",
-          "text": "Check your understanding"
-        },
-        {
-          "type": "paragraph",
-          "text": "If B.getInt32(2) returns a value, why does it not appear as an instruction in the printed block?"
-        },
-        {
-          "type": "paragraph",
-          "text": "Answer: It is a constant operand, not a computation to execute. The switch uses the constant as a case label; LLVM prints the value inline in the switch."
-        }
-      ],
-      "words": 1359
     }
   ]
 }
