@@ -1,7 +1,7 @@
 {
   "day": 2,
   "title": "From inspection to transformation",
-  "status": "Complete Day 2 teaching draft. Lessons 0–16 document our study checkpoints and exercises; lessons 17–27 extend through complete rewriting and correctness checks. The remaining learner implementation is still pending.",
+  "status": "Learn value preparation, state-machine construction, branch rewriting, and correctness checks through incremental exercises. Compare your work with the references and run each lesson’s expected checks before proceeding.",
   "groups": [
     {
       "name": "Before mutation",
@@ -265,12 +265,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The session moved from Day 1 inspection into editing FlatteningPass. The important change was responsibility: printing a fact cannot break its graph, but altering instructions or edges can. The repeated requests to continue were handled as small checkpoints rather than one replacement file to paste.",
+          "text": "Move from inspection to transformation through small checkpoints. Printing diagnostics does not intentionally change the graph, while inserting instructions or edges can break its rules. Decide the expected difference for one stage before adding the next.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: What should I change first, and how can I tell whether that change—not a later stage—caused a failure?",
+          "text": "Before writing, answer: What should I change first, and how can I tell whether that change—not a later stage—caused a failure?",
           "sessionWalkthrough": true
         },
         {
@@ -482,7 +482,7 @@
           "irComparison": true
         }
       ],
-      "words": 2534,
+      "words": 2524,
       "quiz": {
         "q": "Why prepare SSA values before adding dispatcher edges?",
         "choices": [
@@ -635,12 +635,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The early Day 2 task was to gather PHI nodes. At this point the pass was still inspecting them; its vector was a plan for later edits. This separated finding the relevant instructions from deleting/replacing them.",
+          "text": "Gather PHI nodes before calling helpers that erase or replace them. The vector is a worklist of existing instruction addresses, separating discovery from mutation rather than changing the target program immediately.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why save addresses in a vector instead of immediately changing each PHI as the instruction loop visits it?",
+          "text": "Before writing, answer: Why save addresses in a vector instead of immediately changing each PHI as the instruction loop visits it?",
           "sessionWalkthrough": true
         },
         {
@@ -847,7 +847,7 @@
           "irComparison": true
         }
       ],
-      "words": 1732,
+      "words": 1726,
       "quiz": {
         "q": "Why prepare PHIs before routing incoming paths through one dispatcher?",
         "choices": [
@@ -959,12 +959,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The learner reported an issue with push_back. The reviewed form checked dyn_cast but discarded the typed result, then tried to append the original Instruction* to vector<PHINode*>. The following is that specific type mistake, not a new LLVM transformation.",
+          "text": "A dyn_cast check can succeed while push_back still receives the wrong static pointer type. If you discard the typed result and append &I, vector<PHINode*> receives the more general Instruction*. Keep the checked pointer instead.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: If the if-condition proved this instruction is a PHI, why does phis.push_back(&I) still fail?",
+          "text": "Before writing, answer: If the if-condition proved this instruction is a PHI, why does phis.push_back(&I) still fail?",
           "sessionWalkthrough": true
         },
         {
@@ -1182,7 +1182,7 @@
           "irComparison": true
         }
       ],
-      "words": 1496,
+      "words": 1491,
       "quiz": {
         "q": "Does a successful dyn_cast used only as an if condition retype I?",
         "choices": [
@@ -1317,12 +1317,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The conversation asked what demoting PHIs means. This checkpoint turned the collected worklist into the first actual edit: LLVM’s per-PHI helper replaces incoming-edge selection with explicit storage and replaces the former users.",
+          "text": "Use PHI demotion to preserve the incoming path’s value choice through explicit storage. Replacing users and arranging writes/reads are the purpose; simply making the PHI line disappear is not enough.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Where does the selected value go after the PHI itself has disappeared?",
+          "text": "Before writing, answer: Where does the selected value go after the PHI itself has disappeared?",
           "sessionWalkthrough": true
         },
         {
@@ -1578,7 +1578,7 @@
           "irComparison": true
         }
       ],
-      "words": 2155,
+      "words": 2152,
       "quiz": {
         "q": "What does demoting the PHI in the diamond preserve?",
         "choices": [
@@ -1706,12 +1706,12 @@
         },
         {
           "type": "paragraph",
-          "text": "After PHI preparation, the session moved to ordinary instruction results used in another block. A loop-variable reload introduced by the first helper was a useful example: removing the PHI did not make every remaining use local.",
+          "text": "After PHI preparation, inspect ordinary instruction results used in another block. A reload introduced by the first helper may still have nonlocal users, so removing every PHI does not complete value preparation.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: What exactly am I collecting now: every instruction, every pointer, or only results with a cross-block user?",
+          "text": "Before writing, answer: What exactly am I collecting now: every instruction, every pointer, or only results with a cross-block user?",
           "sessionWalkthrough": true
         },
         {
@@ -1962,7 +1962,7 @@
           "irComparison": true
         }
       ],
-      "words": 2266,
+      "words": 2261,
       "quiz": {
         "q": "Why can a PHI-free function still need preparation?",
         "choices": [
@@ -2122,12 +2122,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The learner asked how to check whether instructions return void. The needed distinction was between an instruction’s effect and its produced value. A store is important but has no SSA result to put into the ordinary-value worklist.",
+          "text": "Ask about the instruction’s result type separately from its effect. A store, branch, or return can be essential even though it produces no SSA result for the ordinary-value worklist.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Does skipping a void instruction mean I should delete its memory or control-flow effect?",
+          "text": "Before writing, answer: Does skipping a void instruction mean I should delete its memory or control-flow effect?",
           "sessionWalkthrough": true
         },
         {
@@ -2354,7 +2354,7 @@
           "irComparison": true
         }
       ],
-      "words": 1936,
+      "words": 1927,
       "quiz": {
         "q": "What is the result type of the instruction ret i32 %x?",
         "choices": [
@@ -2451,12 +2451,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The next explicit question was how to recognize AllocaInst. The void test had not removed it: alloca produces a pointer. That pointer is deliberately used by loads and stores in other blocks.",
+          "text": "Recognize an allocation separately from the void-result filter: alloca produces a pointer. Its address naturally reaches loads and stores in several blocks, but that storage foundation is not an ordinary scalar result to re-spill in this strategy.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why does alloca i32 pass the non-void test, and why do we nevertheless skip it in this worklist?",
+          "text": "Before writing, answer: Why does alloca i32 pass the non-void test, and why do we nevertheless skip it in this worklist?",
           "sessionWalkthrough": true
         },
         {
@@ -2711,7 +2711,7 @@
           "irComparison": true
         }
       ],
-      "words": 1907,
+      "words": 1911,
       "quiz": {
         "q": "Why does the ordinary value worklist exclude an entry alloca?",
         "choices": [
@@ -2809,12 +2809,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The reviewed preparation draft had two distinct issues: an old early exit for phis.empty() could bypass the new work, and creating/filtering escapingValues did not itself add any instructions to that vector. These were collection/control-flow bugs in the pass, not malformed input IR.",
+          "text": "Review two independent collection mistakes: an early return on phis.empty() can bypass the new stage, and filtering escapingValues does not append suitable candidates automatically. Make both continuation and insertion explicit.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why is the second worklist empty even though I can see a value used in another block?",
+          "text": "Before writing, answer: Why is the second worklist empty even though I can see a value used in another block?",
           "sessionWalkthrough": true
         },
         {
@@ -3008,7 +3008,7 @@
           "irComparison": true
         }
       ],
-      "words": 1377,
+      "words": 1364,
       "quiz": {
         "q": "At the collection-only checkpoint, does a nonempty escapingValues list itself mean IR changed?",
         "choices": [
@@ -3100,12 +3100,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The session compared the two demotion helpers before integrating the second call. Their first parameter types differ, although both operate on LLVM-owned IR and both can return a pointer to created storage.",
+          "text": "Read each helper’s first parameter before writing the call. The PHI helper accepts a pointer; the ordinary-value helper accepts an instruction reference. Both borrow mutable LLVM-owned IR rather than receive a copied runtime value.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why did the PHI helper take phi directly, while the ordinary-value helper needs *value?",
+          "text": "Before writing, answer: Why did the PHI helper take phi directly, while the ordinary-value helper needs *value?",
           "sessionWalkthrough": true
         },
         {
@@ -3343,7 +3343,7 @@
           "irComparison": true
         }
       ],
-      "words": 1694,
+      "words": 1695,
       "quiz": {
         "q": "escapingValues stores Instruction*. What does the first DemoteRegToStack parameter require?",
         "choices": [
@@ -3438,12 +3438,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The learner asked what demoting collected values does. The important answer was that ordinary calculations remain: the helper changes how their results reach users. The second worklist becomes useful only when its helper calls actually run.",
+          "text": "Demote collected ordinary results only after discovery ends. Their calculations remain; the helper replaces cross-block transport with storage and reloads. Track this stage’s edits as well as PHI demotion.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: If the add still exists, what has DemoteRegToStack accomplished?",
+          "text": "Before writing, answer: If the add still exists, what has DemoteRegToStack accomplished?",
           "sessionWalkthrough": true
         },
         {
@@ -3687,7 +3687,7 @@
           "irComparison": true
         }
       ],
-      "words": 2062,
+      "words": 2054,
       "quiz": {
         "q": "After ordinary-value demotion, what must the final rewrite still preserve?",
         "choices": [
@@ -3793,12 +3793,12 @@
         },
         {
           "type": "paragraph",
-          "text": "This part of the teaching answered the demotion question by following a tiny calculation, rather than by reading helper names alone. The example is an illustrative exercise; it is not another demotion loop to insert into run().",
+          "text": "Trace a tiny calculation to understand the helper rather than inferring behavior from its name. This illustrative exercise follows one value through calculation, storage, reload, and return; it does not require a second demotion loop.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: For x = 4, where does the number 5 exist before and after preparation?",
+          "text": "Before writing, answer: For x = 4, where does the number 5 exist before and after preparation?",
           "sessionWalkthrough": true
         },
         {
@@ -4048,7 +4048,7 @@
           "irComparison": true
         }
       ],
-      "words": 1883,
+      "words": 1880,
       "quiz": {
         "q": "Does the alloca result contain the saved integer directly?",
         "choices": [
@@ -4159,12 +4159,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The follow-up question about PHI demotion required a different trace from the ordinary add example. A PHI’s value depends on the incoming path, so replacing it must preserve the path/value pairing rather than one fixed calculation.",
+          "text": "Trace PHI demotion by path, not by textual store order. A PHI can select different incoming values, so replacement storage must preserve which executed path supplies the value.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why are there two stores in the module if only one value should be returned?",
+          "text": "Before writing, answer: Why are there two stores in the module if only one value should be returned?",
           "sessionWalkthrough": true
         },
         {
@@ -4426,7 +4426,7 @@
           "irComparison": true
         }
       ],
-      "words": 2058,
+      "words": 2049,
       "quiz": {
         "q": "What replaces the PHI’s incoming-edge selection in the simple diamond?",
         "choices": [
@@ -4550,12 +4550,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The next construction checkpoint introduced stateBlocks and stateIDs. No dispatcher edges were added while mapping. This kept the list limited to prepared original non-entry blocks rather than accidentally including the machinery created afterward.",
+          "text": "Map prepared original non-entry blocks before adding dispatcher machinery. Keep the state list and encoding deterministic, and exclude one-time entry setup from the recurring states.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Is state 0 a new block, the entry block, or just a number associated with an existing destination?",
+          "text": "Before writing, answer: Is state 0 a new block, the entry block, or just a number associated with an existing destination?",
           "sessionWalkthrough": true
         },
         {
@@ -4796,7 +4796,7 @@
           "irComparison": true
         }
       ],
-      "words": 1883,
+      "words": 1874,
       "quiz": {
         "q": "Why preserve the existing entry as setup?",
         "choices": [
@@ -4906,12 +4906,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The state-mapping draft exposed three related syntax/type mistakes: comparing a pointer to a block object, appending an object to a pointer vector, and writing angle-bracket notation as though it constructed a pair. The fix was to follow the declared types.",
+          "text": "Follow the declared C++ types to fix state-table expressions. Comparing a pointer to a block object, appending an object to a pointer vector, and using angle brackets as a key/value pair constructor are different mistakes.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Where do I need BB, where do I need &BB, and what does DenseMap insertion actually receive?",
+          "text": "Before writing, answer: Where do I need BB, where do I need &BB, and what does DenseMap insertion actually receive?",
           "sessionWalkthrough": true
         },
         {
@@ -5152,7 +5152,7 @@
           "irComparison": true
         }
       ],
-      "words": 1885,
+      "words": 1879,
       "quiz": {
         "q": "Which value belongs in a DenseMap<BasicBlock*, unsigned> key?",
         "choices": [
@@ -5304,12 +5304,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The session next built a state slot, dispatcher, and invalid block while preserving old branches. This intermediate module could verify without yet executing the new machinery; that distinction prevents a successful verifier from being mistaken for complete flattening.",
+          "text": "Construct the state slot, dispatcher, and invalid block while leaving original branches intact for this checkpoint. Complete disconnected machinery can verify without yet demonstrating live dispatcher routing.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: What do CreateLoad and CreateSwitch add, and why does an unreachable new block still need a terminator?",
+          "text": "Before writing, answer: What do CreateLoad and CreateSwitch add, and why does an unreachable new block still need a terminator?",
           "sessionWalkthrough": true
         },
         {
@@ -5560,7 +5560,7 @@
           "irComparison": true
         }
       ],
-      "words": 2422,
+      "words": 2410,
       "quiz": {
         "q": "Why is a valid but disconnected dispatcher only an intermediate checkpoint?",
         "choices": [
@@ -5660,12 +5660,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The reviewed draft tried to use ms.dispatch as a C++ variable, treated BasicBlock::Create as returning an object value, and left the invalid block empty. These belong to different checking layers: C++ parsing/types versus LLVM IR verification.",
+          "text": "Distinguish the C++ variable, the LLVM block object, and its printed name. A declaration using ms.dispatch as a variable or treating BasicBlock::Create as returning a block value fails at C++ checking; an empty block without a terminator fails LLVM verification.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why is \"ms.dispatch\" a legal displayed block name when ms.dispatch is not a legal single C++ identifier?",
+          "text": "Before writing, answer: Why is \"ms.dispatch\" a legal displayed block name when ms.dispatch is not a legal single C++ identifier?",
           "sessionWalkthrough": true
         },
         {
@@ -5892,7 +5892,7 @@
           "irComparison": true
         }
       ],
-      "words": 1911,
+      "words": 1914,
       "quiz": {
         "q": "What is \"ms.dispatch\" in BasicBlock::Create(..., \"ms.dispatch\", &F)?",
         "choices": [
@@ -6003,12 +6003,12 @@
         },
         {
           "type": "paragraph",
-          "text": "The resumed lesson connected the original unconditional entry branch as the first live dispatcher hop. This was still partial: header/body branches in loop.ll remained direct. The existing branch identifies the intended first destination and anchors the insertion point.",
+          "text": "Translate only the unconditional entry branch for the first live dispatcher hop. Use its original successor to choose the initial state; keep header/body loop branches direct until their own transitions are deliberately rewritten.",
           "sessionWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "Question for this replay: Why must I read the old successor and emit the replacement before erasing the old branch?",
+          "text": "Before writing, answer: Why must I read the old successor and emit the replacement before erasing the old branch?",
           "sessionWalkthrough": true
         },
         {
@@ -6286,7 +6286,7 @@
           "irComparison": true
         }
       ],
-      "words": 2843,
+      "words": 2837,
       "quiz": {
         "q": "At this checkpoint, which original branches have been redirected?",
         "choices": [
@@ -6386,7 +6386,7 @@
         },
         {
           "type": "paragraph",
-          "text": "These are the smaller steps used in our live lesson. Write each guard inside the existing instruction loop in FunctionEligibility::check, then test it before adding the next. Eligibility inspects the original IR without changing it; the flattening pass must call it before demotion.",
+          "text": "Build these guards incrementally inside the existing instruction loop in FunctionEligibility::check, and test each before adding the next. Eligibility inspects original IR without changing it; the flattening pass must call it before demotion.",
           "eligibilityWalkthrough": true
         },
         {
@@ -6602,19 +6602,19 @@
         },
         {
           "type": "heading",
-          "text": "Study-session update — musttail and inline assembly checked",
+          "text": "Study-session walkthrough — inspect inline-assembly calls through CallBase",
           "eligibilityWalkthrough": true,
           "sessionProgressUpdate": true
         },
         {
           "type": "paragraph",
-          "text": "At this resumed session checkpoint, the learner had implemented the musttail guard. The current build was up to date; the plugin rejected the focused musttail fixture with “musttail calls are unsupported,” and canonical before/after IR was identical. This records the observed result for that fixture, rather than converting every future support rule into a completed task.",
+          "text": "Keep the musttail rule separate from the following call-form checks. A focused musttail fixture should produce “musttail calls are unsupported” and unchanged canonical IR; test that reason rather than accepting any rejection.",
           "eligibilityWalkthrough": true,
           "sessionProgressUpdate": true
         },
         {
           "type": "paragraph",
-          "text": "The inline-assembly guard was then implemented and checked in the resumed session. The existing build was up to date; tests/ir/inline_assembly.ll was rejected with the learner’s exact diagnostic “inline assembly is not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The convergent-call exercise was assigned next; its completed check is recorded in the following walkthrough.",
+          "text": "Add the inline-assembly predicate to the CallBase block and check it with tests/ir/inline_assembly.ll. With the diagnostic shown in this exercise, expect “inline assembly is not supported” and unchanged canonical output. Then test convergent calls independently.",
           "eligibilityWalkthrough": true,
           "sessionProgressUpdate": true
         },
@@ -6652,7 +6652,7 @@
         },
         {
           "type": "task",
-          "text": "Task: To replay this completed checkpoint, write the CallBase/isInlineAsm guard and the separate tests/ir/inline_assembly.ll fixture yourself. Keep the existing intrinsic and musttail checks; do not replace the entire checker with this one rule.",
+          "text": "Task: Write the CallBase/isInlineAsm guard and the separate tests/ir/inline_assembly.ll fixture. Keep the intrinsic and musttail checks; do not replace the entire checker with this one rule.",
           "eligibilityWalkthrough": true,
           "sessionProgressUpdate": true
         },
@@ -6665,7 +6665,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: The observed inline-assembly diagnostic was “inline assembly is not supported,” with unchanged canonical output. Explain why call void can matter even though it produces no value, and why CallBase is broader than CallInst. Keep this checked result separate from the next convergent guard’s expected result.",
+          "text": "Checkpoint: Expect “inline assembly is not supported” and unchanged canonical output for the focused fixture. Explain why call void can matter even without a produced value, and why CallBase is broader than CallInst. Verify the convergent rule separately.",
           "eligibilityWalkthrough": true,
           "sessionProgressUpdate": true
         },
@@ -6677,7 +6677,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The learner then implemented the isConvergent() guard on the existing CallBase pointer. In the resumed session, the current build was up to date; tests/ir/convergent.ll was rejected with the exact diagnostic “convergent calls are not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The operand-bundle guard was assigned next; its completed check is recorded below.",
+          "text": "Inspect the convergent marker on the existing CallBase pointer before mutation. Use tests/ir/convergent.ll as a focused input, expect “convergent calls are not supported,” and compare canonical output. A rejection caused by another rule does not establish this predicate’s coverage.",
           "eligibilityWalkthrough": true,
           "convergenceWalkthrough": true
         },
@@ -6721,7 +6721,7 @@
         },
         {
           "type": "task",
-          "text": "Task: To replay this completed check, write the isConvergent guard inside the existing CallBase block and the focused tests/ir/convergent.ll input yourself. Keep the inline-assembly rule. Verify the intended rejection reason as well as unchanged output, rather than accepting any earlier rejection as coverage.",
+          "text": "Task: Write the isConvergent guard inside the CallBase block and the focused tests/ir/convergent.ll input. Keep the inline-assembly rule. Check the intended reason as well as unchanged output.",
           "eligibilityWalkthrough": true,
           "convergenceWalkthrough": true
         },
@@ -6734,7 +6734,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: The observed diagnostic for the focused convergent fixture was “convergent calls are not supported,” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. The operand-bundle check’s subsequent completion is recorded below; do not confuse it with the next returns_twice exercise.",
+          "text": "Checkpoint: Expect “convergent calls are not supported” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. Keep this rule distinct from the operand-bundle check.",
           "eligibilityWalkthrough": true,
           "convergenceWalkthrough": true
         },
@@ -6746,7 +6746,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check was assigned next; its completed result is recorded below.",
+          "text": "Reject calls carrying operand bundles before any transformation. Use tests/ir/operand_bundle.ll to exercise that predicate independently; expect “operand bundles are unsupported” and unchanged canonical output. The next sections explain the payload syntax and why an ordinary argument count is a different question.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6796,7 +6796,7 @@
         },
         {
           "type": "task",
-          "text": "Task: To replay this completed guard, write the operand-bundle predicate inside the CallBase block and the focused tests/ir/operand_bundle.ll input yourself. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.",
+          "text": "Task: Write the operand-bundle predicate inside CallBase and the focused tests/ir/operand_bundle.ll input. Preserve the earlier call checks and reject before PHI or ordinary-value demotion.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6809,7 +6809,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The returns_twice check’s subsequent completion is recorded below; the new naked-function guard remains the next writing exercise.",
+          "text": "Checkpoint: Expect “operand bundles are unsupported” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would test the wrong property.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6821,13 +6821,13 @@
         },
         {
           "type": "paragraph",
-          "text": "The learner then implemented the returns_twice guard. In the resumed session, the build was current; tests/ir/returns_twice.ll was rejected with “returns_twice calls are unsupported,” and canonical before/after IR was unchanged. This supersedes the earlier pending note. The function-level naked check below is the next, final planned preflight exercise; its plugin rejection has not yet been observed here.",
+          "text": "Add the returns_twice predicate to the CallBase checks and isolate it with tests/ir/returns_twice.ll. Expect “returns_twice calls are unsupported” and unchanged canonical output. The function-level naked rule is a separate check because it concerns the containing function rather than one call.",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
         {
           "type": "paragraph",
-          "text": "The C setjmp/longjmp mechanism is a useful conceptual example: setjmp first returns normally while recording context; a later nonlocal transfer can make execution continue as though that same call had returned again. This is not two result operands produced at once, and not merely an ordinary loop calling a function twice. A transformation relying only on a single forward return path has not established correct handling of this reentry, so our prototype rejects it conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).",
+          "text": "The C setjmp/longjmp mechanism is a useful conceptual example: setjmp first returns normally while recording context; a later nonlocal transfer can make execution continue as though that same call had returned again. This is not two result operands produced at once, and not merely an ordinary loop calling a function twice. A transformation relying only on a single forward return path has not established correct handling of this reentry, so this prototype rejects it conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
@@ -6878,7 +6878,7 @@
         },
         {
           "type": "task",
-          "text": "Task: To replay this completed checkpoint, add the explicit Attributes.h include and ReturnsTwice predicate inside CallBase, and write the focused tests/ir/returns_twice.ll input yourself. Retain the earlier supported-call and rejection checks.",
+          "text": "Task: Add the explicit Attributes.h include and ReturnsTwice predicate inside CallBase. Write tests/ir/returns_twice.ll and retain the earlier call checks.",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
@@ -6891,7 +6891,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: The observed returns_twice rejection was “returns_twice calls are unsupported,” with identical canonical output. Explain why one static SSA call/result can require special control-flow handling without producing two simultaneous result values. Keep this completed result separate from the next naked-function exercise.",
+          "text": "Checkpoint: Expect “returns_twice calls are unsupported” and identical canonical output. Explain why one static SSA call/result can need special control-flow handling without producing two simultaneous result values.",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
@@ -6903,7 +6903,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The next assignment is the final planned function-level preflight guard. The focused input below parses and verifies, but the learner still needs to write this predicate and establish its plugin rejection. Do not mark the support-contract exercise complete merely because its full reference is already printed later in the chapter.",
+          "text": "Check the function-level Naked attribute before traversing instructions. Save the focused module below as tests/ir/naked.ll, or pass it through standard input for the same guard test. Expect “naked functions are unsupported” and unchanged canonical output; test that specific reason.",
           "eligibilityWalkthrough": true,
           "nakedWalkthrough": true
         },
@@ -6947,7 +6947,7 @@
         },
         {
           "type": "task",
-          "text": "Task: Add the function-level Naked predicate yourself before traversing blocks/instructions. Write the focused tests/ir/naked.ll input. Keep every existing preflight check before the first transformation edit.",
+          "text": "Task: Put the function-level Naked predicate before block/instruction traversal and write tests/ir/naked.ll. Keep every preflight decision before the first transformation edit.",
           "eligibilityWalkthrough": true,
           "nakedWalkthrough": true
         },
@@ -6960,9 +6960,84 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: After implementing the guard, expect “naked functions are unsupported” and identical canonical IR. That plugin result is still an expectation here, not an observed success. Explain why the check is on F rather than a CallBase pointer, and why this deliberately non-executable fixture is useful for a focused preflight test.",
+          "text": "Checkpoint: Expect “naked functions are unsupported” with identical canonical IR. Explain why the predicate is on F rather than CallBase, and why this non-executable structural fixture can test a guard without demonstrating a working naked backend routine.",
           "eligibilityWalkthrough": true,
           "nakedWalkthrough": true
+        },
+        {
+          "type": "heading",
+          "text": "Check the preflight boundary with focused inputs",
+          "eligibilityWalkthrough": true,
+          "preflightSessionCheckpoint": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Create one valid focused input for each restriction, then check the rejection reason and canonical before/after equality. For the naked case you can save naked.ll or supply the complete module through stdin. Use the table as expected outcomes, not as a substitute for running your own checks.",
+          "eligibilityWalkthrough": true,
+          "preflightSessionCheckpoint": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Input checked",
+              "Rule exercised",
+              "Expected structural result"
+            ],
+            [
+              "nonentry-alloca.ll",
+              "Static entry allocation requirement",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "aggregate-result.ll",
+              "Supported scalar instruction result",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "intrinsics.ll",
+              "Explicit intrinsic restriction",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "musttail.ll",
+              "Mandatory tail-call restriction",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "inline_assembly.ll",
+              "Inline assembly restriction",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "convergent.ll",
+              "Convergent-call restriction",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "operand_bundle.ll",
+              "Operand-bundle restriction",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "returns_twice.ll",
+              "Repeated-return restriction",
+              "Rejected; canonical IR unchanged."
+            ],
+            [
+              "naked.ll or the same module through stdin",
+              "Naked function restriction",
+              "Rejected; canonical IR unchanged."
+            ]
+          ],
+          "eligibilityWalkthrough": true,
+          "preflightSessionCheckpoint": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Use loop.ll, phi.ll, switch.ll, and recursion.ll as positive controls and run the plugin followed by IR verification. Passing these selected structural checks does not prove full equivalence or complete all branch rewriting. Next, declare the StateMachineBuilder interface before moving its implementation.",
+          "eligibilityWalkthrough": true,
+          "preflightSessionCheckpoint": true
         },
         {
           "type": "heading",
@@ -6971,7 +7046,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Write each complete module above as a separate test input: nonentry-alloca.ll, aggregate-result.ll, intrinsics.ll, and musttail.ll under tests/ir/. These are suggested learner-written fixtures, not files the book silently creates. The instruction fragment at the start is not a standalone fixture. Build first, then verify each original fixture and run the plugin. Exact diagnostics below apply to the incremental guards shown here; the full reference uses some broader wording.",
+          "text": "Write each complete module above as a separate test input: nonentry-alloca.ll, aggregate-result.ll, intrinsics.ll, and musttail.ll under tests/ir/. Create these fixture files as part of the exercise; the book does not create them for you. The instruction fragment at the start is not a standalone fixture. Build first, then verify each original fixture and run the plugin. Exact diagnostics below apply to the incremental guards shown here; the full reference uses some broader wording.",
           "eligibilityWalkthrough": true
         },
         {
@@ -7008,7 +7083,7 @@
         },
         {
           "type": "paragraph",
-          "text": "For each rejection, the original program and emitted program must be identical after canonical printing through opt. No new allocations, spill operations, or dispatcher blocks should appear. Repeat positive checks on loop.ll and recursion.ll so a too-broad condition does not reject supported input. The next checks cover additional special call semantics; these four rules do not complete the support contract by themselves.",
+          "text": "For each rejection, the original program and emitted program must be identical after canonical printing through opt. No new allocations, spill operations, or dispatcher blocks should appear. Repeat positive checks on loop.ll and recursion.ll so a too-broad condition does not reject supported input. Check the additional call/function fixtures in the subsections above as well; a handful of matching examples does not establish support for every LLVM feature.",
           "eligibilityWalkthrough": true
         },
         {
@@ -7219,7 +7294,7 @@
           "irComparison": true
         }
       ],
-      "words": 5487,
+      "words": 5441,
       "quiz": {
         "q": "Can you safely hoist every non-entry alloca into entry?",
         "choices": [
@@ -7265,6 +7340,58 @@
         {
           "type": "task",
           "text": "Task: Future exercise: declare StateMachineBuilder and move dispatcher construction into it. Keep eligibility and value preparation in FlatteningPass."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — declare the builder interface first",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Begin with include/minishield/StateMachineBuilder.h. Eligibility defines the support boundary; preparation transports values; construction changes the graph. Give construction a named interface before moving the implementation, so you can state its contract without rewriting the pass all at once.",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#pragma once\n#include \"llvm/IR/Function.h\"\n\nnamespace minishield {\nclass StateMachineBuilder {\npublic:\n    // TODO: declare a static bool build taking llvm::Function &F.\n};\n}",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "pragma once prevents repeated inclusion in one translation unit; the include makes llvm::Function known. The namespace gives the class its minishield:: name, and public permits callers outside the class. static means callers will use StateMachineBuilder::build(F) without constructing an object. Function& borrows mutable existing IR; it does not copy or own the function. bool reports whether construction changed IR, not whether input was eligible.",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Before calling the implementation, the caller must supply valid IR that passed strict preflight and had PHIs/escaping results prepared. A declaration documents that contract; it does not execute the checks or perform construction.",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Write only the header for this step and fill its public static declaration. Leave graph code and CMake unchanged until you write the later .cpp definition. Use the implementation scaffold as the next exercise after checking the interface.",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "heading",
+          "text": "Check the declaration without needing its definition",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "A normal build may report no work because an unused header is not compiled on its own. Once you have written it, this optional syntax-only caller checks visibility and the static call form without linking the not-yet-written definition:",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "clang++-23 -std=c++20 -fsyntax-only -x c++ \\\n  -Iinclude -I\"$CONDA_PREFIX/include\" - <<'CPP'\n#include \"minishield/StateMachineBuilder.h\"\nbool checkDeclaration(llvm::Function &F) {\n    return minishield::StateMachineBuilder::build(F);\n}\nCPP\ncmake --build build",
+          "builderInterfaceWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: A header declaration alone should cause no LLVM program change. Explain why a static method needs no builder object, why Function& is mutable but borrowed, and why the declaration cannot supply a linked implementation by itself.",
+          "builderInterfaceWalkthrough": true
         },
         {
           "type": "heading",
@@ -7532,7 +7659,7 @@
           "irComparison": true
         }
       ],
-      "words": 1955,
+      "words": 2263,
       "quiz": {
         "q": "Why snapshot terminators before creating new blocks?",
         "choices": [

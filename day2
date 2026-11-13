@@ -3,7 +3,7 @@ Study notes and future exercises · expanded 2026-11-13
 
 Read the chapter-based book at https://zilutian.github.io/minishield/#day2.
 
-Complete Day 2 teaching draft. Lessons 0–16 document our study checkpoints and exercises; lessons 17–27 extend through complete rewriting and correctness checks. The remaining learner implementation is still pending.
+Learn value preparation, state-machine construction, branch rewriting, and correctness checks through incremental exercises. Compare your work with the references and run each lesson’s expected checks before proceeding.
 
 The learner writes the implementation and scripts. Templates, numbered steps,
 full reference examples, verification commands, deeper C++/LLVM explanations,
@@ -99,9 +99,9 @@ Checkpoint: Why must eligibility run before mutation? Why is a successful verifi
 
 ### Study-session walkthrough — make one representation change at a time
 
-The session moved from Day 1 inspection into editing FlatteningPass. The important change was responsibility: printing a fact cannot break its graph, but altering instructions or edges can. The repeated requests to continue were handled as small checkpoints rather than one replacement file to paste.
+Move from inspection to transformation through small checkpoints. Printing diagnostics does not intentionally change the graph, while inserting instructions or edges can break its rules. Decide the expected difference for one stage before adding the next.
 
-Question for this replay: What should I change first, and how can I tell whether that change—not a later stage—caused a failure?
+Before writing, answer: What should I change first, and how can I tell whether that change—not a later stage—caused a failure?
 
 ```text
 inspect original → collect PHIs → demote PHIs → prepare other values
@@ -324,9 +324,9 @@ Keep PreservedAnalyses::all(): collecting pointers and printing a count leave IR
 
 ### Study-session walkthrough — collect a worklist before calling a mutating helper
 
-The early Day 2 task was to gather PHI nodes. At this point the pass was still inspecting them; its vector was a plan for later edits. This separated finding the relevant instructions from deleting/replacing them.
+Gather PHI nodes before calling helpers that erase or replace them. The vector is a worklist of existing instruction addresses, separating discovery from mutation rather than changing the target program immediately.
 
-Question for this replay: Why save addresses in a vector instead of immediately changing each PHI as the instruction loop visits it?
+Before writing, answer: Why save addresses in a vector instead of immediately changing each PHI as the instruction loop visits it?
 
 ```cpp
 std::vector<llvm::PHINode *> phis;
@@ -506,9 +506,9 @@ Use an if-initializer-style declaration in the condition so the typed pointer is
 
 ### Study-session walkthrough — the push_back mismatch is about the static pointer type
 
-The learner reported an issue with push_back. The reviewed form checked dyn_cast but discarded the typed result, then tried to append the original Instruction* to vector<PHINode*>. The following is that specific type mistake, not a new LLVM transformation.
+A dyn_cast check can succeed while push_back still receives the wrong static pointer type. If you discard the typed result and append &I, vector<PHINode*> receives the more general Instruction*. Keep the checked pointer instead.
 
-Question for this replay: If the if-condition proved this instruction is a PHI, why does phis.push_back(&I) still fail?
+Before writing, answer: If the if-condition proved this instruction is a PHI, why does phis.push_back(&I) still fail?
 
 ```cpp
 // I is still declared as Instruction&.
@@ -717,9 +717,9 @@ Return PreservedAnalyses::none() after demotion. Return all() if there were no P
 
 ### Study-session walkthrough — demotion replaces a choice, not merely a line of text
 
-The conversation asked what demoting PHIs means. This checkpoint turned the collected worklist into the first actual edit: LLVM’s per-PHI helper replaces incoming-edge selection with explicit storage and replaces the former users.
+Use PHI demotion to preserve the incoming path’s value choice through explicit storage. Replacing users and arranging writes/reads are the purpose; simply making the PHI line disappear is not enough.
 
-Question for this replay: Where does the selected value go after the PHI itself has disappeared?
+Before writing, answer: Where does the selected value go after the PHI itself has disappeared?
 
 ```cpp
 for (auto *phi : phis)
@@ -971,9 +971,9 @@ Remove the old PHI-empty early return so this stage is reached even without PHIs
 
 ### Study-session walkthrough — a PHI-free graph can still carry values between blocks
 
-After PHI preparation, the session moved to ordinary instruction results used in another block. A loop-variable reload introduced by the first helper was a useful example: removing the PHI did not make every remaining use local.
+After PHI preparation, inspect ordinary instruction results used in another block. A reload introduced by the first helper may still have nonlocal users, so removing every PHI does not complete value preparation.
 
-Question for this replay: What exactly am I collecting now: every instruction, every pointer, or only results with a cross-block user?
+Before writing, answer: What exactly am I collecting now: every instruction, every pointer, or only results with a cross-block user?
 
 ```cpp
 if (I.getType()->isVoidTy() || llvm::isa<llvm::AllocaInst>(I))
@@ -1199,9 +1199,9 @@ In ret i32 %x, i32 is the type of the value returned by the function. The ret in
 
 ### Study-session walkthrough — void describes a result, not whether an operation matters
 
-The learner asked how to check whether instructions return void. The needed distinction was between an instruction’s effect and its produced value. A store is important but has no SSA result to put into the ordinary-value worklist.
+Ask about the instruction’s result type separately from its effect. A store, branch, or return can be essential even though it produces no SSA result for the ordinary-value worklist.
 
-Question for this replay: Does skipping a void instruction mean I should delete its memory or control-flow effect?
+Before writing, answer: Does skipping a void instruction mean I should delete its memory or control-flow effect?
 
 ```cpp
 if (I.getType()->isVoidTy())
@@ -1376,9 +1376,9 @@ The || operator means either condition is sufficient. Short-circuit evaluation s
 
 ### Study-session walkthrough — an allocation produces an address, not its stored integer
 
-The next explicit question was how to recognize AllocaInst. The void test had not removed it: alloca produces a pointer. That pointer is deliberately used by loads and stores in other blocks.
+Recognize an allocation separately from the void-result filter: alloca produces a pointer. Its address naturally reaches loads and stores in several blocks, but that storage foundation is not an ordinary scalar result to re-spill in this strategy.
 
-Question for this replay: Why does alloca i32 pass the non-void test, and why do we nevertheless skip it in this worklist?
+Before writing, answer: Why does alloca i32 pass the non-void test, and why do we nevertheless skip it in this worklist?
 
 ```cpp
 if (I.getType()->isVoidTy() || llvm::isa<llvm::AllocaInst>(I))
@@ -1575,9 +1575,9 @@ This is the end of a collection-only checkpoint: only PHI demotion has modified 
 
 ### Study-session walkthrough — a filter does not append, and an empty first stage is not the end
 
-The reviewed preparation draft had two distinct issues: an old early exit for phis.empty() could bypass the new work, and creating/filtering escapingValues did not itself add any instructions to that vector. These were collection/control-flow bugs in the pass, not malformed input IR.
+Review two independent collection mistakes: an early return on phis.empty() can bypass the new stage, and filtering escapingValues does not append suitable candidates automatically. Make both continuation and insertion explicit.
 
-Question for this replay: Why is the second worklist empty even though I can see a value used in another block?
+Before writing, answer: Why is the second worklist empty even though I can see a value used in another block?
 
 ```cpp
 // Do not return merely because phis is empty.
@@ -1753,9 +1753,9 @@ Both helpers return a pointer to the created stack allocation. The current exerc
 
 ### Study-session walkthrough — the argument type tells you whether to pass the pointer or the object
 
-The session compared the two demotion helpers before integrating the second call. Their first parameter types differ, although both operate on LLVM-owned IR and both can return a pointer to created storage.
+Read each helper’s first parameter before writing the call. The PHI helper accepts a pointer; the ordinary-value helper accepts an instruction reference. Both borrow mutable LLVM-owned IR rather than receive a copied runtime value.
 
-Question for this replay: Why did the PHI helper take phi directly, while the ordinary-value helper needs *value?
+Before writing, answer: Why did the PHI helper take phi directly, while the ordinary-value helper needs *value?
 
 ```cpp
 llvm::DemotePHIToStack(phi);   // phi: PHINode*
@@ -1933,9 +1933,9 @@ A function with zero PHIs can still be transformed by the second loop. Preservin
 
 ### Study-session walkthrough — demote the collected result, then track the actual edit
 
-The learner asked what demoting collected values does. The important answer was that ordinary calculations remain: the helper changes how their results reach users. The second worklist becomes useful only when its helper calls actually run.
+Demote collected ordinary results only after discovery ends. Their calculations remain; the helper replaces cross-block transport with storage and reloads. Track this stage’s edits as well as PHI demotion.
 
-Question for this replay: If the add still exists, what has DemoteRegToStack accomplished?
+Before writing, answer: If the add still exists, what has DemoteRegToStack accomplished?
 
 ```cpp
 for (auto *value : escapingValues)
@@ -2173,9 +2173,9 @@ The return now uses a value defined by a load in its own block. The allocation p
 
 ### Study-session walkthrough — trace one number through an ordinary spill
 
-This part of the teaching answered the demotion question by following a tiny calculation, rather than by reading helper names alone. The example is an illustrative exercise; it is not another demotion loop to insert into run().
+Trace a tiny calculation to understand the helper rather than inferring behavior from its name. This illustrative exercise follows one value through calculation, storage, reload, and return; it does not require a second demotion loop.
 
-Question for this replay: For x = 4, where does the number 5 exist before and after preparation?
+Before writing, answer: For x = 4, where does the number 5 exist before and after preparation?
 
 ```text
 // Target-program story, not C++ pass code:
@@ -2382,9 +2382,9 @@ join loads the slot. The utility replaces the old PHI’s uses and deletes the P
 
 ### Study-session walkthrough — trace a choice through PHI demotion
 
-The follow-up question about PHI demotion required a different trace from the ordinary add example. A PHI’s value depends on the incoming path, so replacing it must preserve the path/value pairing rather than one fixed calculation.
+Trace PHI demotion by path, not by textual store order. A PHI can select different incoming values, so replacement storage must preserve which executed path supplies the value.
 
-Question for this replay: Why are there two stores in the module if only one value should be returned?
+Before writing, answer: Why are there two stores in the module if only one value should be returned?
 
 ```text
 left path:  write 10 → join reads 10
@@ -2612,9 +2612,9 @@ Iterate stateBlocks to print deterministic output. DenseMap iteration order is n
 
 ### Study-session walkthrough — give a next-block decision an integer encoding
 
-The next construction checkpoint introduced stateBlocks and stateIDs. No dispatcher edges were added while mapping. This kept the list limited to prepared original non-entry blocks rather than accidentally including the machinery created afterward.
+Map prepared original non-entry blocks before adding dispatcher machinery. Keep the state list and encoding deterministic, and exclude one-time entry setup from the recurring states.
 
-Question for this replay: Is state 0 a new block, the entry block, or just a number associated with an existing destination?
+Before writing, answer: Is state 0 a new block, the entry block, or just a number associated with an existing destination?
 
 ```cpp
 auto *entry = &F.getEntryBlock();
@@ -2831,9 +2831,9 @@ In this loop BB is already a pointer because that is the vector’s element type
 
 ### Study-session walkthrough — object, address, and key/value pair are separate C++ ideas
 
-The state-mapping draft exposed three related syntax/type mistakes: comparing a pointer to a block object, appending an object to a pointer vector, and writing angle-bracket notation as though it constructed a pair. The fix was to follow the declared types.
+Follow the declared C++ types to fix state-table expressions. Comparing a pointer to a block object, appending an object to a pointer vector, and using angle brackets as a key/value pair constructor are different mistakes.
 
-Question for this replay: Where do I need BB, where do I need &BB, and what does DenseMap insertion actually receive?
+Before writing, answer: Where do I need BB, where do I need &BB, and what does DenseMap insertion actually receive?
 
 ```cpp
 if (&BB == entry) continue;
@@ -3089,9 +3089,9 @@ getInt32(ID) creates an i32 integer constant, unlike getInt32Ty(), which supplie
 
 ### Study-session walkthrough — construct valid machinery before making it live
 
-The session next built a state slot, dispatcher, and invalid block while preserving old branches. This intermediate module could verify without yet executing the new machinery; that distinction prevents a successful verifier from being mistaken for complete flattening.
+Construct the state slot, dispatcher, and invalid block while leaving original branches intact for this checkpoint. Complete disconnected machinery can verify without yet demonstrating live dispatcher routing.
 
-Question for this replay: What do CreateLoad and CreateSwitch add, and why does an unreachable new block still need a terminator?
+Before writing, answer: What do CreateLoad and CreateSwitch add, and why does an unreachable new block still need a terminator?
 
 ```cpp
 llvm::IRBuilder<> dispatchBuilder(dispatcher);
@@ -3330,9 +3330,9 @@ After the declaration errors are fixed, an empty invalid block would still fail 
 
 ### Study-session walkthrough — the C++ handle is not the IR label
 
-The reviewed draft tried to use ms.dispatch as a C++ variable, treated BasicBlock::Create as returning an object value, and left the invalid block empty. These belong to different checking layers: C++ parsing/types versus LLVM IR verification.
+Distinguish the C++ variable, the LLVM block object, and its printed name. A declaration using ms.dispatch as a variable or treating BasicBlock::Create as returning a block value fails at C++ checking; an empty block without a terminator fails LLVM verification.
 
-Question for this replay: Why is "ms.dispatch" a legal displayed block name when ms.dispatch is not a legal single C++ identifier?
+Before writing, answer: Why is "ms.dispatch" a legal displayed block name when ms.dispatch is not a legal single C++ identifier?
 
 ```cpp
 auto *dispatcher = llvm::BasicBlock::Create(
@@ -3545,9 +3545,9 @@ default: break leaves conditional, switch, return, and unreachable entries untou
 
 ### Study-session walkthrough — initialize the state before the first dispatcher read
 
-The resumed lesson connected the original unconditional entry branch as the first live dispatcher hop. This was still partial: header/body branches in loop.ll remained direct. The existing branch identifies the intended first destination and anchors the insertion point.
+Translate only the unconditional entry branch for the first live dispatcher hop. Use its original successor to choose the initial state; keep header/body loop branches direct until their own transitions are deliberately rewritten.
 
-Question for this replay: Why must I read the old successor and emit the replacement before erasing the old branch?
+Before writing, answer: Why must I read the old successor and emit the replacement before erasing the old branch?
 
 ```cpp
 auto *term = entry_ptr->getTerminator();
@@ -3918,7 +3918,7 @@ The full reference rejects non-scalar instruction results, naked functions, inli
 
 ### Study-session walkthrough — operation, result, and storage are different
 
-These are the smaller steps used in our live lesson. Write each guard inside the existing instruction loop in FunctionEligibility::check, then test it before adding the next. Eligibility inspects the original IR without changing it; the flattening pass must call it before demotion.
+Build these guards incrementally inside the existing instruction loop in FunctionEligibility::check, and test each before adding the next. Eligibility inspects original IR without changing it; the flattening pass must call it before demotion.
 
 ```llvm
 %sum = add i32 %x, 1
@@ -4054,11 +4054,11 @@ if (const auto *call = llvm::dyn_cast<llvm::CallInst>(&I)) {
 
 CallInst recognizes the call instruction class; isMustTailCall asks whether this particular call carries the mandatory marker. An ordinary call passes this check. This is separate from the intrinsic check because an ordinary function can be the target of a musttail call.
 
-### Study-session update — musttail and inline assembly checked
+### Study-session walkthrough — inspect inline-assembly calls through CallBase
 
-At this resumed session checkpoint, the learner had implemented the musttail guard. The current build was up to date; the plugin rejected the focused musttail fixture with “musttail calls are unsupported,” and canonical before/after IR was identical. This records the observed result for that fixture, rather than converting every future support rule into a completed task.
+Keep the musttail rule separate from the following call-form checks. A focused musttail fixture should produce “musttail calls are unsupported” and unchanged canonical IR; test that reason rather than accepting any rejection.
 
-The inline-assembly guard was then implemented and checked in the resumed session. The existing build was up to date; tests/ir/inline_assembly.ll was rejected with the learner’s exact diagnostic “inline assembly is not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The convergent-call exercise was assigned next; its completed check is recorded in the following walkthrough.
+Add the inline-assembly predicate to the CallBase block and check it with tests/ir/inline_assembly.ll. With the diagnostic shown in this exercise, expect “inline assembly is not supported” and unchanged canonical output. Then test convergent calls independently.
 
 ```cpp
 if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
@@ -4081,7 +4081,7 @@ This is a complete input module. define void starts a function with no returned 
 
 The prototype rejects this call form conservatively even for an empty assembly string: accepting one visually harmless spelling would not establish correct handling of arbitrary target assembly, constraints, or hidden effects. This is a support-policy choice, not a claim that the input is invalid LLVM IR. Its void result also does not make the call irrelevant; skipping void results in the spill worklist and rejecting an unsupported operation answer different questions.
 
-Task: To replay this completed checkpoint, write the CallBase/isInlineAsm guard and the separate tests/ir/inline_assembly.ll fixture yourself. Keep the existing intrinsic and musttail checks; do not replace the entire checker with this one rule.
+Task: Write the CallBase/isInlineAsm guard and the separate tests/ir/inline_assembly.ll fixture. Keep the intrinsic and musttail checks; do not replace the entire checker with this one rule.
 
 ```bash
 cmake --build build
@@ -4091,11 +4091,11 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/inline_assembly.ll -o build/inline_assembly-checked.ll
 ```
 
-Checkpoint: The observed inline-assembly diagnostic was “inline assembly is not supported,” with unchanged canonical output. Explain why call void can matter even though it produces no value, and why CallBase is broader than CallInst. Keep this checked result separate from the next convergent guard’s expected result.
+Checkpoint: Expect “inline assembly is not supported” and unchanged canonical output for the focused fixture. Explain why call void can matter even without a produced value, and why CallBase is broader than CallInst. Verify the convergent rule separately.
 
 ### Study-session walkthrough — a convergent call has participation constraints
 
-The learner then implemented the isConvergent() guard on the existing CallBase pointer. In the resumed session, the current build was up to date; tests/ir/convergent.ll was rejected with the exact diagnostic “convergent calls are not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The operand-bundle guard was assigned next; its completed check is recorded below.
+Inspect the convergent marker on the existing CallBase pointer before mutation. Use tests/ir/convergent.ll as a focused input, expect “convergent calls are not supported,” and compare canonical output. A rejection caused by another rule does not establish this predicate’s coverage.
 
 In grouped execution, such as GPU work, an operation can involve communication among participating threads. Which threads participate can depend on control flow. Convergent describes constraints on preserving that participation; it does not mean every thread takes the same path or simply that a function eventually returns. Routing through a shared dispatcher changes the graph, so this prototype excludes marked calls until it has a suitable correctness argument. This is conservative policy, not a rule that every CFG transformation is forbidden. See LLVM’s [Convergent Operation Semantics](https://llvm.org/docs/ConvergentOperations.html).
 
@@ -4121,7 +4121,7 @@ Read the complete module locally: declare gives group_operation an i32 result an
 
 group_operation is a placeholder, not an LLVM intrinsic and not an implemented GPU primitive. This fixture isolates recognition of the convergent call marker. It is valid input for parsing/guard checks, but has no main or implementation of the external callee, so it is not a standalone executable or a behavioral simulation of thread communication.
 
-Task: To replay this completed check, write the isConvergent guard inside the existing CallBase block and the focused tests/ir/convergent.ll input yourself. Keep the inline-assembly rule. Verify the intended rejection reason as well as unchanged output, rather than accepting any earlier rejection as coverage.
+Task: Write the isConvergent guard inside the CallBase block and the focused tests/ir/convergent.ll input. Keep the inline-assembly rule. Check the intended reason as well as unchanged output.
 
 ```bash
 cmake --build build
@@ -4131,11 +4131,11 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/convergent.ll -o build/convergent-checked.ll
 ```
 
-Checkpoint: The observed diagnostic for the focused convergent fixture was “convergent calls are not supported,” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. The operand-bundle check’s subsequent completion is recorded below; do not confuse it with the next returns_twice exercise.
+Checkpoint: Expect “convergent calls are not supported” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. Keep this rule distinct from the operand-bundle check.
 
 ### Study-session walkthrough — an operand bundle is part of call semantics
 
-The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check was assigned next; its completed result is recorded below.
+Reject calls carrying operand bundles before any transformation. Use tests/ir/operand_bundle.ll to exercise that predicate independently; expect “operand bundles are unsupported” and unchanged canonical output. The next sections explain the payload syntax and why an ordinary argument count is a different question.
 
 ```cpp
 // Inside the existing CallBase block:
@@ -4163,7 +4163,7 @@ Bundles are semantically meaningful, not disposable comments. For deopt, a suita
 
 observe is an ordinary external placeholder, not an intrinsic or a supplied deoptimization runtime implementation. This fixture is for parsing and guard recognition. It has neither a main function nor a body for observe, so it is not a standalone executable demonstration of deoptimization behavior.
 
-Task: To replay this completed guard, write the operand-bundle predicate inside the CallBase block and the focused tests/ir/operand_bundle.ll input yourself. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.
+Task: Write the operand-bundle predicate inside CallBase and the focused tests/ir/operand_bundle.ll input. Preserve the earlier call checks and reject before PHI or ordinary-value demotion.
 
 ```bash
 cmake --build build
@@ -4173,13 +4173,13 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/operand_bundle.ll -o build/operand_bundle-checked.ll
 ```
 
-Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The returns_twice check’s subsequent completion is recorded below; the new naked-function guard remains the next writing exercise.
+Checkpoint: Expect “operand bundles are unsupported” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would test the wrong property.
 
 ### Study-session walkthrough — returns_twice can resume one continuation again
 
-The learner then implemented the returns_twice guard. In the resumed session, the build was current; tests/ir/returns_twice.ll was rejected with “returns_twice calls are unsupported,” and canonical before/after IR was unchanged. This supersedes the earlier pending note. The function-level naked check below is the next, final planned preflight exercise; its plugin rejection has not yet been observed here.
+Add the returns_twice predicate to the CallBase checks and isolate it with tests/ir/returns_twice.ll. Expect “returns_twice calls are unsupported” and unchanged canonical output. The function-level naked rule is a separate check because it concerns the containing function rather than one call.
 
-The C setjmp/longjmp mechanism is a useful conceptual example: setjmp first returns normally while recording context; a later nonlocal transfer can make execution continue as though that same call had returned again. This is not two result operands produced at once, and not merely an ordinary loop calling a function twice. A transformation relying only on a single forward return path has not established correct handling of this reentry, so our prototype rejects it conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).
+The C setjmp/longjmp mechanism is a useful conceptual example: setjmp first returns normally while recording context; a later nonlocal transfer can make execution continue as though that same call had returned again. This is not two result operands produced at once, and not merely an ordinary loop calling a function twice. A transformation relying only on a single forward return path has not established correct handling of this reentry, so this prototype rejects it conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).
 
 ```cpp
 #include "llvm/IR/Attributes.h"
@@ -4208,7 +4208,7 @@ Read the complete module: declare describes resume_point as taking no arguments 
 
 resume_point is an ordinary external placeholder, not an intrinsic or an implementation of setjmp. The attribute itself does not manufacture a second return. This module isolates the guard’s recognition of the marker; with no main or callee implementation it is not a standalone executable demonstration of a nonlocal return.
 
-Task: To replay this completed checkpoint, add the explicit Attributes.h include and ReturnsTwice predicate inside CallBase, and write the focused tests/ir/returns_twice.ll input yourself. Retain the earlier supported-call and rejection checks.
+Task: Add the explicit Attributes.h include and ReturnsTwice predicate inside CallBase. Write tests/ir/returns_twice.ll and retain the earlier call checks.
 
 ```bash
 cmake --build build
@@ -4218,11 +4218,11 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/returns_twice.ll -o build/returns_twice-checked.ll
 ```
 
-Checkpoint: The observed returns_twice rejection was “returns_twice calls are unsupported,” with identical canonical output. Explain why one static SSA call/result can require special control-flow handling without producing two simultaneous result values. Keep this completed result separate from the next naked-function exercise.
+Checkpoint: Expect “returns_twice calls are unsupported” and identical canonical output. Explain why one static SSA call/result can need special control-flow handling without producing two simultaneous result values.
 
 ### Study-session walkthrough — naked changes the function’s low-level entry/exit contract
 
-The next assignment is the final planned function-level preflight guard. The focused input below parses and verifies, but the learner still needs to write this predicate and establish its plugin rejection. Do not mark the support-contract exercise complete merely because its full reference is already printed later in the chapter.
+Check the function-level Naked attribute before traversing instructions. Save the focused module below as tests/ir/naked.ll, or pass it through standard input for the same guard test. Expect “naked functions are unsupported” and unchanged canonical output; test that specific reason.
 
 For an ordinary function, the backend manages entry/exit machine-code work such as stack-frame setup and restoration when needed. Those sequences are the prologue and epilogue; they are not LLVM blocks automatically named prologue or epilogue. naked disables the usual prologue/epilogue emission and places the function under a special low-level contract. Our dispatcher and demotion add stack storage under ordinary assumptions, so we reject this case conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).
 
@@ -4246,7 +4246,7 @@ Read the complete structural input: define starts a function body, void says the
 
 This fixture exists only to test attribute rejection. It is not an executable demonstration of a functioning naked routine or target-specific prologue behavior. There is no inline-assembly call, so a different call guard cannot substitute for the missing naked rule and accidentally make the negative test appear successful. Parser/verifier validity and the existence of a defined runtime behavior are different questions.
 
-Task: Add the function-level Naked predicate yourself before traversing blocks/instructions. Write the focused tests/ir/naked.ll input. Keep every existing preflight check before the first transformation edit.
+Task: Put the function-level Naked predicate before block/instruction traversal and write tests/ir/naked.ll. Keep every preflight decision before the first transformation edit.
 
 ```bash
 cmake --build build
@@ -4256,11 +4256,29 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/naked.ll -o build/naked-checked.ll
 ```
 
-Checkpoint: After implementing the guard, expect “naked functions are unsupported” and identical canonical IR. That plugin result is still an expectation here, not an observed success. Explain why the check is on F rather than a CallBase pointer, and why this deliberately non-executable fixture is useful for a focused preflight test.
+Checkpoint: Expect “naked functions are unsupported” with identical canonical IR. Explain why the predicate is on F rather than CallBase, and why this non-executable structural fixture can test a guard without demonstrating a working naked backend routine.
+
+### Check the preflight boundary with focused inputs
+
+Create one valid focused input for each restriction, then check the rejection reason and canonical before/after equality. For the naked case you can save naked.ll or supply the complete module through stdin. Use the table as expected outcomes, not as a substitute for running your own checks.
+
+| Input checked | Rule exercised | Expected structural result |
+| --- | --- | --- |
+| nonentry-alloca.ll | Static entry allocation requirement | Rejected; canonical IR unchanged. |
+| aggregate-result.ll | Supported scalar instruction result | Rejected; canonical IR unchanged. |
+| intrinsics.ll | Explicit intrinsic restriction | Rejected; canonical IR unchanged. |
+| musttail.ll | Mandatory tail-call restriction | Rejected; canonical IR unchanged. |
+| inline_assembly.ll | Inline assembly restriction | Rejected; canonical IR unchanged. |
+| convergent.ll | Convergent-call restriction | Rejected; canonical IR unchanged. |
+| operand_bundle.ll | Operand-bundle restriction | Rejected; canonical IR unchanged. |
+| returns_twice.ll | Repeated-return restriction | Rejected; canonical IR unchanged. |
+| naked.ll or the same module through stdin | Naked function restriction | Rejected; canonical IR unchanged. |
+
+Use loop.ll, phi.ll, switch.ll, and recursion.ll as positive controls and run the plugin followed by IR verification. Passing these selected structural checks does not prove full equivalence or complete all branch rewriting. Next, declare the StateMachineBuilder interface before moving its implementation.
 
 ### Verify these guards independently
 
-Write each complete module above as a separate test input: nonentry-alloca.ll, aggregate-result.ll, intrinsics.ll, and musttail.ll under tests/ir/. These are suggested learner-written fixtures, not files the book silently creates. The instruction fragment at the start is not a standalone fixture. Build first, then verify each original fixture and run the plugin. Exact diagnostics below apply to the incremental guards shown here; the full reference uses some broader wording.
+Write each complete module above as a separate test input: nonentry-alloca.ll, aggregate-result.ll, intrinsics.ll, and musttail.ll under tests/ir/. Create these fixture files as part of the exercise; the book does not create them for you. The instruction fragment at the start is not a standalone fixture. Build first, then verify each original fixture and run the plugin. Exact diagnostics below apply to the incremental guards shown here; the full reference uses some broader wording.
 
 ```bash
 cmake --build build
@@ -4277,7 +4295,7 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 | intrinsics.ll | intrinsic calls are outside this prototype's scope |
 | musttail.ll | musttail calls are unsupported |
 
-For each rejection, the original program and emitted program must be identical after canonical printing through opt. No new allocations, spill operations, or dispatcher blocks should appear. Repeat positive checks on loop.ll and recursion.ll so a too-broad condition does not reject supported input. The next checks cover additional special call semantics; these four rules do not complete the support contract by themselves.
+For each rejection, the original program and emitted program must be identical after canonical printing through opt. No new allocations, spill operations, or dispatcher blocks should appear. Repeat positive checks on loop.ll and recursion.ll so a too-broad condition does not reject supported input. Check the additional call/function fixtures in the subsections above as well; a handful of matching examples does not establish support for every LLVM feature.
 
 ### The full eligibility reference
 
@@ -4445,6 +4463,45 @@ StateMachineBuilder gives graph construction one boundary. Its input is a valid,
 A precondition is an obligation on the caller, not an automatic check performed by a C++ class. Extracting the code does not make unsafe input safe. Naming those obligations is what lets another reader understand when this helper may be used.
 
 Task: Future exercise: declare StateMachineBuilder and move dispatcher construction into it. Keep eligibility and value preparation in FlatteningPass.
+
+### Study-session walkthrough — declare the builder interface first
+
+Begin with include/minishield/StateMachineBuilder.h. Eligibility defines the support boundary; preparation transports values; construction changes the graph. Give construction a named interface before moving the implementation, so you can state its contract without rewriting the pass all at once.
+
+```cpp
+#pragma once
+#include "llvm/IR/Function.h"
+
+namespace minishield {
+class StateMachineBuilder {
+public:
+    // TODO: declare a static bool build taking llvm::Function &F.
+};
+}
+```
+
+pragma once prevents repeated inclusion in one translation unit; the include makes llvm::Function known. The namespace gives the class its minishield:: name, and public permits callers outside the class. static means callers will use StateMachineBuilder::build(F) without constructing an object. Function& borrows mutable existing IR; it does not copy or own the function. bool reports whether construction changed IR, not whether input was eligible.
+
+Before calling the implementation, the caller must supply valid IR that passed strict preflight and had PHIs/escaping results prepared. A declaration documents that contract; it does not execute the checks or perform construction.
+
+Task: Write only the header for this step and fill its public static declaration. Leave graph code and CMake unchanged until you write the later .cpp definition. Use the implementation scaffold as the next exercise after checking the interface.
+
+### Check the declaration without needing its definition
+
+A normal build may report no work because an unused header is not compiled on its own. Once you have written it, this optional syntax-only caller checks visibility and the static call form without linking the not-yet-written definition:
+
+```bash
+clang++-23 -std=c++20 -fsyntax-only -x c++ \
+  -Iinclude -I"$CONDA_PREFIX/include" - <<'CPP'
+#include "minishield/StateMachineBuilder.h"
+bool checkDeclaration(llvm::Function &F) {
+    return minishield::StateMachineBuilder::build(F);
+}
+CPP
+cmake --build build
+```
+
+Checkpoint: A header declaration alone should cause no LLVM program change. Explain why a static method needs no builder object, why Function& is mutable but borrowed, and why the declaration cannot supply a linked implementation by itself.
 
 ### The template to start with
 

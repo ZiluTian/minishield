@@ -184,12 +184,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The books were revised after the learner asked for beginner knowledge gaps to be filled. This replay connects the project’s tools before asking the reader to recognize their APIs. It is orientation, not an additional implementation checkpoint.",
+        "text": "Separate the compiler-side plugin from the program described by LLVM IR. First identify which tools build the plugin, which tool loads it, and which later tools produce an executable. This orientation makes the following API exercises easier to place.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: When I run opt, am I executing the C function, compiling the C++ pass, or transforming the LLVM program?",
+        "text": "Before writing, answer: When I run opt, am I executing the C function, compiling the C++ pass, or transforming the LLVM program?",
         "sessionWalkthrough": true
       },
       {
@@ -214,7 +214,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 1717
+    "words": 1718
   },
   {
     "id": 1,
@@ -362,12 +362,12 @@
       },
       {
         "type": "paragraph",
-        "text": "After the README was shortened, the learner asked how the minishield Conda environment was created. The useful distinction is the saved package recipe versus the state of a particular shell, not a need to recreate an already working environment.",
+        "text": "Treat environment.yml as the package recipe and activation as a change to the current shell’s tool selection. If minishield already exists, inspect its tools before recreating anything. A working environment and a configured project build are separate prerequisites.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What changes when I activate minishield, and why can a new terminal accidentally use different tools?",
+        "text": "Before writing, answer: What changes when I activate minishield, and why can a new terminal accidentally use different tools?",
         "sessionWalkthrough": true
       },
       {
@@ -392,7 +392,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 734
+    "words": 732
   },
   {
     "id": 2,
@@ -909,12 +909,12 @@
       },
       {
         "type": "paragraph",
-        "text": "An early request asked what target_include_directories, target_link_libraries, and set_target_properties do. These solve different problems even though all are attached to the same MiniShield target.",
+        "text": "Use target_include_directories, target_link_libraries, and set_target_properties for different jobs: finding declarations, resolving compiled library code, and selecting output properties. Attach each setting to the target it affects rather than treating all three as ways to locate LLVM.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why is finding an LLVM header not enough to produce a loadable plugin?",
+        "text": "Before writing, answer: Why is finding an LLVM header not enough to produce a loadable plugin?",
         "sessionWalkthrough": true
       },
       {
@@ -939,7 +939,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 2615
+    "words": 2626
   },
   {
     "id": 3,
@@ -1019,12 +1019,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner ran cmake --build build and received “loading build.ninja: No such file or directory.” The next question asked what created that file. This was a configure/generate prerequisite, not a Ninja instruction-count or source-code failure.",
+        "text": "If cmake --build build reports “loading build.ninja: No such file or directory,” check whether configuration and generation completed first. Ninja cannot execute build instructions that CMake has not successfully generated; this is different from a later C++ compilation failure.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Which command creates the build instructions, and which command executes them?",
+        "text": "Before writing, answer: Which command creates the build instructions, and which command executes them?",
         "sessionWalkthrough": true
       },
       {
@@ -1049,7 +1049,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 684
+    "words": 687
   },
   {
     "id": 4,
@@ -1112,12 +1112,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner asked how to define Plugin.cpp and FlatteningPass after CMake was ready. The session also found a declaration file named .cpp while includes requested .h, plus missing statement semicolons in the entry-point code.",
+        "text": "Give the pass declaration, its method definitions, and plugin registration separate files. If an include requests FlatteningPass.h while the declaration was saved under a .cpp name, fix the filename/include agreement. Also check complete C++ statements and aggregate initializers when the compiler reports missing semicolons.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why does listing an implementation in CMake not replace including its class declaration?",
+        "text": "Before writing, answer: Why does listing an implementation in CMake not replace including its class declaration?",
         "sessionWalkthrough": true
       },
       {
@@ -1142,7 +1142,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 622
+    "words": 631
   },
   {
     "id": 5,
@@ -1232,12 +1232,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner compared OptionalPassInfoMixin, RequiredPassInfoMixin, and plain PassInfoMixin. This clarified a policy question: may LLVM skip the pass on a function such as one marked optnone? It did not remove the need to register or invoke it.",
+        "text": "Choose optional or required pass behavior deliberately. The mixin answers whether LLVM may skip the pass on inputs such as optnone functions; it does not load the plugin, register a pipeline name, or schedule the pass automatically.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: If StatsPass is required, why must I still give opt the minishield-stats pipeline name?",
+        "text": "Before writing, answer: If StatsPass is required, why must I still give opt the minishield-stats pipeline name?",
         "sessionWalkthrough": true
       },
       {
@@ -1262,7 +1262,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 506
+    "words": 505
   },
   {
     "id": 6,
@@ -1352,12 +1352,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The session separated defining a C++ class from making its spelling recognizable to opt. Registration is the bridge: the pipeline parser asks the plugin whether it understands a name, and the callback adds the corresponding pass object.",
+        "text": "Registration connects a pipeline string to a C++ pass object. The parser asks whether the plugin understands a requested name, and the callback schedules the corresponding object. Defining a class alone does not teach opt its user-facing name.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Where does the string minishield-stats become a call to StatsPass::run?",
+        "text": "Before writing, answer: Where does the string minishield-stats become a call to StatsPass::run?",
         "sessionWalkthrough": true
       },
       {
@@ -1434,12 +1434,12 @@
       },
       {
         "type": "paragraph",
-        "text": "After an up-to-date build, the learner asked how to verify it. The session then showed an invalid pipeline ending with function(minishield-flatten)] instead of matching parentheses. That parse failure happens before the pass can inspect a function.",
+        "text": "Check pipeline syntax before investigating pass behavior. An expression ending in function(minishield-flatten)] has a mismatched closing bracket and cannot be parsed as the intended pipeline. Correct that spelling before expecting the pass to inspect a function.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What does verify establish, and why did a stray ] stop the command before any transformation?",
+        "text": "Before writing, answer: What does verify establish, and why did a stray ] stop the command before any transformation?",
         "sessionWalkthrough": true
       },
       {
@@ -1594,7 +1594,7 @@
         "irComparison": true
       }
     ],
-    "words": 893
+    "words": 892
   },
   {
     "id": 8,
@@ -1676,12 +1676,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner reported finishing StatsPass.h before proceeding. That checkpoint established the class/method interface; it did not mean the implementation, source list, and registration were already complete.",
+        "text": "Start StatsPass with a small header interface, then supply its implementation and registration separately. Completing a class declaration does not provide the method definition or add a name to the loaded plugin.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Which promise does the header make to Plugin.cpp and StatsPass.cpp?",
+        "text": "Before writing, answer: Which promise does the header make to Plugin.cpp and StatsPass.cpp?",
         "sessionWalkthrough": true
       },
       {
@@ -1702,11 +1702,11 @@
       },
       {
         "type": "checkpoint",
-        "text": "Checkpoint: A header can compile in one file while another translation unit still lacks its include. The next integration lesson handles the observed namespace-member error and unknown pipeline name separately; neither should be “fixed” by duplicating the class definition in Plugin.cpp.",
+        "text": "Checkpoint: A header can compile in one file while another translation unit still lacks its include. The next integration lesson handles the namespace-member error and unknown pipeline name separately; neither should be “fixed” by duplicating the class definition in Plugin.cpp.",
         "sessionWalkthrough": true
       }
     ],
-    "words": 533
+    "words": 537
   },
   {
     "id": 9,
@@ -1784,12 +1784,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The statistics implementation began with nested block/instruction traversal. The teaching broke counting away from classification so a wrong total could be located before adding opcode-specific cases.",
+        "text": "Count blocks and instructions before classifying opcodes. A small initial traversal gives you an independent checkpoint: if the total is wrong, investigate traversal before adding more counters that depend on it.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Do I need another module-to-function loop inside a function pass, and does the range-for loop copy the LLVM objects?",
+        "text": "Before writing, answer: Do I need another module-to-function loop inside a function pass, and does the range-for loop copy the LLVM objects?",
         "sessionWalkthrough": true
       },
       {
@@ -1953,7 +1953,7 @@
         "irComparison": true
       }
     ],
-    "words": 1303
+    "words": 1307
   },
   {
     "id": 10,
@@ -2049,12 +2049,12 @@
       },
       {
         "type": "paragraph",
-        "text": "Two concrete errors occurred: opt reported unknown function pass minishield-stats, and the rebuild reported no StatsPass member in namespace minishield. The latter came from including FlatteningPass.h twice rather than including StatsPass.h.",
+        "text": "Distinguish “unknown function pass minishield-stats” from “no member named StatsPass in namespace minishield.” The first concerns a loaded pipeline registration; the second concerns C++ declaration visibility while compiling Plugin.cpp. Including FlatteningPass.h twice cannot supply the missing StatsPass declaration.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why can adding StatsPass.cpp to CMake still leave Plugin.cpp unable to name the class?",
+        "text": "Before writing, answer: Why can adding StatsPass.cpp to CMake still leave Plugin.cpp unable to name the class?",
         "sessionWalkthrough": true
       },
       {
@@ -2079,7 +2079,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 625
+    "words": 631
   },
   {
     "id": 11,
@@ -2151,12 +2151,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner preferred a switch over if/else. The first opcode example used Instruction::Br, but the installed LLVM 23 headers provide CondBr and UncondBr separately. The session also caught the danger of missing break and omitting a counted field from the printed report.",
+        "text": "A C++ switch is a suitable way to classify instruction opcodes, but use names from the installed LLVM version. LLVM 23 here has CondBr and UncondBr rather than Instruction::Br. Also check case fallthrough and ensure every counted field appears in the report.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: How can a switch compile yet report a wrong count?",
+        "text": "Before writing, answer: How can a switch compile yet report a wrong count?",
         "sessionWalkthrough": true
       },
       {
@@ -2320,7 +2320,7 @@
         "irComparison": true
       }
     ],
-    "words": 1514
+    "words": 1513
   },
   {
     "id": 12,
@@ -2594,12 +2594,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The session used small IR fixtures with expected highlights rather than a visually impressive dump as the only check. The learner later wanted the directory runner to print this information as a readable table.",
+        "text": "Use small fixtures and hand-written expected counts as an independent oracle. A readable output table helps comparison, but its appearance does not establish that the numbers are correct.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What independent fact lets me decide whether the pass’s output is correct?",
+        "text": "Before writing, answer: What independent fact lets me decide whether the pass’s output is correct?",
         "sessionWalkthrough": true
       },
       {
@@ -2777,7 +2777,7 @@
         "irComparison": true
       }
     ],
-    "words": 1964
+    "words": 1957
   },
   {
     "id": 13,
@@ -2861,12 +2861,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner asked to run every test in a directory and print a table. The concrete shell failure was “unexpected end of file”; the recorded runner ended its loop with don instead of done, so Bash was still waiting for the loop to close.",
+        "text": "Treat a directory test runner as another program whose syntax and failure handling need checks. For example, don instead of done leaves a for-loop unclosed and can make Bash report “unexpected end of file,” even though the mistake is earlier.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why does Bash point at the end of the file instead of the misspelled closing word?",
+        "text": "Before writing, answer: Why does Bash point at the end of the file instead of the misspelled closing word?",
         "sessionWalkthrough": true
       },
       {
@@ -2877,7 +2877,7 @@
       },
       {
         "type": "paragraph",
-        "text": "This is a loop sketch, not a complete runner to overwrite the learner’s script. : is a no-op placeholder. The parser tracks opened constructs such as do/if and their closing done/fi. It may only discover at end-of-file that a required closer never arrived. Separately, statistics use stderr, so command capture must deliberately include diagnostics and preserve a failure status instead of printing a successful-looking row.",
+        "text": "This is a loop sketch, not a replacement for your complete runner. : is a no-op placeholder. The parser tracks opened constructs such as do/if and their closing done/fi. It may only discover at end-of-file that a required closer never arrived. Separately, statistics use stderr, so command capture must deliberately include diagnostics and preserve a failure status instead of printing a successful-looking row.",
         "sessionWalkthrough": true
       },
       {
@@ -2891,7 +2891,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 574
+    "words": 567
   },
   {
     "id": 14,
@@ -2946,12 +2946,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The session’s “clean” checkpoint compared the statistics pass with an LLVM-printed baseline. This tests the pass’s read-only promise instead of relying on a diagnostic saying that it only inspected input.",
+        "text": "Compare the statistics pass with an LLVM-printed baseline to check its read-only contract. A message saying that the pass only inspected input is weaker evidence than unchanged canonical output.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why compare two canonical LLVM outputs rather than diff a handwritten source file directly against generated IR?",
+        "text": "Before writing, answer: Why compare two canonical LLVM outputs rather than diff a handwritten source file directly against generated IR?",
         "sessionWalkthrough": true
       },
       {
@@ -3115,7 +3115,7 @@
         "irComparison": true
       }
     ],
-    "words": 1168
+    "words": 1166
   },
   {
     "id": 15,
@@ -3188,12 +3188,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner printed successor/predecessor relationships for phi.ll and asked how to visualize the result. The output showed entry’s two destinations, left/right feeding join, and a predecessor order that need not match a hand-drawn left-to-right picture.",
+        "text": "Draw the successor/predecessor relation for phi.ll before interpreting its report. The conditional entry has two destinations, left/right both lead to join, and join’s predecessor print order need not match a left-to-right drawing.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why do we count three branch instructions but four CFG edges?",
+        "text": "Before writing, answer: Why do we count three branch instructions but four CFG edges?",
         "sessionWalkthrough": true
       },
       {
@@ -3357,7 +3357,7 @@
         "irComparison": true
       }
     ],
-    "words": 1529
+    "words": 1525
   },
   {
     "id": 16,
@@ -3570,12 +3570,12 @@
       },
       {
         "type": "paragraph",
-        "text": "After CFG printing worked, the lesson introduced a reusable CFGAnalyzer header. The learner asked what was wrong with the current header, leading to a smaller interface-first exercise before implementing the graph traversal.",
+        "text": "After a CFG report is useful, expose the same facts as reusable data instead of making another pass parse text. Declare CFGAnalyzer’s result interface first so its ownership, identity, and consumer contract are clear before implementing traversal.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What should another pass receive from CFGAnalyzer: printed lines, copied blocks, or a result of borrowed block records?",
+        "text": "Before writing, answer: What should another pass receive from CFGAnalyzer: printed lines, copied blocks, or a result of borrowed block records?",
         "sessionWalkthrough": true
       },
       {
@@ -3753,7 +3753,7 @@
         "irComparison": true
       }
     ],
-    "words": 1808
+    "words": 1812
   },
   {
     "id": 17,
@@ -3942,12 +3942,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The implementation exercise turned each visited block into a BlockInfo. Successors, predecessors, and terminators were added in small steps, and the session later reported them alongside function statistics. Loop/back-edge analysis extended that same basic traversal rather than replacing it.",
+        "text": "Build one BlockInfo per visited block, fill its fields, and append it to the returned result. Start with blocks and edges, then extend the same analysis with terminators, dominator back edges, and loop information.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Which object should info.block identify, and when should this iteration’s record be added to the result?",
+        "text": "Before writing, answer: Which object should info.block identify, and when should this iteration’s record be added to the result?",
         "sessionWalkthrough": true
       },
       {
@@ -4111,7 +4111,7 @@
         "irComparison": true
       }
     ],
-    "words": 1757
+    "words": 1751
   },
   {
     "id": 18,
@@ -4335,12 +4335,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner asked whether BB could be stored directly because it was a reference and info.block held a pointer. The mistaken step was treating “refers to an object” as meaning the C++ expression already has pointer type.",
+        "text": "A reference alias and a pointer can both refer to the same object without being interchangeable C++ expressions. If info.block is a pointer while BB is a reference, determine the address expression needed to connect their types.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Does BB name the block object, or does it hold a BasicBlock* value?",
+        "text": "Before writing, answer: Does BB name the block object, or does it hold a BasicBlock* value?",
         "sessionWalkthrough": true
       },
       {
@@ -4365,7 +4365,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 1414
+    "words": 1413
   },
   {
     "id": 19,
@@ -4551,12 +4551,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner asked why some traversal loops use * while others use &. The answer depended on the range: iterating a Function yields blocks by reference, while LLVM successor/predecessor ranges yield block pointers.",
+        "text": "Choose * or & from the range’s actual element type. A Function traversal yields block references; LLVM successor/predecessor ranges yield block pointers. Similar-looking loops can therefore need different declarations.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why is &BB needed for one range, but successor already usable as a pointer in the inner range?",
+        "text": "Before writing, answer: Why is &BB needed for one range, but successor already usable as a pointer in the inner range?",
         "sessionWalkthrough": true
       },
       {
@@ -4581,7 +4581,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 933
+    "words": 928
   },
   {
     "id": 20,
@@ -4715,12 +4715,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner explicitly asked why for (auto bb : F) could not replace for (const llvm::BasicBlock &BB : F). That change asks C++ to initialize a new local object from each block rather than bind a reference to it.",
+        "text": "Compare for (auto bb : F) with for (const llvm::BasicBlock &BB : F). The first tries to initialize a new local block value, while the second binds a reference to the existing block. This difference matters because BasicBlock is not copyable.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: Why is auto valid in one loop but wrong when it silently removes the reference?",
+        "text": "Before writing, answer: Why is auto valid in one loop but wrong when it silently removes the reference?",
         "sessionWalkthrough": true
       },
       {
@@ -4745,7 +4745,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 775
+    "words": 776
   },
   {
     "id": 21,
@@ -4900,12 +4900,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner compared bb.isEHPad() with F.hasPersonalityFn() and then asked what a pad means. Both relate to exception handling, but they inspect different objects and protect different assumptions.",
+        "text": "Separate function-wide exception-handling information from a particular handler entry block. F.hasPersonalityFn() and BB.isEHPad() inspect different objects and protect different assumptions in a CFG rewrite.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: If the function has a personality routine, does that mean every one of its blocks is an EH pad?",
+        "text": "Before writing, answer: If the function has a personality routine, does that mean every one of its blocks is an EH pad?",
         "sessionWalkthrough": true
       },
       {
@@ -4930,7 +4930,7 @@
         "sessionWalkthrough": true
       }
     ],
-    "words": 1009
+    "words": 1005
   },
   {
     "id": 22,
@@ -5111,12 +5111,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The learner asked about the relationship between an intrinsic and an instruction. This mattered while recognizing coroutine operations in the eligibility checker: many intrinsics appear as call instructions, but not every instruction is a call or intrinsic.",
+        "text": "Relate an intrinsic to the instruction that invokes it. Many LLVM intrinsics are represented by call instructions, but ordinary arithmetic is also an instruction and most calls are not intrinsic operations. This distinction matters when filtering coroutine operations.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What am I checking with IntrinsicInst: the class of an IR operation, or the name of an ordinary source function?",
+        "text": "Before writing, answer: What am I checking with IntrinsicInst: the class of an IR operation, or the name of an ordinary source function?",
         "sessionWalkthrough": true
       },
       {
@@ -5420,12 +5420,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The session connected the checker to the flattening stub and printed accepted/rejected reasons. The guard belongs before any later mutation, which became particularly important once Day 2 added PHI and ordinary-value demotion.",
+        "text": "Put the eligibility decision before all mutation. A negative decision must leave the function intact; a positive decision permits the following stages to proceed but does not itself transform the graph or prove their correctness.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What should happen immediately after the checker says false, and what does true actually establish?",
+        "text": "Before writing, answer: What should happen immediately after the checker says false, and what does true actually establish?",
         "sessionWalkthrough": true
       },
       {
@@ -5609,7 +5609,7 @@
         "irComparison": true
       }
     ],
-    "words": 1407
+    "words": 1409
   },
   {
     "id": 24,
@@ -5727,12 +5727,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The session added separate coroutine and address-taken inputs because the existing EH/indirect-branch cases could reject earlier for a different reason. More unsupported constructs in one file do not automatically give better coverage of every condition.",
+        "text": "Isolate each rejection rule with a focused valid fixture. A coroutine test and an address-taken-block test exercise different conditions; combining unsupported features can let an earlier return hide the rule you meant to test.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: How could a rejection test pass even after the rule I intended to test was accidentally removed?",
+        "text": "Before writing, answer: How could a rejection test pass even after the rule I intended to test was accidentally removed?",
         "sessionWalkthrough": true
       },
       {
@@ -5891,7 +5891,7 @@
         "irComparison": true
       }
     ],
-    "words": 1183
+    "words": 1181
   },
   {
     "id": 25,
@@ -5961,12 +5961,12 @@
       },
       {
         "type": "paragraph",
-        "text": "The final Day 1 review checked that unsupported functions remain intact. A message saying “rejected” is insufficient if the pass has already inserted spills or rewired a branch before deciding to stop.",
+        "text": "Check unchanged output as well as a rejection diagnostic. An unsupported function can remain structurally valid even if the pass has already inserted spills or changed edges, so verifier success alone does not establish rejection before mutation.",
         "sessionWalkthrough": true
       },
       {
         "type": "paragraph",
-        "text": "Question for this replay: What should I compare to prove that the rejected function did not receive partial edits?",
+        "text": "Before writing, answer: What should I compare to prove that the rejected function did not receive partial edits?",
         "sessionWalkthrough": true
       },
       {
@@ -6150,7 +6150,7 @@
         "irComparison": true
       }
     ],
-    "words": 1237
+    "words": 1241
   },
   {
     "id": 26,
