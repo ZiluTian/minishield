@@ -4054,16 +4054,16 @@ if (const auto *call = llvm::dyn_cast<llvm::CallInst>(&I)) {
 
 CallInst recognizes the call instruction class; isMustTailCall asks whether this particular call carries the mandatory marker. An ordinary call passes this check. This is separate from the intrinsic check because an ordinary function can be the target of a musttail call.
 
-### Study-session update — musttail checked, inline assembly next
+### Study-session update — musttail and inline assembly checked
 
 At this resumed session checkpoint, the learner had implemented the musttail guard. The current build was up to date; the plugin rejected the focused musttail fixture with “musttail calls are unsupported,” and canonical before/after IR was identical. This records the observed result for that fixture, rather than converting every future support rule into a completed task.
 
-The next assigned guard is inline assembly. Its fixture syntax was verified, but the learner had not yet implemented this guard or demonstrated its plugin rejection when this note was written. The code and expected check below remain the next writing exercise.
+The inline-assembly guard was then implemented and checked in the resumed session. The existing build was up to date; tests/ir/inline_assembly.ll was rejected with the learner’s exact diagnostic “inline assembly is not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The convergent-call exercise below is the next assigned step, not a completed rejection check.
 
 ```cpp
 if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
     if (call->isInlineAsm())
-        return {false, "inline assembly is unsupported"};
+        return {false, "inline assembly is not supported"};
 }
 ```
 
@@ -4081,7 +4081,7 @@ This is a complete input module. define void starts a function with no returned 
 
 The prototype rejects this call form conservatively even for an empty assembly string: accepting one visually harmless spelling would not establish correct handling of arbitrary target assembly, constraints, or hidden effects. This is a support-policy choice, not a claim that the input is invalid LLVM IR. Its void result also does not make the call irrelevant; skipping void results in the spill worklist and rejecting an unsupported operation answer different questions.
 
-Task: Small writing step: add the CallBase/isInlineAsm guard yourself and save the complete module as a separate fixture, for example tests/ir/inline_assembly.ll. Keep the existing intrinsic and musttail checks; do not replace the entire checker with this one rule.
+Task: To replay this completed checkpoint, write the CallBase/isInlineAsm guard and the separate tests/ir/inline_assembly.ll fixture yourself. Keep the existing intrinsic and musttail checks; do not replace the entire checker with this one rule.
 
 ```bash
 cmake --build build
@@ -4091,7 +4091,47 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/inline_assembly.ll -o build/inline_assembly-checked.ll
 ```
 
-Checkpoint: After implementing the guard, expect “inline assembly is unsupported” and unchanged canonical output for this valid input. That plugin result is an expectation here, not a recorded success. Explain why call void can matter even though it produces no value, and why CallBase is broader than CallInst.
+Checkpoint: The observed inline-assembly diagnostic was “inline assembly is not supported,” with unchanged canonical output. Explain why call void can matter even though it produces no value, and why CallBase is broader than CallInst. Keep this checked result separate from the next convergent guard’s expected result.
+
+### Study-session walkthrough — a convergent call has participation constraints
+
+The next assigned check uses isConvergent() on the existing CallBase pointer. The input syntax below has been verified; implementation of this guard and its plugin rejection remain learner work at this checkpoint. An unchanged output from some other check would not prove this particular guard ran.
+
+In grouped execution, such as GPU work, an operation can involve communication among participating threads. Which threads participate can depend on control flow. Convergent describes constraints on preserving that participation; it does not mean every thread takes the same path or simply that a function eventually returns. Routing through a shared dispatcher changes the graph, so this prototype excludes marked calls until it has a suitable correctness argument. This is conservative policy, not a rule that every CFG transformation is forbidden. See LLVM’s [Convergent Operation Semantics](https://llvm.org/docs/ConvergentOperations.html).
+
+```cpp
+// Inside the existing successful dyn_cast<llvm::CallBase>(&I) block:
+if (call->isConvergent())
+    return {false, "convergent calls are unsupported"};
+```
+
+call is the already-checked borrowed pointer to a call-like instruction; use your existing variable name if it differs. isConvergent() returns a C++ bool for that call’s semantic marker. It is not a target-program test of how many threads arrived. Returning the rejection before demotion keeps the original function intact. This guard is separate from intrinsic recognition: an ordinary external function call can also be marked convergent.
+
+```llvm
+declare i32 @group_operation(i32) convergent
+
+define i32 @use_group(i32 %x) {
+entry:
+  %r = call i32 @group_operation(i32 %x) convergent
+  ret i32 %r
+}
+```
+
+Read the complete module locally: declare gives group_operation an i32 result and one i32 input without defining a body. Its convergent suffix marks the declared function. define creates use_group, whose caller supplies i32 %x. The call passes %x to that ordinary external name and binds its returned integer to %r; its own explicit convergent suffix marks the call site. ret returns %r. @ names the module-level functions; % names the wrapper’s local argument/result. The markers describe a contract, not an extra argument, branch, or arithmetic instruction.
+
+group_operation is a placeholder, not an LLVM intrinsic and not an implemented GPU primitive. This fixture isolates recognition of the convergent call marker. It is valid input for parsing/guard checks, but has no main or implementation of the external callee, so it is not a standalone executable or a behavioral simulation of thread communication.
+
+Task: Write the isConvergent guard inside the existing CallBase block, and save this focused input as tests/ir/convergent.ll. Keep the inline-assembly rule. Check this one additional restriction before adding the next special-call rule.
+
+```bash
+cmake --build build
+opt -passes=verify -disable-output tests/ir/convergent.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/convergent.ll -o build/convergent-checked.ll
+```
+
+Checkpoint: After implementing this guard, expect “convergent calls are unsupported” and identical canonical output for this focused input. That plugin outcome is still expected, not observed, in this note. Explain why a scalar result and an ordinary external callee do not remove the participation contract.
 
 ### Verify these guards independently
 
