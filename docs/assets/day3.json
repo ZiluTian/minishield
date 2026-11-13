@@ -1,7 +1,7 @@
 {
   "day": 3,
-  "title": "Day 3 — Evidence, tests, and measurement",
-  "status": "Complete teaching draft. These are future exercises, not a report of completed tests or measured performance. Write and run the examples after finishing the Day 2 implementation.",
+  "title": "Volume 3 — Evidence, tests, and measurement",
+  "status": "Complete teaching draft. These are future exercises, not a report of completed tests or measured performance. Write and run the examples after finishing the Volume 2 implementation.",
   "groups": [
     {
       "name": "Plan the evidence",
@@ -58,7 +58,7 @@
       "description": "Write an honest report, build a clean demo, and investigate a simulated bug."
     },
     {
-      "name": "Day 3 reference",
+      "name": "Volume 3 reference",
       "label": "GLOSSARY",
       "key": "reference",
       "ids": [
@@ -74,14 +74,14 @@
       "day": 3,
       "title": "What evidence will make the pass trustworthy?",
       "originalTitle": "What evidence will make the pass trustworthy?",
-      "summary": "Turn the Day 2 implementation into a set of independently checkable claims before measuring it.",
+      "summary": "Turn the Volume 2 implementation into a set of independently checkable claims before measuring it.",
       "takeaway": "Each kind of test answers a different question.",
       "source": "day3",
       "group": "design",
       "blocks": [
         {
           "type": "task",
-          "text": "Task: Future exercise: finish the Day 2 checklist, then build the evidence in this book. Reading this draft does not mean tests or benchmarks have run."
+          "text": "Task: Future exercise: finish the Volume 2 checklist, then build the evidence in this book. Reading this draft does not mean tests or benchmarks have run."
         },
         {
           "type": "heading",
@@ -401,7 +401,7 @@
       "blocks": [
         {
           "type": "task",
-          "text": "Task: Future exercise: after writing the Day 2 builder, refactor CMake. This chapter supplies a proposed file; it does not modify your current build configuration."
+          "text": "Task: Future exercise: after writing the Volume 2 builder, refactor CMake. This chapter supplies a proposed file; it does not modify your current build configuration."
         },
         {
           "type": "heading",
@@ -1049,7 +1049,7 @@
       "blocks": [
         {
           "type": "task",
-          "text": "Task: Future exercise: append a builder test only after the complete Day 2 StateMachineBuilder exists. The fixture below is already prepared because it contains no PHIs or escaping instruction results."
+          "text": "Task: Future exercise: append a builder test only after the complete Volume 2 StateMachineBuilder exists. The fixture below is already prepared because it contains no PHIs or escaping instruction results."
         },
         {
           "type": "heading",
@@ -1377,7 +1377,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A variable-sized entry alloca is valid IR but outside the strict Day 2 contract. The fixture has a real body and an ordinary branch so an earlier declaration/terminator rejection does not mask the allocation rule."
+          "text": "A variable-sized entry alloca is valid IR but outside the strict Volume 2 contract. The fixture has a real body and an ordinary branch so an earlier declaration/terminator rejection does not mask the allocation rule."
         },
         {
           "type": "heading",
@@ -1610,7 +1610,7 @@
       "blocks": [
         {
           "type": "task",
-          "text": "Task: Future exercise: write tests/integration/differential.py yourself from this reference. First write the discount kernel and driver from Day 2 lesson 24, and build both executables using that common-IR pipeline."
+          "text": "Task: Future exercise: write tests/integration/differential.py yourself from this reference. First write the discount kernel and driver from Volume 2 lesson 24, and build both executables using that common-IR pipeline."
         },
         {
           "type": "heading",
@@ -3708,7 +3708,7 @@
       "blocks": [
         {
           "type": "task",
-          "text": "Task: Future exercise: write scripts/demo.sh yourself. This reference assumes the future Day 3 CMake/tests and discount fixtures have been written. It does not alter or replace your local test_all.sh."
+          "text": "Task: Future exercise: write scripts/demo.sh yourself. This reference assumes the future Volume 3 CMake/tests and discount fixtures have been written. It does not alter or replace your local test_all.sh."
         },
         {
           "type": "heading",
@@ -3733,7 +3733,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A successful run shows configure, build, plugin loading, verifier checks, output equality on the stated domain, and tests. Benchmarking remains a separate command so measurement noise and correctness failures do not become confused. The Day 3 build rule also generates the registered differential artifacts; the explicit commands here demonstrate those same stages for inspection."
+          "text": "A successful run shows configure, build, plugin loading, verifier checks, output equality on the stated domain, and tests. Benchmarking remains a separate command so measurement noise and correctness failures do not become confused. The Volume 3 build rule also generates the registered differential artifacts; the explicit commands here demonstrate those same stages for inspection."
         },
         {
           "type": "heading",
@@ -4077,8 +4077,8 @@
       "id": 69,
       "number": 13,
       "day": 3,
-      "title": "Handle the simulated O2 bug and close Day 3",
-      "originalTitle": "Handle the simulated O2 bug and close Day 3",
+      "title": "Handle the simulated O2 bug and close Volume 3",
+      "originalTitle": "Handle the simulated O2 bug and close Volume 3",
       "summary": "Practice a support workflow, then audit the evidence before claiming completion.",
       "takeaway": "The book can be finished while its exercises remain unfinished.",
       "source": "day3",
@@ -4131,7 +4131,7 @@
         },
         {
           "type": "heading",
-          "text": "The full Day 3 exit checklist"
+          "text": "The full Volume 3 exit checklist"
         },
         {
           "type": "code",
@@ -4401,8 +4401,8 @@
       "id": 70,
       "number": 14,
       "day": 3,
-      "title": "Glossary. Terms used in Day 3",
-      "originalTitle": "Glossary. Terms used in Day 3",
+      "title": "Terms used in Volume 3",
+      "originalTitle": "Terms used in Volume 3",
       "summary": "A reference for ownership, test design, reproducibility, and performance vocabulary.",
       "takeaway": "Use a precise term to name the claim you are checking.",
       "source": "day3",
@@ -4433,7 +4433,7 @@
             ],
             [
               "Translation unit",
-              "Covered in the [Day 1 glossary](#lesson-26) (“Translation unit”): one `.cpp` file, expanded with the headers it includes and compiled into one object file."
+              "Covered in the [Volume 1 glossary](#lesson-26) (“Translation unit”): one `.cpp` file, expanded with the headers it includes and compiled into one object file."
             ],
             [
               "ODR",
@@ -4445,7 +4445,7 @@
             ],
             [
               "Usage requirement",
-              "Covered in the [Day 1 glossary](#lesson-26) (“Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`)”): who sees a target’s compile/link requirements; MiniShield is a plugin nothing links to, so everything is `PRIVATE`."
+              "Covered in the [Volume 1 glossary](#lesson-26) (“Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`)”): who sees a target’s compile/link requirements; MiniShield is a plugin nothing links to, so everything is `PRIVATE`."
             ],
             [
               "extern C",
@@ -4510,7 +4510,7 @@
             ],
             [
               "CTest / GoogleTest",
-              "CTest orchestrates the commands; for the framework itself see the [Day 1 glossary](#lesson-26) (“GoogleTest (gtest)”): C++ test cases and assertions."
+              "CTest orchestrates the commands; for the framework itself see the [Volume 1 glossary](#lesson-26) (“GoogleTest (gtest)”): C++ test cases and assertions."
             ],
             [
               "Analysis invalidation",

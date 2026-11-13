@@ -8,7 +8,7 @@
     "coverFoot": "Source →<br>understanding.",
     "aside": {
       "label": "Roadmap",
-      "text": "Day 1 ends with one decision — which functions a control-flow-flattening pass may touch. You build a read-only stats pass and a CFG analysis first, because you can't safely flatten what you haven't inspected. The flattening rewrite itself is Day 2."
+      "text": "Volume 1 ends with one decision — which functions a control-flow-flattening pass may touch. You build a read-only stats pass and a CFG analysis first, because you can't safely flatten what you haven't inspected. The flattening rewrite itself is Volume 2."
     }
   },
   "groups": [
@@ -74,7 +74,7 @@
         18,
         19
       ],
-      "description": "Every term used in the README and Day 1, plus reference cards for the C++ and LLVM concepts the guard relies on."
+      "description": "Every term used in the README and Volume 1, plus reference cards for the C++ and LLVM concepts the guard relies on."
     }
   ],
   "lessons": [
@@ -324,7 +324,7 @@
       "blocks": [
         {
           "type": "paragraph",
-          "text": "Day 1 builds toward one decision — which functions a control-flow-flattening pass may touch. Everything before that decision is inspection, and inspection needs a plugin that actually loads. This part is the ground every later lesson stands on: a consistent Conda toolchain and a CMake project that turns your source into a loadable library."
+          "text": "Volume 1 builds toward one decision — which functions a control-flow-flattening pass may touch. Everything before that decision is inspection, and inspection needs a plugin that actually loads. This part is the ground every later lesson stands on: a consistent Conda toolchain and a CMake project that turns your source into a loadable library."
         },
         {
           "type": "task",
@@ -1080,7 +1080,7 @@
         },
         {
           "type": "task",
-          "text": "Task: Small writing step: Explain each line against the error it could address: missing header, unresolved library symbol, or looking for the .so in the wrong directory. Keep the reusable-core changes for Day 3 separate.",
+          "text": "Task: Small writing step: Explain each line against the error it could address: missing header, unresolved library symbol, or looking for the .so in the wrong directory. Keep the reusable-core changes for Volume 3 separate.",
           "sessionWalkthrough": true
         },
         {
@@ -1776,7 +1776,7 @@
         },
         {
           "type": "paragraph",
-          "text": "This is the complete minishield-input.ll smoke example used by the run command. Day 1 runs an inspection/stub checkpoint; do not use the later Day 2 transforming implementation as an unchanged-output baseline.",
+          "text": "This is the complete minishield-input.ll smoke example used by the run command. Volume 1 runs an inspection/stub checkpoint; do not use the later Volume 2 transforming implementation as an unchanged-output baseline.",
           "irComparison": true
         },
         {
@@ -4711,7 +4711,7 @@
       "blocks": [
         {
           "type": "paragraph",
-          "text": "MiniShield's product is a control-flow-flattening pass: it rewrites a function's branching into a single dispatcher. It can only run on functions it fully understands, so the first job is a guard — an eligibility policy that accepts a function only if every block, terminator, and call is supported, and rejects everything else without changing it. This is the one decision Day 1 ends on; the flattening rewrite itself is Day 2."
+          "text": "MiniShield's product is a control-flow-flattening pass: it rewrites a function's branching into a single dispatcher. It can only run on functions it fully understands, so the first job is a guard — an eligibility policy that accepts a function only if every block, terminator, and call is supported, and rejects everything else without changing it. This is the one decision Volume 1 ends on; the flattening rewrite itself is Volume 2."
         },
         {
           "type": "heading",
@@ -4801,8 +4801,8 @@
       "day": 1,
       "number": 26,
       "title": "Look up a term",
-      "originalTitle": "Glossary. Terms used in the README and Day 1",
-      "summary": "The working glossary for the README and Day 1: every term used in the guide, defined in one to three sentences with a pointer to the lesson where it appears.",
+      "originalTitle": "Glossary. Terms used in the README and Volume 1",
+      "summary": "The working glossary for the README and Volume 1: every term used in the guide, defined in one to three sentences with a pointer to the lesson where it appears.",
       "takeaway": "If a term is new, the glossary is the fastest detour.",
       "source": "day1",
       "blocks": [
@@ -5119,7 +5119,7 @@
       "blocks": [
         {
           "type": "paragraph",
-          "text": "Reference cards for the C++ the Day 1 lessons rely on: references versus pointers, the two jobs of `&`, and how a range-based loop variable is typed. Look these up when a construct matters; each entry states the idea, shows it in this project's code, and links the language reference."
+          "text": "Reference cards for the C++ the Volume 1 lessons rely on: references versus pointers, the two jobs of `&`, and how a range-based loop variable is typed. Look these up when a construct matters; each entry states the idea, shows it in this project's code, and links the language reference."
         },
         {
           "type": "heading",

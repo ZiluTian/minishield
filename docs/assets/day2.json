@@ -88,7 +88,7 @@
       "description": "Inspect invariants, compare defined behavior, test hard cases, and record limitations."
     },
     {
-      "name": "Day 2 reference",
+      "name": "Terms Used, C++ concepts, LLVM concepts",
       "label": "GLOSSARY",
       "key": "reference",
       "ids": [
@@ -96,7 +96,7 @@
         71,
         72
       ],
-      "description": "The Day 2 glossary and the dedicated LLVM and C++ term references."
+      "description": "The Volume 2 glossary and the dedicated LLVM and C++ term references."
     }
   ],
   "lessons": [
@@ -123,7 +123,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Day 1 described programs. Day 2 changes how they execute. Our goal is to route decisions through one dispatcher while preserving the answers, effects, and termination of every execution covered by our support contract. This is why we cannot start by replacing all the branches: a program carries both control flow (which block runs next) and data flow (which computed values later instructions use).",
+          "text": "Volume 1 described programs. Volume 2 changes how they execute. Our goal is to route decisions through one dispatcher while preserving the answers, effects, and termination of every execution covered by our support contract. This is why we cannot start by replacing all the branches: a program carries both control flow (which block runs next) and data flow (which computed values later instructions use).",
           "conceptualIntro": true
         },
         {
@@ -169,7 +169,7 @@
         },
         {
           "type": "task",
-          "text": "Task: Read this context before editing FlatteningPass. Day 1 built the plugin, statistics, CFG analysis, and eligibility checker. Day 2 starts changing eligible functions."
+          "text": "Task: Read this context before editing FlatteningPass. Volume 1 built the plugin, statistics, CFG analysis, and eligibility checker. Volume 2 starts changing eligible functions."
         },
         {
           "type": "heading",
@@ -235,7 +235,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Edit the existing lib/FlatteningPass.cpp. Do not create a second run() definition. The eligibility guard from Day 1 stays at the top; every new mutation belongs after it."
+          "text": "Edit the existing lib/FlatteningPass.cpp. Do not create a second run() definition. The eligibility guard from Volume 1 stays at the top; every new mutation belongs after it."
         },
         {
           "type": "code",
@@ -265,7 +265,7 @@
               "ordered": true,
               "items": [
                 "The pass's contract is that rejected input comes back untouched: the eligibility guard sits at the top of `run()` (before the TODO mutation site in the template), so if we demoted instructions first and then discovered an unsupported feature, the function would be left half-transformed and could no longer be returned unchanged. The support decision must therefore complete before the first edit.",
-                "The verifier checks structural IR rules — well-formed instructions, valid terminators, SSA dominance — and says nothing about whether the transformed function computes what the original did: a swapped branch destination would verify cleanly and return the wrong answer, which is why Day 2 adds a differential comparison on a defined domain as separate evidence of behavior."
+                "The verifier checks structural IR rules — well-formed instructions, valid terminators, SSA dominance — and says nothing about whether the transformed function computes what the original did: a swapped branch destination would verify cleanly and return the wrong answer, which is why Volume 2 adds a differential comparison on a defined domain as separate evidence of behavior."
               ]
             }
           ]
@@ -323,7 +323,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Preview of the complete Day 2 pipeline, not an edit to make in the background lesson. Later checkpoints reach this shape in smaller steps.",
+          "text": "Preview of the complete Volume 2 pipeline, not an edit to make in the background lesson. Later checkpoints reach this shape in smaller steps.",
           "irComparison": true
         },
         {
@@ -6680,7 +6680,7 @@
       "day": 2,
       "title": "Define the supported input before mutation",
       "originalTitle": "Define the supported input before mutation",
-      "summary": "Tighten the Day 1 guard before turning the prototype into a complete dispatcher. Scope is a correctness decision.",
+      "summary": "Tighten the Volume 1 guard before turning the prototype into a complete dispatcher. Scope is a correctness decision.",
       "takeaway": "Reject unsupported input before the first edit.",
       "source": "day2",
       "group": "complete",
@@ -10037,7 +10037,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Start with amounts -1, 0, 1, 99, 100, 1000, 10000 and every level. Day 3 adds seeded randomized cases, CTest wiring, and diagnostics for the first mismatch."
+          "text": "Start with amounts -1, 0, 1, 99, 100, 1000, 10000 and every level. Volume 3 adds seeded randomized cases, CTest wiring, and diagnostics for the first mismatch."
         },
         {
           "type": "checkpoint",
@@ -11023,8 +11023,8 @@
       "id": 55,
       "number": 27,
       "day": 2,
-      "title": "Close Day 2 with an evidence checklist",
-      "originalTitle": "Close Day 2 with an evidence checklist",
+      "title": "Close Volume 2 with an evidence checklist",
+      "originalTitle": "Close Volume 2 with an evidence checklist",
       "summary": "Separate a completed book draft from a completed learner implementation, then prepare the handoff to the test-and-measurement work.",
       "takeaway": "A checklist is a claim only after its evidence exists.",
       "source": "day2",
@@ -11032,7 +11032,7 @@
       "blocks": [
         {
           "type": "heading",
-          "text": "What finishing Day 2 should mean",
+          "text": "What finishing Volume 2 should mean",
           "conceptualIntro": true
         },
         {
@@ -11042,12 +11042,12 @@
         },
         {
           "type": "paragraph",
-          "text": "Keep three states separate: a chapter is written, you have implemented its exercise, and its behavior has been checked. A full reference in the book establishes the first; it does not automatically establish the other two in your working tree. Day 3 makes the checks repeatable and measures the resulting artifacts.",
+          "text": "Keep three states separate: a chapter is written, you have implemented its exercise, and its behavior has been checked. A full reference in the book establishes the first; it does not automatically establish the other two in your working tree. Volume 3 makes the checks repeatable and measures the resulting artifacts.",
           "conceptualIntro": true
         },
         {
           "type": "task",
-          "text": "Task: Future exercise: review the implementation and evidence before beginning Day 3. The chapters describe work to do; they do not mark it done for you."
+          "text": "Task: Future exercise: review the implementation and evidence before beginning Volume 3. The chapters describe work to do; they do not mark it done for you."
         },
         {
           "type": "heading",
@@ -11080,7 +11080,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Day 3 turns manual observations into repeatable unit, integration, and differential checks, then measures final artifacts. It adds evidence rather than assuming that many successful printouts are a test suite."
+          "text": "Volume 3 turns manual observations into repeatable unit, integration, and differential checks, then measures final artifacts. It adds evidence rather than assuming that many successful printouts are a test suite."
         },
         {
           "type": "heading",
@@ -11120,7 +11120,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Use the entire loop pair to review the Day 2 exit criteria. This is a reference endpoint, not a claim that the learner implementation has reached it.",
+          "text": "Use the entire loop pair to review the Volume 2 exit criteria. This is a reference endpoint, not a claim that the learner implementation has reached it.",
           "irComparison": true
         },
         {
@@ -11317,7 +11317,7 @@
       ],
       "words": 2244,
       "quiz": {
-        "q": "When should a Day 2 exit box be checked?",
+        "q": "When should a Volume 2 exit box be checked?",
         "choices": [
           "When the corresponding implementation and evidence exist",
           "When a chapter has been read",
@@ -11331,9 +11331,9 @@
       "id": 44,
       "day": 2,
       "number": 28,
-      "title": "Glossary. Terms used in Day 2",
-      "originalTitle": "Glossary. Terms used in Day 2",
-      "summary": "A compact reference for the general compiler and project vocabulary used in Day 2; LLVM-specific and C++-specific terms each have their own document.",
+      "title": "Terms used in Volume 2",
+      "originalTitle": "Terms used in Volume 2",
+      "summary": "A compact reference for the general compiler and project vocabulary used in Volume 2; LLVM-specific and C++-specific terms each have their own document.",
       "takeaway": "Look up the word, then return to the concrete IR example.",
       "source": "day2",
       "group": "reference",
@@ -11355,7 +11355,7 @@
         },
         {
           "type": "task",
-          "text": "Task: Use this reference when a term interrupts your progress. The [Day 1 glossary](#lesson-26) remains available under the Day 1 tab."
+          "text": "Task: Use this reference when a term interrupts your progress. The [Volume 1 glossary](#lesson-26) remains available under the Volume 1 tab."
         },
         {
           "type": "heading",
@@ -11384,7 +11384,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The compiler-background terms the Day 2 lessons build on: the representation invariants (SSA, dominance), the techniques the pass uses (demotion, worklists), and the safety vocabulary (undefined behavior, differential tests) used when judging what a check proves."
+          "text": "The compiler-background terms the Volume 2 lessons build on: the representation invariants (SSA, dominance), the techniques the pass uses (demotion, worklists), and the safety vocabulary (undefined behavior, differential tests) used when judging what a check proves."
         },
         {
           "type": "heading",
@@ -11392,11 +11392,11 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"SSA (static single assignment)\": every value in LLVM IR is defined exactly once and used only after that definition; merges are handled by PHI nodes instead of redefining names, and `verify` checks the constraint."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"SSA (static single assignment)\": every value in LLVM IR is defined exactly once and used only after that definition; merges are handled by PHI nodes instead of redefining names, and `verify` checks the constraint."
         },
         {
           "type": "paragraph",
-          "text": "Day 2 adds dispatcher edges that can reach a use without passing through its definition, which is why value preparation happens before the state machinery exists (lesson 0). The verifier checks the relationship; a passing verify is the evidence that dominance still holds."
+          "text": "Volume 2 adds dispatcher edges that can reach a use without passing through its definition, which is why value preparation happens before the state machinery exists (lesson 0). The verifier checks the relationship; a passing verify is the evidence that dominance still holds."
         },
         {
           "type": "paragraph",
@@ -11408,7 +11408,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Dominator\": a block B dominates a block A when every path from the function entry to A passes through B; dominance underpins the back-edge definition and the `DominatorTreeAnalysis`."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Dominator\": a block B dominates a block A when every path from the function entry to A passes through B; dominance underpins the back-edge definition and the `DominatorTreeAnalysis`."
         },
         {
           "type": "paragraph",
@@ -11433,7 +11433,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Day 2 performs the demotion mechanically: DemotePHIToStack in lesson 3 and DemoteRegToStack in lessons 8–9. The gotcha: demotion does not remove every dominance requirement, because the alloca’s result is itself an SSA pointer that must dominate its uses."
+          "text": "Volume 2 performs the demotion mechanically: DemotePHIToStack in lesson 3 and DemoteRegToStack in lessons 8–9. The gotcha: demotion does not remove every dominance requirement, because the alloca’s result is itself an SSA pointer that must dominate its uses."
         },
         {
           "type": "paragraph",
@@ -11487,7 +11487,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Evaluate a constant expression during IR construction or optimization and replace it with the computed constant. In Day 2 it appears through the builder: when a Create* helper can fold, it returns a Constant instead of inserting an Instruction, which is why a builder result is typed llvm::Value*, not Instruction*."
+          "text": "Evaluate a constant expression during IR construction or optimization and replace it with the computed constant. In Volume 2 it appears through the builder: when a Create* helper can fold, it returns a Constant instead of inserting an Instruction, which is why a builder result is typed llvm::Value*, not Instruction*."
         },
         {
           "type": "code",
@@ -11538,7 +11538,7 @@
         },
         {
           "type": "paragraph",
-          "text": "In Day 2, unreachable marks the ms.invalid destination: the state-machine invariant keeps execution off it, and reaching it would be undefined behavior, not error recovery (lessons 14–15)."
+          "text": "In Volume 2, unreachable marks the ms.invalid destination: the state-machine invariant keeps execution off it, and reaching it would be undefined behavior, not error recovery (lessons 14–15)."
         },
         {
           "type": "paragraph",
@@ -11559,7 +11559,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Day 2 compares executions in lesson 24 over a defined input domain and records the limits of that comparison in lesson 26."
+          "text": "Volume 2 compares executions in lesson 24 over a defined input domain and records the limits of that comparison in lesson 26."
         },
         {
           "type": "paragraph",
@@ -11712,8 +11712,8 @@
             "Before/after memory examples: lessons 10–11.",
             "State IDs, block creation, and first-hop connection: lessons 12–16.",
             "Guard-rejected LLVM constructs and their predicates: lesson 17.",
-            "LLVM-specific terms — printed IR, memory, control flow, calls, and the C++ API: lesson 29, the Day 2 LLVM document.",
-            "C++-specific terms — pointers, references, casts, classes, and translation units: lesson 30, the Day 2 C++ document."
+            "LLVM-specific terms — printed IR, memory, control flow, calls, and the C++ API: lesson 29, the Volume 2 LLVM document.",
+            "C++-specific terms — pointers, references, casts, classes, and translation units: lesson 30, the Volume 2 C++ document."
           ]
         },
         {
@@ -11747,9 +11747,9 @@
       "id": 71,
       "day": 2,
       "number": 29,
-      "title": "Glossary. LLVM terms used in Day 2",
-      "originalTitle": "Glossary. LLVM terms used in Day 2",
-      "summary": "The LLVM-specific terms of Day 2: the IR constructs the pass reads and writes, the call and function properties the guard checks, and the C++ API surface the pass uses.",
+      "title": "LLVM terms used in Volume 2",
+      "originalTitle": "LLVM terms used in Volume 2",
+      "summary": "The LLVM-specific terms of Volume 2: the IR constructs the pass reads and writes, the call and function properties the guard checks, and the C++ API surface the pass uses.",
       "takeaway": "Name the construct, then name the API that reads or writes it.",
       "source": "day2",
       "group": "reference",
@@ -11761,11 +11761,11 @@
         },
         {
           "type": "paragraph",
-          "text": "Each entry names an LLVM construct, the problem it serves in Day 2, and the API that reads or writes it. The groups follow where you meet the terms: the printed IR you read, the memory and control-flow constructs, the call and function properties the guard checks, and the C++ side of the pass."
+          "text": "Each entry names an LLVM construct, the problem it serves in Volume 2, and the API that reads or writes it. The groups follow where you meet the terms: the printed IR you read, the memory and control-flow constructs, the call and function properties the guard checks, and the C++ side of the pass."
         },
         {
           "type": "task",
-          "text": "Task: Use this document when an LLVM term interrupts your progress. General compiler and project vocabulary lives in the Day 2 glossary, and C++ language terms have their own document."
+          "text": "Task: Use this document when an LLVM term interrupts your progress. General compiler and project vocabulary lives in the Volume 2 glossary, and C++ language terms have their own document."
         },
         {
           "type": "heading",
@@ -11822,7 +11822,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Declaration vs. definition (function)\": a `declare` signature announces a function with no body; a `define` provides the body, and passes only run on definitions — `F.isDeclaration()` detects the former."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Declaration vs. definition (function)\": a `declare` signature announces a function with no body; a `define` provides the body, and passes only run on definitions — `F.isDeclaration()` detects the former."
         },
         {
           "type": "paragraph",
@@ -11940,7 +11940,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Every Day 2 read-from-zero table flags the common misreading of align as a stored value."
+          "text": "Every Volume 2 read-from-zero table flags the common misreading of align as a stored value."
         },
         {
           "type": "paragraph",
@@ -11961,7 +11961,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Every Day 2 read-from-zero table treats ; preds as comment only; the ms.dispatch block prints “No predecessors!” until the first hop is connected (lesson 16)."
+          "text": "Every Volume 2 read-from-zero table treats ; preds as comment only; the ms.dispatch block prints “No predecessors!” until the first hop is connected (lesson 16)."
         },
         {
           "type": "paragraph",
@@ -11981,7 +11981,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"PHI node / phi\": at a block’s entry a PHI picks which value flows in from which predecessor — `%x = phi i32 [ 1, %left ], [ 2, %right ]` — because SSA forbids redefining a value’s name at a merge point."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"PHI node / phi\": at a block’s entry a PHI picks which value flows in from which predecessor — `%x = phi i32 [ 1, %left ], [ 2, %right ]` — because SSA forbids redefining a value’s name at a merge point."
         },
         {
           "type": "paragraph",
@@ -12018,7 +12018,7 @@
         },
         {
           "type": "paragraph",
-          "text": "store writes a typed value to an address and produces no SSA result; load reads a typed value from an address and defines a new SSA value. The pair is how Day 2 carries values between blocks once PHIs and register-like results are demoted."
+          "text": "store writes a typed value to an address and produces no SSA result; load reads a typed value from an address and defines a new SSA value. The pair is how Volume 2 carries values between blocks once PHIs and register-like results are demoted."
         },
         {
           "type": "code",
@@ -12056,7 +12056,7 @@
         },
         {
           "type": "paragraph",
-          "text": "select i1 C, T A, T B chooses a value: the result is A when C is true and B otherwise. It does not branch and does not conditionally execute the instructions that computed A and B — both operands are available when select runs. That is exactly what lets Day 2 encode the next state as a value."
+          "text": "select i1 C, T A, T B chooses a value: the result is A when C is true and B otherwise. It does not branch and does not conditionally execute the instructions that computed A and B — both operands are available when select runs. That is exactly what lets Volume 2 encode the next state as a value."
         },
         {
           "type": "code",
@@ -12106,7 +12106,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Terminator\": the last instruction of a basic block, which transfers control (`br`, `switch`, `ret`, `unreachable`, …); Day 1’s policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Terminator\": the last instruction of a basic block, which transfers control (`br`, `switch`, `ret`, `unreachable`, …); Volume 1’s policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only."
         },
         {
           "type": "paragraph",
@@ -12148,7 +12148,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Day 2 carries two switches at once: the original program decision is lowered to comparisons and selects (lesson 20), while the dispatcher’s switch stays in place to decode state IDs (lesson 14)."
+          "text": "Volume 2 carries two switches at once: the original program decision is lowered to comparisons and selects (lesson 20), while the dispatcher’s switch stays in place to decode state IDs (lesson 14)."
         },
         {
           "type": "paragraph",
@@ -12177,7 +12177,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Unreachable\": a terminator marking a point that cannot execute, transferring control nowhere."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Unreachable\": a terminator marking a point that cannot execute, transferring control nowhere."
         },
         {
           "type": "paragraph",
@@ -12244,7 +12244,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The Day 2 glossary’s tail-call entry carries the general concept; this entry is about the IR marker."
+          "text": "The Volume 2 glossary’s tail-call entry carries the general concept; this entry is about the IR marker."
         },
         {
           "type": "paragraph",
@@ -12358,7 +12358,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A declare signature with no body: the callee exists in the module but has no blocks to inspect or rewrite. Day 2’s guard rejects declarations before any other check because everything after it assumes a body."
+          "text": "A declare signature with no body: the callee exists in the module but has no blocks to inspect or rewrite. Volume 2’s guard rejects declarations before any other check because everything after it assumes a body."
         },
         {
           "type": "code",
@@ -12383,7 +12383,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Intrinsic\": an operation declared by LLVM itself under the reserved `llvm.` namespace, whose semantics LLVM knows and which is lowered directly to target code; in IR it appears as an ordinary `call`."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Intrinsic\": an operation declared by LLVM itself under the reserved `llvm.` namespace, whose semantics LLVM knows and which is lowered directly to target code; in IR it appears as an ordinary `call`."
         },
         {
           "type": "paragraph",
@@ -12399,7 +12399,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Coroutine\": a function that can be suspended and resumed, expressed in LLVM IR through the `llvm.coro.*` intrinsics (the `begin` / `end` / `suspend` / `resume` family that builds coroutine state machines). The guard does not handle coroutine IR, so the general intrinsic rule rejects these calls; the dedicated entry exists so a diagnostic can name the real cause."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Coroutine\": a function that can be suspended and resumed, expressed in LLVM IR through the `llvm.coro.*` intrinsics (the `begin` / `end` / `suspend` / `resume` family that builds coroutine state machines). The guard does not handle coroutine IR, so the general intrinsic rule rejects these calls; the dedicated entry exists so a diagnostic can name the real cause."
         },
         {
           "type": "paragraph",
@@ -12411,7 +12411,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Coroutine\", which also names the presplit case: a coroutine the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()`. Its CFG is not the shape this pass assumes, so the guard rejects it before any inspection."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Coroutine\", which also names the presplit case: a coroutine the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()`. Its CFG is not the shape this pass assumes, so the guard rejects it before any inspection."
         },
         {
           "type": "paragraph",
@@ -12423,7 +12423,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Personality routine\": the function a language runtime calls while an exception unwinds; a function that can receive exceptions carries one, and `F.hasPersonalityFn()` asks whether it does. The guard reads `hasPersonalityFn` and rejects, because the rewrite has no model for EH flow."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Personality routine\": the function a language runtime calls while an exception unwinds; a function that can receive exceptions carries one, and `F.hasPersonalityFn()` asks whether it does. The guard reads `hasPersonalityFn` and rejects, because the rewrite has no model for EH flow."
         },
         {
           "type": "paragraph",
@@ -12435,7 +12435,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"EH pad\": the first instruction of a block that receives exceptional control — `landingpad`, `catchpad`, `cleanuppad`, or `catchswitch` — asked by `BB.isEHPad()`."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"EH pad\": the first instruction of a block that receives exceptional control — `landingpad`, `catchpad`, `cleanuppad`, or `catchswitch` — asked by `BB.isEHPad()`."
         },
         {
           "type": "paragraph",
@@ -12451,7 +12451,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Address-taken block\": a basic block whose address is used as a value in the IR (produced by `blockaddress`) — a value a program can compute with, not just a control-flow destination, so the CFG alone no longer describes control flow. `BasicBlock::hasAddressTaken` detects it, and the guard rejects."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Address-taken block\": a basic block whose address is used as a value in the IR (produced by `blockaddress`) — a value a program can compute with, not just a control-flow destination, so the CFG alone no longer describes control flow. `BasicBlock::hasAddressTaken` detects it, and the guard rejects."
         },
         {
           "type": "paragraph",
@@ -12509,7 +12509,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"isa<T>(X) / dyn_cast<T>(X)\": `isa` answers “is this value a T?” with a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise; `cast` asserts. Day 2 uses the if-initializer form so the pointer is typed and scoped to the check: the declaration, the check, and the use happen in one statement."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"isa<T>(X) / dyn_cast<T>(X)\": `isa` answers “is this value a T?” with a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise; `cast` asserts. Volume 2 uses the if-initializer form so the pointer is typed and scoped to the check: the declaration, the check, and the use happen in one statement."
         },
         {
           "type": "paragraph",
@@ -12609,7 +12609,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"PreservedAnalyses\": the value a transformation pass returns, describing which cached analyses remain valid after its changes — `::all()` promises nothing was touched, `::none()` says recompute everything; it reports cache validity only, not behavior."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"PreservedAnalyses\": the value a transformation pass returns, describing which cached analyses remain valid after its changes — `::all()` promises nothing was touched, `::none()` says recompute everything; it reports cache validity only, not behavior."
         },
         {
           "type": "paragraph",
@@ -12705,9 +12705,9 @@
       "id": 72,
       "day": 2,
       "number": 30,
-      "title": "Glossary. C++ terms used in Day 2",
-      "originalTitle": "Glossary. C++ terms used in Day 2",
-      "summary": "The C++ language concepts the Day 2 lessons rely on: pointers and references, casts, classes, and translation units.",
+      "title": "C++ terms used in Volume 2",
+      "originalTitle": "C++ terms used in Volume 2",
+      "summary": "The C++ language concepts the Volume 2 lessons rely on: pointers and references, casts, classes, and translation units.",
       "takeaway": "Say whether a value is borrowed, copied, or owned before you write the expression.",
       "source": "day2",
       "group": "reference",
@@ -12719,11 +12719,11 @@
         },
         {
           "type": "paragraph",
-          "text": "Each entry names a C++ concept, the problem it solves, and how Day 2 meets it. The groups follow the order the lessons introduce them: pointer and reference mechanics, type and conversion rules, and class and translation-unit structure."
+          "text": "Each entry names a C++ concept, the problem it solves, and how Volume 2 meets it. The groups follow the order the lessons introduce them: pointer and reference mechanics, type and conversion rules, and class and translation-unit structure."
         },
         {
           "type": "task",
-          "text": "Task: Use this document when a C++ term interrupts your progress. LLVM-specific terms have their own document, and general compiler vocabulary is in the Day 2 glossary."
+          "text": "Task: Use this document when a C++ term interrupts your progress. LLVM-specific terms have their own document, and general compiler vocabulary is in the Volume 2 glossary."
         },
         {
           "type": "heading",
@@ -12768,7 +12768,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"Reference vs. pointer\": a reference is another name for an existing object; a pointer stores an object’s address. Day 2’s worklists store pointers because they must point at the instruction; pass parameters take references because they borrow it."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"Reference vs. pointer\": a reference is another name for an existing object; a pointer stores an object’s address. Volume 2’s worklists store pointers because they must point at the instruction; pass parameters take references because they borrow it."
         },
         {
           "type": "paragraph",
@@ -12835,7 +12835,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A saved traversal position can stop being valid the moment the underlying collection changes: erasing an instruction mid-loop can leave the iterator past the end, and rehashing a DenseMap invalidates references into its storage. Day 2’s rule is collect all the pointers first, then mutate."
+          "text": "A saved traversal position can stop being valid the moment the underlying collection changes: erasing an instruction mid-loop can leave the iterator past the end, and rehashing a DenseMap invalidates references into its storage. Volume 2’s rule is collect all the pointers first, then mutate."
         },
         {
           "type": "code",
@@ -12915,7 +12915,7 @@
         },
         {
           "type": "paragraph",
-          "text": "a && b does not evaluate b when a is false; a || b does not evaluate b when a is true. That matters when the second operand performs a transformation: changed = changed || build(F) skips build whenever demotion already changed the function. Day 2’s fix evaluates build first and then combines, or uses |= on already-computed results."
+          "text": "a && b does not evaluate b when a is false; a || b does not evaluate b when a is true. That matters when the second operand performs a transformation: changed = changed || build(F) skips build whenever demotion already changed the function. Volume 2’s fix evaluates build first and then combines, or uses |= on already-computed results."
         },
         {
           "type": "code",
@@ -12936,7 +12936,7 @@
         },
         {
           "type": "paragraph",
-          "text": "if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) declares a variable inside the condition and tests it: the pointer exists only inside the if, and the truth test is not null. It is Day 2’s standard checked-cast idiom: one declaration, one check, one scoped pointer."
+          "text": "if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) declares a variable inside the condition and tests it: the pointer exists only inside the if, and the truth test is not null. It is Volume 2’s standard checked-cast idiom: one declaration, one check, one scoped pointer."
         },
         {
           "type": "code",
@@ -12965,7 +12965,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A namespace gives declarations a scoped name — minishield::StateMachineBuilder instead of a bare StateMachineBuilder that could collide with anything else in the translation unit. Day 2’s pass, guard, and builder all live in namespace minishield."
+          "text": "A namespace gives declarations a scoped name — minishield::StateMachineBuilder instead of a bare StateMachineBuilder that could collide with anything else in the translation unit. Volume 2’s pass, guard, and builder all live in namespace minishield."
         },
         {
           "type": "code",
@@ -12982,7 +12982,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See the [Day 1 glossary](#lesson-26) entry \"#pragma once\": a compiler directive meaning “include this header at most once per translation unit”. Day 2’s builder header (lesson 18) starts with it so the class is declared exactly once even when several files include it."
+          "text": "See the [Volume 1 glossary](#lesson-26) entry \"#pragma once\": a compiler directive meaning “include this header at most once per translation unit”. Volume 2’s builder header (lesson 18) starts with it so the class is declared exactly once even when several files include it."
         },
         {
           "type": "paragraph",
@@ -12998,7 +12998,7 @@
         },
         {
           "type": "paragraph",
-          "text": "In C++ the two differ mostly in default access: a class defaults to private, a struct to public. Day 2 declares class StateMachineBuilder with an explicit public: section — the class default is private, so the public specifier is what lets callers use StateMachineBuilder::build(F)."
+          "text": "In C++ the two differ mostly in default access: a class defaults to private, a struct to public. Volume 2 declares class StateMachineBuilder with an explicit public: section — the class default is private, so the public specifier is what lets callers use StateMachineBuilder::build(F)."
         },
         {
           "type": "code",
@@ -13083,7 +13083,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Pick one expression from the Day 2 lessons and say whether each value in it is borrowed, copied, or owned. Then name the lesson that introduced the construct.",
+          "text": "Checkpoint: Pick one expression from the Volume 2 lessons and say whether each value in it is borrowed, copied, or owned. Then name the lesson that introduced the construct.",
           "answers": [
             {
               "type": "list",

@@ -1,4 +1,4 @@
-MiniShield — Day 1: the step-by-step teaching guide
+MiniShield — Volume 1: the step-by-step teaching guide
 Recorded from the study sessions on 2026-11-11 and 2026-11-12
 
 Read this as a book at https://zilutian.github.io/minishield/ or serve docs/ locally.
@@ -244,7 +244,7 @@ Checkpoint: Explain what opt -disable-output suppresses: it prevents writing the
 0. Create the minishield Conda environment
 ==========================================
 
-Day 1 builds toward one decision — which functions a control-flow-flattening pass may touch. Everything before that decision is inspection, and inspection needs a plugin that actually loads. This part is the ground every later lesson stands on: a consistent Conda toolchain and a CMake project that turns your source into a loadable library.
+Volume 1 builds toward one decision — which functions a control-flow-flattening pass may touch. Everything before that decision is inspection, and inspection needs a plugin that actually loads. This part is the ground every later lesson stands on: a consistent Conda toolchain and a CMake project that turns your source into a loadable library.
 
 Goal: give the project one consistent Linux C++ toolchain, LLVM release, build system, and test library.
 
@@ -756,7 +756,7 @@ set_target_properties(MiniShield PROPERTIES
 
 This CMake fragment belongs after target creation. Include paths help the C++ compiler find declarations while compiling source files. Linking resolves the LLVM functions/types’ out-of-line code through the imported LLVM library. The output-directory property chooses where the built module is placed; it does not find headers or register a pass. PRIVATE limits these usage requirements to this target in this initial module-only layout.
 
-Task: Small writing step: Explain each line against the error it could address: missing header, unresolved library symbol, or looking for the .so in the wrong directory. Keep the reusable-core changes for Day 3 separate.
+Task: Small writing step: Explain each line against the error it could address: missing header, unresolved library symbol, or looking for the .so in the wrong directory. Keep the reusable-core changes for Volume 3 separate.
 
 Checkpoint: Reconfigure after changing CMake and rebuild. Finding LLVMConfig.cmake discovers package information; it does not magically compile missing project .cpp files or teach opt a pipeline name.
 
@@ -1242,7 +1242,7 @@ Checkpoint: Distinguish pipeline-parse failure, plugin-load failure, verifier fa
 
 ### LLVM program before and after this checkpoint
 
-This is the complete minishield-input.ll smoke example used by the run command. Day 1 runs an inspection/stub checkpoint; do not use the later Day 2 transforming implementation as an unchanged-output baseline.
+This is the complete minishield-input.ll smoke example used by the run command. Volume 1 runs an inspection/stub checkpoint; do not use the later Volume 2 transforming implementation as an unchanged-output baseline.
 
 The program is unchanged at this checkpoint. Loading a plugin, running it, and verifying output do not require the pass to change the function. Diagnostics are separate from emitted IR.
 
@@ -2577,8 +2577,8 @@ MiniShield's product is a control-flow-flattening pass: it rewrites a
 function's branching into a single dispatcher. It can only run on functions it
 fully understands, so the first job is a guard — an eligibility policy that
 accepts a function only if every block, terminator, and call is supported, and
-rejects everything else without changing it. This is the one decision Day 1
-ends on; the flattening rewrite itself is Day 2.
+rejects everything else without changing it. This is the one decision Volume 1
+ends on; the flattening rewrite itself is Volume 2.
 
 ### The guard returns a decision, not an edit
 
@@ -2659,7 +2659,7 @@ was left untouched.
 18. C++ concepts
 ================
 
-Reference cards for the C++ the Day 1 lessons rely on: references versus
+Reference cards for the C++ the Volume 1 lessons rely on: references versus
 pointers, the two jobs of `&`, and how a range-based loop variable is typed.
 Look these up when a construct matters; each entry states the idea, shows it in
 this project's code, and links the language reference.
@@ -2820,7 +2820,7 @@ The guard conservatively rejects coroutine intrinsics: after
 `llvm::dyn_cast<llvm::IntrinsicInst>(&I)`, a callee name starting with
 `llvm.coro.` is rejected. See [LLVM's exception-handling docs](https://llvm.org/docs/ExceptionHandling.html), the [intrinsic reference](https://llvm.org/docs/LangRef.html#intrinsic-functions), and [coroutines](https://llvm.org/docs/Coroutines.html).
 
-Glossary. Terms used in the README and Day 1
+Glossary. Terms used in the README and Volume 1
 ============================================
 
 Alphabetical, one-to-three-sentence definitions of the terms that appear in

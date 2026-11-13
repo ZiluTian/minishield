@@ -1,9 +1,9 @@
-MiniShield — Day 3: the step-by-step teaching guide
+MiniShield — Volume 3: the step-by-step teaching guide
 Study notes and future exercises · expanded 2026-11-13
 
 Read the chapter-based book at https://zilutian.github.io/minishield/#day3.
 
-Complete teaching draft. These are future exercises, not a report of completed tests or measured performance. Write and run the examples after finishing the Day 2 implementation.
+Complete teaching draft. These are future exercises, not a report of completed tests or measured performance. Write and run the examples after finishing the Volume 2 implementation.
 
 The learner writes the implementation and scripts. Templates, numbered steps,
 full reference examples, verification commands, deeper C++/LLVM explanations,
@@ -14,7 +14,7 @@ exercise must be written before running commands that depend on them.
 0. What evidence will make the pass trustworthy?
 ================================================
 
-Task: Future exercise: finish the Day 2 checklist, then build the evidence in this book. Reading this draft does not mean tests or benchmarks have run.
+Task: Future exercise: finish the Volume 2 checklist, then build the evidence in this book. Reading this draft does not mean tests or benchmarks have run.
 
 ### The template to start with
 
@@ -186,7 +186,7 @@ Answer: A. Behavior and performance require their own evidence.
 1. Build one core that the plugin and tests can use
 ===================================================
 
-Task: Future exercise: after writing the Day 2 builder, refactor CMake. This chapter supplies a proposed file; it does not modify your current build configuration.
+Task: Future exercise: after writing the Volume 2 builder, refactor CMake. This chapter supplies a proposed file; it does not modify your current build configuration.
 
 ### The template to start with
 
@@ -641,7 +641,7 @@ Answer: A. The manager can compute only analyses it knows how to construct.
 4. Assert that the dispatcher really controls the function
 ==========================================================
 
-Task: Future exercise: append a builder test only after the complete Day 2 StateMachineBuilder exists. The fixture below is already prepared because it contains no PHIs or escaping instruction results.
+Task: Future exercise: append a builder test only after the complete Volume 2 StateMachineBuilder exists. The fixture below is already prepared because it contains no PHIs or escaping instruction results.
 
 ### The template to start with
 
@@ -901,7 +901,7 @@ const auto before = dump(*module);
 
 ### Step 1 — Isolate the unsupported feature
 
-A variable-sized entry alloca is valid IR but outside the strict Day 2 contract. The fixture has a real body and an ordinary branch so an earlier declaration/terminator rejection does not mask the allocation rule.
+A variable-sized entry alloca is valid IR but outside the strict Volume 2 contract. The fixture has a real body and an ordinary branch so an earlier declaration/terminator rejection does not mask the allocation rule.
 
 ### Step 2 — Compare parsed canonical output
 
@@ -1033,7 +1033,7 @@ Answer: A. A negative test should fail when the specific guard it targets is rem
 6. Run differential cases with a reproducible seed
 ==================================================
 
-Task: Future exercise: write tests/integration/differential.py yourself from this reference. First write the discount kernel and driver from Day 2 lesson 24, and build both executables using that common-IR pipeline.
+Task: Future exercise: write tests/integration/differential.py yourself from this reference. First write the discount kernel and driver from Volume 2 lesson 24, and build both executables using that common-IR pipeline.
 
 ### The template to start with
 
@@ -2452,7 +2452,7 @@ Answer: A. The report must distinguish the plan from observations.
 12. Build a reproducible demo from a fresh directory
 ====================================================
 
-Task: Future exercise: write scripts/demo.sh yourself. This reference assumes the future Day 3 CMake/tests and discount fixtures have been written. It does not alter or replace your local test_all.sh.
+Task: Future exercise: write scripts/demo.sh yourself. This reference assumes the future Volume 3 CMake/tests and discount fixtures have been written. It does not alter or replace your local test_all.sh.
 
 ### The template to start with
 
@@ -2470,7 +2470,7 @@ Run from the repository root in the minishield environment. The demo uses build/
 
 ### Step 2 — Keep the generated pipeline explicit
 
-A successful run shows configure, build, plugin loading, verifier checks, output equality on the stated domain, and tests. Benchmarking remains a separate command so measurement noise and correctness failures do not become confused. The Day 3 build rule also generates the registered differential artifacts; the explicit commands here demonstrate those same stages for inspection.
+A successful run shows configure, build, plugin loading, verifier checks, output equality on the stated domain, and tests. Benchmarking remains a separate command so measurement noise and correctness failures do not become confused. The Volume 3 build rule also generates the registered differential artifacts; the explicit commands here demonstrate those same stages for inspection.
 
 ### The full demo reference
 
@@ -2782,7 +2782,7 @@ C. Print a warning and report success
 
 Answer: A. Stale artifacts must not masquerade as a successful current transformation.
 
-13. Handle the simulated O2 bug and close Day 3
+13. Handle the simulated O2 bug and close Volume 3
 ===============================================
 
 Task: Future exercise: the “protected application fails only at O2” scenario is simulated. It is a debugging exercise, not a report of a current MiniShield incident.
@@ -2818,7 +2818,7 @@ Ask whether the failure is an opt crash, verifier error, target crash, timeout, 
 
 Retain the minimized fixture and observable mismatch, assert the earliest relevant invariant, and rerun related tests. Re-measure after a correctness fix if it changes code or the accepted workload. Do not “fix” a reproducible bug solely by forcing O0.
 
-### The full Day 3 exit checklist
+### The full Volume 3 exit checklist
 
 ```text
 [ ] Unit tests exercise eligibility, graph analysis, and live state construction.
@@ -2985,7 +2985,7 @@ C. Removing the failing input
 
 Answer: A. The fix must address the underlying invariant and retain a test that would catch its return.
 
-14. Glossary. Terms used in Day 3
+14. Terms used in Volume 3
 ==================
 
 ### C++ and build concepts
@@ -2995,10 +2995,10 @@ Answer: A. The fix must address the underlying invariant and retain a test that 
 | RAII | Tie cleanup to object lifetime; local destruction runs in reverse construction order. |
 | unique_ptr | An exclusive owner that can move but does not copy ownership. |
 | Borrowed pointer/reference | Access to an object whose lifetime is controlled elsewhere. |
-| Translation unit | Covered in the [Day 1 glossary](#lesson-26) (“Translation unit”): one `.cpp` file, expanded with the headers it includes and compiled into one object file. |
+| Translation unit | Covered in the [Volume 1 glossary](#lesson-26) (“Translation unit”): one `.cpp` file, expanded with the headers it includes and compiled into one object file. |
 | ODR | One Definition Rule: constraints on declarations/definitions across translation units. |
 | PIC | Position-independent machine code suitable for placement in a shared object. |
-| Usage requirement | Covered in the [Day 1 glossary](#lesson-26) (“Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`)”): who sees a target’s compile/link requirements; MiniShield is a plugin nothing links to, so everything is `PRIVATE`. |
+| Usage requirement | Covered in the [Volume 1 glossary](#lesson-26) (“Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`)”): who sees a target’s compile/link requirements; MiniShield is a plugin nothing links to, so everything is `PRIVATE`. |
 | extern C | C language linkage for a declaration in C++; useful at C/C++ boundaries. |
 | LTO | Link-time optimization; can optimize across separately compiled module boundaries. |
 
@@ -3016,7 +3016,7 @@ Answer: A. The fix must address the underlying invariant and retain a test that 
 | Timeout | A bound on waiting, reported as failure rather than proof of nontermination. |
 | Regression | A retained test for a known bug or behavior that must not return. |
 | Minimization | Reduce a failing case while preserving validity, assumptions, and failure. |
-| CTest / GoogleTest | CTest orchestrates the commands; for the framework itself see the [Day 1 glossary](#lesson-26) (“GoogleTest (gtest)”): C++ test cases and assertions. |
+| CTest / GoogleTest | CTest orchestrates the commands; for the framework itself see the [Volume 1 glossary](#lesson-26) (“GoogleTest (gtest)”): C++ test cases and assertions. |
 | Analysis invalidation | Discard/recompute cached results that mutation made stale. |
 
 ### Measurement concepts

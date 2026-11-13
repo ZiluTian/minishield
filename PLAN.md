@@ -9,14 +9,14 @@ pitfalls, and a verifiable *exit criteria* for every task.
 | Milestone | Status |
 |---|---|
 | Environment and CMake | Plugin builds against LLVM 23.1.5 |
-| Day 1 foundations | Statistics, CFG/loop analysis, and eligibility implemented during study |
-| Day 2 flattening | Learner implementation in progress; complete book draft available |
-| Day 3 tests, benchmarks, demo | Complete book draft; learner exercises and measurements pending |
+| Volume 1 foundations | Statistics, CFG/loop analysis, and eligibility implemented during study |
+| Volume 2 flattening | Learner implementation in progress; complete book draft available |
+| Volume 3 tests, benchmarks, demo | Complete book draft; learner exercises and measurements pending |
 
 **Current priority:** finish the books before resuming hands-on lessons.
-[Day 2](https://zilutian.github.io/minishield/#day2) documents preparation,
+[Volume 2](https://zilutian.github.io/minishield/#day2) documents preparation,
 dispatcher construction, complete branch rewriting, and correctness checks.
-[Day 3](https://zilutian.github.io/minishield/#day3) supplies test/build/harness
+[Volume 3](https://zilutian.github.io/minishield/#day3) supplies test/build/harness
 references and a measurement plan. Reading a chapter does not complete its
 implementation or establish its expected results.
 
@@ -66,7 +66,7 @@ minishield/
   16.2.0, matching the environment's GCC runtime. A missing `<type_traits>`
   means those development headers need checking, not LLVM's include paths.
 - Shared `libLLVM-23.so` is present → build the plugin as a `MODULE` and link
-  against the LLVM dylib (see Day 1, Task 1.1).
+  against the LLVM dylib (see Volume 1, Task 1.1).
 - `opt` writes the transformed module to **stdout** by default — always pass
   `-S` (text IR) or `-o out.ll`.
 - **Deviation from spec (accepted):** conda-forge does not ship `FileCheck`/`not`/
@@ -76,7 +76,7 @@ minishield/
 
 ---
 
-## Day 1 — Foundations: plugin skeleton, IR stats, CFG analysis, eligibility
+## Volume 1 — Foundations: plugin skeleton, IR stats, CFG analysis, eligibility
 (~7–8 h)
 
 ### 1.1 Hello-pass plugin (New Pass Manager) — ~2 h
@@ -175,7 +175,7 @@ time: you linked against the wrong (or missing) libLLVM — check
 
 ### 1.2 IR traversal pass → function-level statistics — ~2 h
 Goal: the "IR inspection pass" of Phase 1, doubled as your stats tool for
-Day 3 benchmarks.
+Volume 3 benchmarks.
 
 - Traverse `Module → Function → BasicBlock → Instruction`. The function pass
   manager visits functions; `StatsPass::run()` loops over blocks/instructions.
@@ -243,7 +243,7 @@ Goal: a reusable CFG representation for one function.
 - The analysis must be a **New PM `Analysis`** (own pass class returning a
   result struct) or it won't compose.
 - Invalidate correctly: your analysis pass must not mutate IR; the flattening
-  pass (Day 2) should return `PreservedAnalyses::none()` after restructuring
+  pass (Volume 2) should return `PreservedAnalyses::none()` after restructuring
   unless it explicitly maintains particular analyses. Unchanged functions
   can return `PreservedAnalyses::all()`.
 
@@ -262,21 +262,21 @@ Goal: reject-unsafe-inputs-loudly. For each function, decide eligible/rejected
   - coroutines (`isCoroutine`)
   - blocks whose address is taken (labels used as values) — check with
     `BlockAddress` / `blockaddress` uses
-  - The complete Day 2 prototype rejects special call semantics such as
+  - The complete Volume 2 prototype rejects special call semantics such as
     `musttail`, `returns_twice`, convergence, and operand bundles before mutation.
-    See its stricter support contract; the Day 1 inspection guard is narrower.
+    See its stricter support contract; the Volume 1 inspection guard is narrower.
 
 **Exit criteria:** each rejection case has a fixture `.ll`; running the pass
 prints the diagnostic, IR is byte-identical (or at least `opt -verify` passes
 and the function's blocks/terminators are unchanged), and the *success rate*
-(metric you'll report on Day 3) can be computed.
+(metric you'll report on Volume 3) can be computed.
 
-**Day 1 exit:** plugin builds; `minishield-stats` + CFG report + eligibility
+**Volume 1 exit:** plugin builds; `minishield-stats` + CFG report + eligibility
 diagnostics all work via `opt`.
 
 ---
 
-## Day 2 — The core: control-flow flattening
+## Volume 2 — The core: control-flow flattening
 (~9–10 h. This is the heart of the project. Go slow, verify constantly.)
 
 ### 2.1 PHI demotion — ~1.5 h
@@ -343,7 +343,7 @@ Use `IRBuilder` at the end of each block (`builder.SetInsertPoint(term)` then
   prototype rejects explicit intrinsic calls; full debug/profile preservation
   is outside its support promise.
 
-**Exit criteria:** every fixture from Day 1 (if/else, nested, loop, switch,
+**Exit criteria:** every fixture from Volume 1 (if/else, nested, loop, switch,
 multiple returns, PHI-heavy, recursion) transforms, passes `verify`, and the
 rewritten terminators look like the table above in the dumped IR.
 
@@ -351,19 +351,19 @@ rewritten terminators look like the table above in the dumped IR.
 - Compile the kernel alone once to common IR with
   `clang -O0 -Xclang -disable-O0-optnone -S -emit-llvm`.
 - Transform that IR, then compile original and protected variants with the
-  same `-O2` backend and the same untransformed driver. See Day 2 lesson 24
+  same `-O2` backend and the same untransformed driver. See Volume 2 lesson 24
   for full source and commands.
 - Compare successful exit, stdout, and stderr over the documented defined
   domain. Include every branch/switch outcome and record the failing input.
 - Inspect final optimized code: later optimization may simplify dispatch.
   A behavior match does not prove that obfuscation structure survived.
 
-**Day 2 exit:** `minishield-flatten` produces valid, behavior-preserving IR for
+**Volume 2 exit:** `minishield-flatten` produces valid, behavior-preserving IR for
 the full fixture set; CFG is visibly a dispatcher state machine.
 
 ---
 
-## Day 3 — Tests, benchmarks, report, demo
+## Volume 3 — Tests, benchmarks, report, demo
 (~8–9 h)
 
 ### 3.1 Test suite — ~3 h
@@ -379,7 +379,7 @@ the full fixture set; CFG is visibly a dispatcher state machine.
     branch to dispatch, while return/unreachable remain terminal; (e) state
     storage dominates all uses. Do not assert temporary names or assume
     preparation never splits edges.
-- `tests/ir/`: the fixture `.ll`/`.c` files (the ones from Days 1–2, plus
+- `tests/ir/`: the fixture `.ll`/`.c` files (the ones from Volumes 1–2, plus
   negatives: EH, indirectbr, coroutine).
 - `tests/integration`: **differential executable test** (the one that
   distinguishes you): for each C fixture, build orig and protected at the same
@@ -430,7 +430,7 @@ reproducible via one command (document it).
   a regression test, document root cause. This mirrors the actual support
   workflow from the job description.
 
-**Day 3 exit:** `ninja test` green, benchmark report real, `demo.sh` runs
+**Volume 3 exit:** `ninja test` green, benchmark report real, `demo.sh` runs
 start-to-finish unattended, README explains everything a stranger needs.
 
 ---

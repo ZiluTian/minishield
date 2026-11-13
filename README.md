@@ -4,18 +4,18 @@ An LLVM pass-plugin study project for control-flow flattening. The study covers 
 rewriting. The learner implementation is in progress; the books include future
 exercises and complete reference examples.
 
-**[Read the Day 1 book](https://zilutian.github.io/minishield/)** — step-by-step
+**[Read the Volume 1 book](https://zilutian.github.io/minishield/)** — step-by-step
 lessons, diagrams, code, explanations, and checkpoints. The editable teaching
 source is [day1](day1); the roadmap is [PLAN.md](PLAN.md).
 
-**Day 1 roadmap.** Day 1 ends with one decision — which functions a
+**Volume 1 roadmap.** Volume 1 ends with one decision — which functions a
 control-flow-flattening pass may touch. You build a read-only stats pass and a
 CFG analysis first, because you can't safely flatten what you haven't inspected.
-The flattening rewrite itself is Day 2.
-[Day 2: transformations](https://zilutian.github.io/minishield/#day2) adds
+The flattening rewrite itself is Volume 2.
+[Volume 2: transformations](https://zilutian.github.io/minishield/#day2) adds
 PHI and cross-block value demotion, then dispatcher construction. Its teaching
 notes are in [day2](day2).
-[Day 3: tests and measurement](https://zilutian.github.io/minishield/#day3)
+[Volume 3: tests and measurement](https://zilutian.github.io/minishield/#day3)
 covers GoogleTest, CTest, differential checks, benchmarks, and a reproducible
 demo; its teaching source is [day3](day3). Both books are complete drafts,
 with implementation exercises and measurements still to be done.
@@ -32,7 +32,7 @@ export LIBRARY_PATH="$CONDA_PREFIX/lib"
 
 [environment.yml](environment.yml) specifies LLVM/Clang 23.1.5, CMake, Ninja,
 GoogleTest, and C++ development headers. In each new shell, activate the
-environment and export `LIBRARY_PATH` again. Day 1’s environment chapter explains how the
+environment and export `LIBRARY_PATH` again. Volume 1’s environment chapter explains how the
 original environment was created, what each package does, and how to verify it.
 
 ## Configure and build
