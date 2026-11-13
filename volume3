@@ -873,10 +873,11 @@ $ opt-23 -load-pass-plugin=build/libMiniShield.so \
     -passes='function(minishield-flatten),verify' \
     -S persist_o2.ll -o persist_final.ll
 [MiniShield] eligible: classify
+Number of Phis: 1
 [MiniShield] rejected: main: intrinsic calls are outside this prototype's scope
 ```
 
-Two diagnostics, both correct. `classify` is eligible, and it is flattened. `main` is rejected by the learner's own guard: at -O2 it still carries `llvm.lifetime.start`/`llvm.lifetime.end` intrinsic calls, which the support contract established in Volume 2 excludes — the guard prints its named reason and leaves the function untouched. The pipeline is two stages: the final optimizer first (`-O2` to a `.ll`), then the obfuscation (`function(minishield-flatten)`), then `verify`.
+Three lines, all correct: `classify` is eligible, the pass counts its one PHI (the join block's, which the preparation stage demotes — visible in the artifact below), and `main` is rejected by the learner's own guard: at -O2 it still carries `llvm.lifetime.start`/`llvm.lifetime.end` intrinsic calls, which the support contract established in Volume 2 excludes — the guard prints its named reason and leaves the function untouched. The pipeline is two stages: the final optimizer first (`-O2` to a `.ll`), then the obfuscation (`function(minishield-flatten)`), then `verify`.
 
 ### The artifact
 
@@ -926,7 +927,35 @@ ms.invalid:                                       ; preds = %ms.dispatch
 }
 ```
 
-This is the Volume 2 flattening output running on -O2's IR: the optimized blocks `3`, `5`, `7`, `9`, `12` are intact — note `shl nuw nsw` where -O2 wrote the `x * 2` — now reached through `ms.dispatch`, whose `switch` over `ms.current` maps the five states onto the five blocks, with the invalid state going to `ms.invalid` → `unreachable`. The `; No predecessors!` comment marks the dispatcher: execution enters it first, and its first dispatch jump reaches the right block. The state machine sits on top of the optimized function; the transform adds the dispatcher and leaves the optimized code alone.
+This is the learner's flattening output on -O2's IR, and it is worth reading block by block. First the preparation: the values the optimized blocks share have moved to the stack — the `phi` at join block `12` (which picked among the three branch results) is gone, replaced by a `%.reg2mem` slot each producing branch stores into and the join loads from — while the optimized blocks themselves are intact, including the `shl nuw nsw` where -O2 wrote the `x * 2`. Demoting PHIs and escaping values preserves behavior by itself. Then the state machine: an `ms.state` slot, an `ms.dispatch` block whose `switch` over `ms.current` maps the five states onto the five optimized blocks, and `ms.invalid` → `unreachable` as the switch's default. The transform lays the scaffolding on top of the optimized function; whether the scaffolding is wired to the entry is a separate question, and the artifact answers it plainly.
+
+### The entry the pass does — and does not — rewire
+
+`ms.dispatch` carries the `; No predecessors!` comment: in this build the entry's conditional branch is not yet rewired — `entry` still reaches `3` and `5` directly, so the dispatcher is scaffolding that has been added but not connected. The build is not idle, though: it does rewire an unconditional entry. The fixture below is the Volume 2 exit-evidence shape — an unconditional jump into a loop header with a PHI — written by hand rather than produced by clang, because `clang -O0` marks every function `optnone` and the optional pass skips `optnone` functions silently (the second of this lesson's pipeline traps), and it carries a second function with a conditional entry, so one module shows both cases:
+
+```bash
+$ opt-23 -passes=verify -disable-output wire_fixture.ll
+$ opt-23 -load-pass-plugin=build/libMiniShield.so \
+    -passes='function(minishield-flatten),verify' \
+    -S wire_fixture.ll -o wire_flat.ll
+[MiniShield] eligible: count_to
+Number of Phis: 1
+[MiniShield] eligible: main
+Number of Phis: 0
+$ grep -A1 'store i32 0, ptr %ms.state' wire_flat.ll
+  store i32 0, ptr %ms.state, align 4
+  br label %ms.dispatch
+$ grep '^ms.dispatch:' wire_flat.ll
+ms.dispatch:                                      ; preds = %entry
+ms.dispatch:                                      ; No predecessors!
+$ clang-23 wire_fixture.ll -o wire_orig
+$ clang-23 wire_flat.ll -o wire_flat_bin
+$ echo 5 | ./wire_orig  &&  echo 5 | ./wire_flat_bin
+count_to(5)=5
+count_to(5)=5
+```
+
+In `count_to` the entry's branch is replaced by a store of the successor's state (`0`, the id of the first block) and a jump to the dispatcher, and its `ms.dispatch` now has a real predecessor. In `main` — as in `classify` — the entry's conditional branch is untouched, and its `ms.dispatch` has none. The conditional-entry case is what the CondBr lesson builds: every original terminator stores its destination state and jumps to the dispatcher, which is what the Volume 2 exit evidence's fully wired listing shows. The persistence rule does not depend on that gap: the artifact is exactly what the final optimizer sees, and the control below measures what the final optimizer does to it.
 
 ### Behavior identity
 
