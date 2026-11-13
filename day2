@@ -4561,21 +4561,38 @@ public:
 }
 ```
 
-### Implementation scaffold
+### Study-session walkthrough — define the first implementation body
+
+After declaring the interface, write lib/StateMachineBuilder.cpp with this small body. Include your own header so the compiler checks the definition against the declaration. DenseMap, Instructions, and vector support the upcoming state/terminator snapshots; leave those snapshots as the next writing step.
 
 ```cpp
 #include "minishield/StateMachineBuilder.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/IR/Instructions.h"
+#include <vector>
+
 namespace minishield {
 bool StateMachineBuilder::build(llvm::Function &F) {
     auto &entry = F.getEntryBlock();
     if (F.size() < 2 || entry.getTerminator()->getNumSuccessors() == 0)
         return false;
-    // TODO: snapshot originals, allocate state, create dispatch and invalid.
-    // TODO: rewrite the original terminators using the next three lessons.
-    return true;
+
+    // TODO: snapshot prepared states, state IDs, and original terminators next.
+    // No IR edits have been added at this checkpoint.
+    return false;
 }
 }
 ```
+
+The header declares a public static method; this file defines it. Do not repeat static on an out-of-class member definition. StateMachineBuilder::build selects the class member, and the enclosing minishield namespace matches the header. Function& borrows mutable existing IR. The returned bool reports a construction edit, so this no-edit scaffold truthfully returns false.
+
+The caller must already exclude declarations so getEntryBlock has a body to inspect. auto &entry aliases that first block. F.size() counts blocks, while getNumSuccessors() counts the entry terminator’s outgoing destinations. Skip a function with fewer than two blocks or no outgoing entry edge: there is no live next-block route for this dispatcher design to construct. The || expression accepts either reason and short-circuits after a true first condition.
+
+Task: Write only the file, method body, and early guard for this checkpoint. Leave the snapshot TODO in place. Once the .cpp file exists, add lib/StateMachineBuilder.cpp to the existing target’s source list; do not replace the other sources. Rebuild after that source-list edit.
+
+A header declaration is sufficient to compile a call, but linking that call requires the matching definition. Missing definitions or a source omitted from the target can therefore produce undefined-reference errors later. For now keep the placeholder disconnected: do not call it from FlatteningPass or remove the existing construction code until the helper implements the complete intended behavior.
+
+Checkpoint: Expect the new source to compile and the current pass’s emitted LLVM program to stay unchanged, because it still uses the existing implementation. The scaffold itself contains no mutation and returns false. Next, snapshot original prepared blocks, IDs, and terminators before adding any dispatcher blocks; otherwise a traversal could accidentally include and rewrite its own new routing machinery.
 
 ### Verify
 
