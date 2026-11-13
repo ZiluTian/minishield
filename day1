@@ -1040,6 +1040,28 @@ This is the complete minishield-input.ll smoke example used by the run command. 
 
 The program is unchanged at this checkpoint. Loading a plugin, running it, and verifying output do not require the pass to change the function. Diagnostics are separate from emitted IR.
 
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @add_one(i32 %x) {` | `define` starts a function body. `@add_one` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i32` | i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%result = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `add`: `%result = add i32 %x, 1` | Add the two same-typed operands and define the sum. In these unflagged i32 examples, arithmetic is modulo 2^32; the test inputs stay in the small intended range. This calculates data, such as the next loop counter or x + 1, rather than choosing a block. |
+| `ret`: `ret i32 %result` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call add_one with x = 4. The add produces 5 and ret returns 5. There is only one block, no branch choice, and no memory slot in either listing. Collecting diagnostics does not add instructions to this path.
+
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
 
@@ -1118,6 +1140,30 @@ three branches, one PHI, and one return.
 The nested traversal counts this module; it does not add instructions to it.
 
 The program is unchanged at this checkpoint. There are four blocks and five instructions: three branches, one PHI, one return. Those counts describe both listings.
+
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @merge(i1 %condition) {` | `define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%value = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `br`: `br i1 %condition, label %left, label %right` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %value` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
@@ -1244,6 +1290,30 @@ Loop counting is deferred to task 1.3 rather than reporting a false zero.
 Classifying opcodes adds C++ counters to the pass, not instructions to the target function.
 
 The program is unchanged at this checkpoint. The report changes as classifications are implemented, but the IR remains identical.
+
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @merge(i1 %condition) {` | `define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%value = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `br`: `br i1 %condition, label %left, label %right` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %value` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
@@ -1423,6 +1493,33 @@ Hand-count the loop fixture before comparing the statistics report.
 
 The program is unchanged at this checkpoint. The header PHI, comparison, increment, and branch edges are preserved by inspection. The PHI is one static instruction even when the loop repeats.
 
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @count_to(i32 %limit) {` | `define` starts a function body. `@count_to` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%i = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `add`: `%next = add i32 %i, 1` | Add the two same-typed operands and define the sum. In these unflagged i32 examples, arithmetic is modulo 2^32; the test inputs stay in the small intended range. This calculates data, such as the next loop counter or x + 1, rather than choosing a block. |
+| `br`: `br label %header` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `icmp`: `%continue = icmp slt i32 %i, %limit` | Compare two same-typed integers and produce i1, which can feed br or select. `slt` asks whether the left operand is smaller using signed integer interpretation, so a negative i32 is below zero. The comparison computes a condition; it does not jump by itself. |
+| `icmp slt`: `%continue = icmp slt i32 %i, %limit` | Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For the loop it compares the current counter with the bound; for the discount kernel it checks whether the amount is negative. |
+| `phi`: `%i = phi i32 [ 0, %entry ], [ %next, %body ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %i` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call count_to with limit = 2. The initial counter is 0; the signed-less-than test is true for 0 and 1, so the body increments it to 1 and then 2. At 2 the test is false and exit returns 2. A PHI selects initial 0 on entry and the previous body’s next value on a back edge; after demotion the loop-variable slot carries those same values.
+
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
 
@@ -1554,6 +1651,30 @@ This is the explicit unchanged-IR contract for the statistics pass.
 
 The program is unchanged at this checkpoint. Canonical before/after equality is expected for a read-only pass. A later flattening pass has a different contract.
 
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @merge(i1 %condition) {` | `define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%value = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `br`: `br i1 %condition, label %left, label %right` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %value` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value.
+
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
 
@@ -1635,6 +1756,30 @@ blocks and should not be used as the graph's identity.
 Printing successors observes the graph; it does not connect new edges.
 
 The program is unchanged at this checkpoint. The reported four edges come from the same three branch instructions in the input and output.
+
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @merge(i1 %condition) {` | `define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%value = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `br`: `br i1 %condition, label %left, label %right` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %value` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
@@ -1815,6 +1960,33 @@ Registering and requesting a reusable analysis computes a C++ result describing 
 
 The program is unchanged at this checkpoint. The cached result is separate from the LLVM program. No instructions, blocks, or PHIs are inserted by the analysis.
 
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @count_to(i32 %limit) {` | `define` starts a function body. `@count_to` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%i = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `add`: `%next = add i32 %i, 1` | Add the two same-typed operands and define the sum. In these unflagged i32 examples, arithmetic is modulo 2^32; the test inputs stay in the small intended range. This calculates data, such as the next loop counter or x + 1, rather than choosing a block. |
+| `br`: `br label %header` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `icmp`: `%continue = icmp slt i32 %i, %limit` | Compare two same-typed integers and produce i1, which can feed br or select. `slt` asks whether the left operand is smaller using signed integer interpretation, so a negative i32 is below zero. The comparison computes a condition; it does not jump by itself. |
+| `icmp slt`: `%continue = icmp slt i32 %i, %limit` | Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For the loop it compares the current counter with the bound; for the discount kernel it checks whether the amount is negative. |
+| `phi`: `%i = phi i32 [ 0, %entry ], [ %next, %body ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %i` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call count_to with limit = 2. The initial counter is 0; the signed-less-than test is true for 0 and 1, so the body increments it to 1 and then 2. At 2 the test is false and exit returns 2. A PHI selects initial 0 on entry and the previous body’s next value on a back edge; after demotion the loop-variable slot carries those same values.
+
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
 
@@ -1955,6 +2127,30 @@ Checkpoint: explain why an analysis result is requested by reference, why domina
 BlockInfo records borrow pointers to the blocks shown here. Building those records does not replace any block.
 
 The program is unchanged at this checkpoint. Collecting predecessor/successor data leaves the entire module unchanged. Predecessor print order is not a semantic difference.
+
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define i32 @merge(i1 %condition) {` | `define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `i1` / `i32` | i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type. |
+| `%value = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `br`: `br i1 %condition, label %left, label %right` | `br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]` | Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other. |
+| `ret`: `ret i32 %value` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
@@ -2625,6 +2821,36 @@ Recognizing a coroutine intrinsic is a type/name inspection. The complete fixtur
 
 The program is unchanged at this checkpoint. The check neither lowers the intrinsic nor erases its call. That unsupported function must be rejected before transformation.
 
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define ptr @coroutine_handle() {` | `define` starts a function body. `@coroutine_handle` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
+| `%handle = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+| `declare ptr @llvm.coro.noop() #0` | A function declaration gives a return type, name, and argument list without a body. Here `()` means no arguments. `llvm.coro.noop` is an LLVM-recognized coroutine intrinsic, not a function body that this snippet defines or ordinary arithmetic to spill. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `call`: `%handle = call ptr @llvm.coro.noop()` | Invoke the named callee with the shown arguments and capture its returned value on the left. Here the return type ptr means the result is a coroutine handle pointer; the later ret returns that handle to the caller. LLVM recognizes `@llvm.coro.noop` as an intrinsic. The eligibility example detects that unsupported operation and leaves the call intact. |
+| `ret`: `ret ptr %handle` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### The other syntax printed around this function
+
+| Module or function syntax | Meaning here |
+| --- | --- |
+| `#0` / function attributes | The numbered group attaches facts to a function declaration/definition rather than executing them. `nounwind`: The function does not unwind the stack. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract. |
+
+### Walk one concrete execution
+
+When coroutine_handle is called, its call obtains the special no-op coroutine handle from the LLVM intrinsic, and ret ptr returns that same handle. No integer load/store or coroutine resumption is present here. The intrinsic is deliberately unsupported by this prototype, so checking/rejecting it leaves both its declaration and its call unchanged.
+
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
 
@@ -2739,6 +2965,36 @@ inspects `optnone` functions; the optional flattening pass may not run on them.
 Eligibility makes a decision before any rewrite. Here the coroutine call is valid IR but outside the supported input contract.
 
 The program is unchanged at this checkpoint. Rejection means leaving the function and its declaration untouched, rather than partially demoting or reconnecting it.
+
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define ptr @coroutine_handle() {` | `define` starts a function body. `@coroutine_handle` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
+| `%handle = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+| `declare ptr @llvm.coro.noop() #0` | A function declaration gives a return type, name, and argument list without a body. Here `()` means no arguments. `llvm.coro.noop` is an LLVM-recognized coroutine intrinsic, not a function body that this snippet defines or ordinary arithmetic to spill. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `call`: `%handle = call ptr @llvm.coro.noop()` | Invoke the named callee with the shown arguments and capture its returned value on the left. Here the return type ptr means the result is a coroutine handle pointer; the later ret returns that handle to the caller. LLVM recognizes `@llvm.coro.noop` as an intrinsic. The eligibility example detects that unsupported operation and leaves the call intact. |
+| `ret`: `ret ptr %handle` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### The other syntax printed around this function
+
+| Module or function syntax | Meaning here |
+| --- | --- |
+| `#0` / function attributes | The numbered group attaches facts to a function declaration/definition rather than executing them. `nounwind`: The function does not unwind the stack. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract. |
+
+### Walk one concrete execution
+
+When coroutine_handle is called, its call obtains the special no-op coroutine handle from the LLVM intrinsic, and ret ptr returns that same handle. No integer load/store or coroutine resumption is present here. The intrinsic is deliberately unsupported by this prototype, so checking/rejecting it leaves both its declaration and its call unchanged.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
@@ -2882,6 +3138,29 @@ This complete fixture isolates an address-taken block as a rejection reason.
 
 The program is unchanged at this checkpoint. The global blockaddress and function are preserved. An unrelated earlier rejection should not be the only reason this test passes.
 
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define ptr @address_taken() {` | `define` starts a function body. `@address_taken` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+| `blockaddress(@address_taken, %target)` | A constant pointer identifying target’s code block within the named function, not a call to that block or a load of data from it. Returning that pointer exposes block identity, which is why this prototype rejects the function before rewiring it. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `br`: `br label %target` | `br label %B` always transfers control to block B. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
+| `ret`: `ret ptr blockaddress(@address_taken, %target)` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### Walk one concrete execution
+
+Execution starts at entry, br transfers to target, and ret ptr returns the constant blockaddress identifying that target block. It does not return an integer stored at the block or call the block as a new function. Because block identity is exposed as a pointer value, the guard leaves this program unchanged.
+
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
 
@@ -2974,6 +3253,36 @@ that a future transformation preserves behavior.
 A negative test must prove both the intended rejection and unchanged canonical output.
 
 The program is unchanged at this checkpoint. The reference check rejects this input before mutation. Compare normalized IR rather than the original file’s whitespace.
+
+### Reading this LLVM program from zero
+
+Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
+
+| Spelling in these listings | How to read it here |
+| --- | --- |
+| `define ptr @coroutine_handle() {` | `define` starts a function body. `@coroutine_handle` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
+| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
+| `%handle = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
+| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
+| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
+| `declare ptr @llvm.coro.noop() #0` | A function declaration gives a return type, name, and argument list without a body. Here `()` means no arguments. `llvm.coro.noop` is an LLVM-recognized coroutine intrinsic, not a function body that this snippet defines or ordinary arithmetic to spill. |
+
+### Every instruction used in this pair
+
+| Instruction and an actual line | Meaning and operand order in these listings |
+| --- | --- |
+| `call`: `%handle = call ptr @llvm.coro.noop()` | Invoke the named callee with the shown arguments and capture its returned value on the left. Here the return type ptr means the result is a coroutine handle pointer; the later ret returns that handle to the caller. LLVM recognizes `@llvm.coro.noop` as an intrinsic. The eligibility example detects that unsupported operation and leaves the call intact. |
+| `ret`: `ret ptr %handle` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
+
+### The other syntax printed around this function
+
+| Module or function syntax | Meaning here |
+| --- | --- |
+| `#0` / function attributes | The numbered group attaches facts to a function declaration/definition rather than executing them. `nounwind`: The function does not unwind the stack. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract. |
+
+### Walk one concrete execution
+
+When coroutine_handle is called, its call obtains the special no-op coroutine handle from the LLVM intrinsic, and ret ptr returns that same handle. No integer load/store or coroutine resumption is present here. The intrinsic is deliberately unsupported by this prototype, so checking/rejecting it leaves both its declaration and its call unchanged.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>

@@ -195,6 +195,143 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @merge(i1 %condition) {`",
+              "`define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%value = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br i1 %condition, label %left, label %right`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`load`: `%value.reload = load i32, ptr %value.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]`",
+              "Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other."
+            ],
+            [
+              "`ret`: `ret i32 %value`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %condition, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %ms.next, ptr %ms.state, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "load",
+            "phi",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value. In the complete machine entry selects state 0 or 1, the chosen path writes its data value then state 2, and dispatch enters join. The stored state number 2 means “run join”; it is not the result 10 or 20.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -230,7 +367,7 @@
           "irComparison": true
         }
       ],
-      "words": 680,
+      "words": 1810,
       "quiz": {
         "q": "What does a successful verifier establish?",
         "choices": [
@@ -478,6 +615,90 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @choose(i1 %c) {`",
+              "`define` starts a function body. `@choose` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 7`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`br`: `br i1 %c, label %left, label %right`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`ret`: `ret i32 7`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ]
+          ],
+          "coveredOpcodes": [
+            "br",
+            "ret"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call choose with c = true: enter left, then join, then return the constant 7. With false, visit right instead and still return 7. There is no PHI here because the return uses one constant rather than a path-dependent value. If the after listing has live dispatch routing, entry first stores the chosen left/right state and those blocks later store join’s state before returning through dispatch.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -513,7 +734,7 @@
           "irComparison": true
         }
       ],
-      "words": 643,
+      "words": 1106,
       "quiz": {
         "q": "Why declare the LLVMContext before the Module owner?",
         "choices": [
@@ -639,6 +860,90 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @choose(i1 %c) {`",
+              "`define` starts a function body. `@choose` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 7`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`br`: `br i1 %c, label %left, label %right`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`ret`: `ret i32 7`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ]
+          ],
+          "coveredOpcodes": [
+            "br",
+            "ret"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call choose with c = true: enter left, then join, then return the constant 7. With false, visit right instead and still return 7. There is no PHI here because the return uses one constant rather than a path-dependent value. If the after listing has live dispatch routing, entry first stores the chosen left/right state and those blocks later store join’s state before returning through dispatch.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -674,7 +979,7 @@
           "irComparison": true
         }
       ],
-      "words": 606,
+      "words": 1069,
       "quiz": {
         "q": "What must happen before CFGAnalyzer can request DominatorTreeAnalysis?",
         "choices": [
@@ -800,6 +1105,138 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @choose(i1 %c) {`",
+              "`define` starts a function body. `@choose` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%ms.state = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 7`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br i1 %c, label %left, label %right`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`load`: `%ms.current = load i32, ptr %ms.state, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`ret`: `ret i32 7`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %c, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %ms.next, ptr %ms.state, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "load",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call choose with c = true: enter left, then join, then return the constant 7. With false, visit right instead and still return 7. There is no PHI here because the return uses one constant rather than a path-dependent value. If the after listing has live dispatch routing, entry first stores the chosen left/right state and those blocks later store join’s state before returning through dispatch.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -835,7 +1272,7 @@
           "irComparison": true
         }
       ],
-      "words": 926,
+      "words": 1933,
       "quiz": {
         "q": "When is the expected N + 2 block invariant measured?",
         "choices": [
@@ -948,6 +1385,99 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @dynamic(i32 %n) {`",
+              "`define` starts a function body. `@dynamic` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i8` / `i32`",
+              "i8 means an 8-bit integer; an alloca of i8 reserves one byte per element here; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`%storage = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 1`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%storage = alloca i8, i32 %n, align 1`",
+              "`alloca i8, i32 %n` reserves n i8 elements and produces their address. It does not store n into the storage. This size depends on a runtime input, so it is not a static entry allocation and the guard intentionally rejects it unchanged."
+            ],
+            [
+              "`br`: `br label %done`",
+              "`br label %B` always transfers control to block B. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`ret`: `ret i32 %n`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "ret"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "For an illustrative valid call with n = 4, alloca reserves four i8 elements, br goes to done, and ret returns the input integer 4, not the allocated address. This lesson’s guard rejects the variable-sized allocation before editing the IR, so both printed versions remain identical; rejection is a pass decision, not an instruction inserted into the program.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -983,7 +1513,7 @@
           "irComparison": true
         }
       ],
-      "words": 523,
+      "words": 1053,
       "quiz": {
         "q": "Why compare the exact rejection reason?",
         "choices": [
@@ -1100,6 +1630,219 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define dso_local i32 @calculate_discount(i32 noundef %0, i32 noundef %1) #0 {`",
+              "`define` starts a function body. `@calculate_discount` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%3 = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`9:` and `label %9`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`%0`, `%1`, `%3`, `%4` — numbered names",
+              "Clang can print unnamed arguments, instruction results, and blocks with numbers. They are names, not the numeric value of the object, source line numbers, or MiniShield state IDs. Inserting instructions can renumber later printed labels without changing which original block object they identify. The omitted first block label in this discount function is its implicit numbered entry block."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%3 = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br i1 %8, label %9, label %10`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`icmp`: `%8 = icmp slt i32 %7, 0`",
+              "Compare two same-typed integers and produce i1, which can feed br or select. `eq` asks whether the bit patterns are equal. `slt` asks whether the left operand is smaller using signed integer interpretation, so a negative i32 is below zero. The comparison computes a condition; it does not jump by itself."
+            ],
+            [
+              "`icmp eq`: `%12 = icmp eq i32 %11, 0`",
+              "Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For a state-choice chain this tests one original case value."
+            ],
+            [
+              "`icmp slt`: `%8 = icmp slt i32 %7, 0`",
+              "Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For the loop it compares the current counter with the bound; for the discount kernel it checks whether the amount is negative."
+            ],
+            [
+              "`load`: `%7 = load i32, ptr %4, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`mul`: `%20 = mul nsw i32 %18, %19`",
+              "Multiply the two same-typed operands. In the discount kernel this computes amount × percentage before division by 100; the percentage is a numeric value loaded from storage, not the address of its slot."
+            ],
+            [
+              "`nsw` on `mul`",
+              "No signed wrap: this arithmetic promises not to overflow its signed range. A violation produces poison, an invalid intermediate value that can lead to undefined behavior when used; it is not a checked overflow exception. The documented discount domain keeps the promise valid."
+            ],
+            [
+              "`ret`: `ret i32 %24`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`sdiv`: `%21 = sdiv i32 %20, 100`",
+              "Perform signed integer division: first operand divided by second, rounding toward zero. Dividing by zero, or signed minimum divided by −1, is undefined behavior. Here the divisor is the literal 100 and the bounded test inputs keep the arithmetic defined."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %8, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %0, ptr %4, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`sub`: `%22 = sub nsw i32 %17, %21`",
+              "Subtract the second operand from the first and define the difference. Operand order matters: a − b is not b − a. In the discount kernel it removes the computed discount; in the swap loop it makes the current ordering observable."
+            ],
+            [
+              "`nsw` on `sub`",
+              "No signed wrap: this arithmetic promises not to overflow its signed range. A violation produces poison, an invalid intermediate value that can lead to undefined behavior when used; it is not a checked overflow exception. The documented discount domain keeps the promise valid."
+            ],
+            [
+              "`switch`: `switch i32 %11, label %15 [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "icmp",
+            "load",
+            "mul",
+            "ret",
+            "sdiv",
+            "select",
+            "store",
+            "sub",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "The other syntax printed around this function",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Module or function syntax",
+              "Meaning here"
+            ],
+            [
+              "`target triple` / `target datalayout`",
+              "Module settings for the target machine and its data representation. The triple names the architecture/environment. The datalayout string describes details such as pointer sizes, integer alignment, native widths, and stack alignment; it is not a sequence of program instructions."
+            ],
+            [
+              "`dso_local` / `noundef`",
+              "dso_local says the function symbol resolves locally in its linkage unit. noundef on the inputs requires a fully defined value, without undef/poison bits. These are semantic contracts and code-generation facts, not extra parameters or runtime tests."
+            ],
+            [
+              "`#0` and `attributes #0 = { ... }`",
+              "The header’s #0 refers to the numbered attribute group below. noinline prevents inlining; nounwind says the function does not unwind; uwtable requests unwind-table information. These do not replace the body’s branches or arithmetic."
+            ],
+            [
+              "Quoted attributes in `#0`",
+              "\"frame-pointer\"=\"all\" requests retained frame pointers; \"min-legal-vector-width\"=\"0\" records a code-generation width setting; \"no-trapping-math\"=\"true\" records a floating-point trapping assumption; \"stack-protector-buffer-size\"=\"8\" is a stack-protector threshold setting. The target-cpu, target-features, and tune-cpu strings select available machine features and tuning. They are not target-program string variables."
+            ],
+            [
+              "`!llvm.module.flags`, `!llvm.ident`, `!0`, and `!{ ... }`",
+              "These are metadata names/references and tuple nodes. !\"PIC Level\" is a metadata string; typed i32 values inside a node describe settings. They are not runtime struct/array objects or executable assignments. For example, the module-flag tuple’s first integer controls how a setting merges when modules are linked; 8 means Min, 7 Max. The following string names the setting and the final integer gives its value."
+            ],
+            [
+              "PIC/PIE, uwtable, frame-pointer metadata",
+              "These entries record position-independent code/executable settings and unwind/frame-pointer policy; !llvm.ident records compiler identity. They remain in the complete module for reproducibility while the lesson’s transformation changes function instructions."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Use amount = 1000 and level = 1: input %0 is amount and %1 is level. In the before listing, %4 holds amount, %5 level, %6 the selected percentage, and %3 the eventual result. The negative test is false; the original level switch chooses 5 percent. mul computes 5000, sdiv by 100 gives 50, and sub produces 950. The result slot is read and ret returns 950. In the after listing the state sequence is 1 → 3 → 6 → 7, routing through the level decision, rate-5 block, arithmetic block, and return block. Numeric block labels have been renumbered by inserted results; match their instructions and the dispatcher cases, not their old numbers.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -1135,7 +1878,7 @@
           "irComparison": true
         }
       ],
-      "words": 1455,
+      "words": 3240,
       "quiz": {
         "q": "If both programs exit with status 2 and print nothing, should this runner pass?",
         "choices": [
@@ -1262,6 +2005,143 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @merge(i1 %condition) {`",
+              "`define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%value = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br i1 %condition, label %left, label %right`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`load`: `%value.reload = load i32, ptr %value.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]`",
+              "Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other."
+            ],
+            [
+              "`ret`: `ret i32 %value`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %condition, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %ms.next, ptr %ms.state, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "load",
+            "phi",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value. In the complete machine entry selects state 0 or 1, the chosen path writes its data value then state 2, and dispatch enters join. The stored state number 2 means “run join”; it is not the result 10 or 20.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -1297,7 +2177,7 @@
           "irComparison": true
         }
       ],
-      "words": 806,
+      "words": 1936,
       "quiz": {
         "q": "Does add_test create the differential executables?",
         "choices": [
@@ -1438,6 +2318,143 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @merge(i1 %condition) {`",
+              "`define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%value = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br i1 %condition, label %left, label %right`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`load`: `%value.reload = load i32, ptr %value.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`phi`: `%value = phi i32 [ 10, %left ], [ 20, %right ]`",
+              "Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other."
+            ],
+            [
+              "`ret`: `ret i32 %value`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %condition, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %ms.next, ptr %ms.state, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "load",
+            "phi",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value. In the complete machine entry selects state 0 or 1, the chosen path writes its data value then state 2, and dispatch enters join. The stored state number 2 means “run join”; it is not the result 10 or 20.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -1473,7 +2490,7 @@
           "irComparison": true
         }
       ],
-      "words": 728,
+      "words": 1858,
       "quiz": {
         "q": "If deleting an instruction turns a mismatch into uninitialized-memory behavior, is that a useful reduction?",
         "choices": [
@@ -1620,6 +2637,167 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @merge(i1 %condition) {`",
+              "`define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%ms.state = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br label %ms.dispatch`",
+              "`br label %B` always transfers control to block B. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`load`: `%value.reload = load i32, ptr %value.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`ret`: `ret i32 %value.reload`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %condition, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %ms.next, ptr %ms.state, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "load",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "The other syntax printed around this function",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Module or function syntax",
+              "Meaning here"
+            ],
+            [
+              "`local_unnamed_addr`",
+              "The function’s address is not semantically significant within this module, which gives the optimizer extra freedom. This is an address-identity property, not removal of the @function name."
+            ],
+            [
+              "`range(i32 10, 21)`",
+              "A return-value contract describing the half-open interval 10 ≤ result < 21. It is not a loop or a runtime bounds check; this function actually chooses 10 or 20. A result violating the contract would be poison."
+            ],
+            [
+              "`#0` / function attributes",
+              "The numbered group attaches facts to a function declaration/definition rather than executing them. `mustprogress`: Requires forward progress rather than an unobservable infinite computation; it is an optimizer contract, not an inserted progress check. `nofree`: The function does not deallocate memory. `norecurse`: The function is not recursive, directly or indirectly. `nosync`: The function does not perform synchronization. `nounwind`: The function does not unwind the stack. `willreturn`: The function must return control to its call site on defined execution. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value. The optimized after listing replaces all this routing and memory with one select choosing 10 or 20 and one return; it does not execute both paths.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -1655,7 +2833,7 @@
           "irComparison": true
         }
       ],
-      "words": 712,
+      "words": 1879,
       "quiz": {
         "q": "What should a report show before measurements exist?",
         "choices": [
@@ -1799,6 +2977,157 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @count_to(i32 %limit) {`",
+              "`define` starts a function body. `@count_to` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%i = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`add`: `%next = add i32 %i, 1`",
+              "Add the two same-typed operands and define the sum. In these unflagged i32 examples, arithmetic is modulo 2^32; the test inputs stay in the small intended range. This calculates data, such as the next loop counter or x + 1, rather than choosing a block."
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br label %header`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`icmp`: `%continue = icmp slt i32 %i, %limit`",
+              "Compare two same-typed integers and produce i1, which can feed br or select. `slt` asks whether the left operand is smaller using signed integer interpretation, so a negative i32 is below zero. The comparison computes a condition; it does not jump by itself."
+            ],
+            [
+              "`icmp slt`: `%continue = icmp slt i32 %i, %limit`",
+              "Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For the loop it compares the current counter with the bound; for the discount kernel it checks whether the amount is negative."
+            ],
+            [
+              "`load`: `%i.reload = load i32, ptr %i.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`phi`: `%i = phi i32 [ 0, %entry ], [ %next, %body ]`",
+              "Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other."
+            ],
+            [
+              "`ret`: `ret i32 %i`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %continue, i32 1, i32 2`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 0, ptr %i.reg2mem, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "add",
+            "alloca",
+            "br",
+            "icmp",
+            "load",
+            "phi",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call count_to with limit = 2. The initial counter is 0; the signed-less-than test is true for 0 and 1, so the body increments it to 1 and then 2. At 2 the test is false and exit returns 2. A PHI selects initial 0 on entry and the previous body’s next value on a back edge; after demotion the loop-variable slot carries those same values. The complete after listing stores state 0 for header, 1 for body, or 2 for exit. State storage controls where to run; separate value slots carry the counter. The default unreachable path is never an intended outcome.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -1834,7 +3163,7 @@
           "irComparison": true
         }
       ],
-      "words": 1174,
+      "words": 2468,
       "quiz": {
         "q": "Why use the same untransformed driver object in both binaries?",
         "choices": [
@@ -1977,6 +3306,167 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @merge(i1 %condition) {`",
+              "`define` starts a function body. `@merge` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%ms.state = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br label %ms.dispatch`",
+              "`br label %B` always transfers control to block B. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`load`: `%value.reload = load i32, ptr %value.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`ret`: `ret i32 %value.reload`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %condition, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %ms.next, ptr %ms.state, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "load",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "The other syntax printed around this function",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Module or function syntax",
+              "Meaning here"
+            ],
+            [
+              "`local_unnamed_addr`",
+              "The function’s address is not semantically significant within this module, which gives the optimizer extra freedom. This is an address-identity property, not removal of the @function name."
+            ],
+            [
+              "`range(i32 10, 21)`",
+              "A return-value contract describing the half-open interval 10 ≤ result < 21. It is not a loop or a runtime bounds check; this function actually chooses 10 or 20. A result violating the contract would be poison."
+            ],
+            [
+              "`#0` / function attributes",
+              "The numbered group attaches facts to a function declaration/definition rather than executing them. `mustprogress`: Requires forward progress rather than an unobservable infinite computation; it is an optimizer contract, not an inserted progress check. `nofree`: The function does not deallocate memory. `norecurse`: The function is not recursive, directly or indirectly. `nosync`: The function does not perform synchronization. `nounwind`: The function does not unwind the stack. `willreturn`: The function must return control to its call site on defined execution. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call merge with condition = true: take left and obtain 10; with false, take right and obtain 20. In a PHI listing join chooses the incoming constant using the predecessor edge. In a demoted listing only the executed path stores its constant, and join reads that value. The optimized after listing replaces all this routing and memory with one select choosing 10 or 20 and one return; it does not execute both paths.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -2012,7 +3502,7 @@
           "irComparison": true
         }
       ],
-      "words": 674,
+      "words": 1841,
       "quiz": {
         "q": "Can synthetic timing numbers be published as measured results to fill the table?",
         "choices": [
@@ -2124,6 +3614,219 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define dso_local i32 @calculate_discount(i32 noundef %0, i32 noundef %1) #0 {`",
+              "`define` starts a function body. `@calculate_discount` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%3 = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`9:` and `label %9`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`%0`, `%1`, `%3`, `%4` — numbered names",
+              "Clang can print unnamed arguments, instruction results, and blocks with numbers. They are names, not the numeric value of the object, source line numbers, or MiniShield state IDs. Inserting instructions can renumber later printed labels without changing which original block object they identify. The omitted first block label in this discount function is its implicit numbered entry block."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`alloca`: `%3 = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br i1 %8, label %9, label %10`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`icmp`: `%8 = icmp slt i32 %7, 0`",
+              "Compare two same-typed integers and produce i1, which can feed br or select. `eq` asks whether the bit patterns are equal. `slt` asks whether the left operand is smaller using signed integer interpretation, so a negative i32 is below zero. The comparison computes a condition; it does not jump by itself."
+            ],
+            [
+              "`icmp eq`: `%12 = icmp eq i32 %11, 0`",
+              "Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For a state-choice chain this tests one original case value."
+            ],
+            [
+              "`icmp slt`: `%8 = icmp slt i32 %7, 0`",
+              "Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For the loop it compares the current counter with the bound; for the discount kernel it checks whether the amount is negative."
+            ],
+            [
+              "`load`: `%7 = load i32, ptr %4, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`mul`: `%20 = mul nsw i32 %18, %19`",
+              "Multiply the two same-typed operands. In the discount kernel this computes amount × percentage before division by 100; the percentage is a numeric value loaded from storage, not the address of its slot."
+            ],
+            [
+              "`nsw` on `mul`",
+              "No signed wrap: this arithmetic promises not to overflow its signed range. A violation produces poison, an invalid intermediate value that can lead to undefined behavior when used; it is not a checked overflow exception. The documented discount domain keeps the promise valid."
+            ],
+            [
+              "`ret`: `ret i32 %24`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`sdiv`: `%21 = sdiv i32 %20, 100`",
+              "Perform signed integer division: first operand divided by second, rounding toward zero. Dividing by zero, or signed minimum divided by −1, is undefined behavior. Here the divisor is the literal 100 and the bounded test inputs keep the arithmetic defined."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %8, i32 0, i32 1`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 %0, ptr %4, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`sub`: `%22 = sub nsw i32 %17, %21`",
+              "Subtract the second operand from the first and define the difference. Operand order matters: a − b is not b − a. In the discount kernel it removes the computed discount; in the swap loop it makes the current ordering observable."
+            ],
+            [
+              "`nsw` on `sub`",
+              "No signed wrap: this arithmetic promises not to overflow its signed range. A violation produces poison, an invalid intermediate value that can lead to undefined behavior when used; it is not a checked overflow exception. The documented discount domain keeps the promise valid."
+            ],
+            [
+              "`switch`: `switch i32 %11, label %15 [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "alloca",
+            "br",
+            "icmp",
+            "load",
+            "mul",
+            "ret",
+            "sdiv",
+            "select",
+            "store",
+            "sub",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "The other syntax printed around this function",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Module or function syntax",
+              "Meaning here"
+            ],
+            [
+              "`target triple` / `target datalayout`",
+              "Module settings for the target machine and its data representation. The triple names the architecture/environment. The datalayout string describes details such as pointer sizes, integer alignment, native widths, and stack alignment; it is not a sequence of program instructions."
+            ],
+            [
+              "`dso_local` / `noundef`",
+              "dso_local says the function symbol resolves locally in its linkage unit. noundef on the inputs requires a fully defined value, without undef/poison bits. These are semantic contracts and code-generation facts, not extra parameters or runtime tests."
+            ],
+            [
+              "`#0` and `attributes #0 = { ... }`",
+              "The header’s #0 refers to the numbered attribute group below. noinline prevents inlining; nounwind says the function does not unwind; uwtable requests unwind-table information. These do not replace the body’s branches or arithmetic."
+            ],
+            [
+              "Quoted attributes in `#0`",
+              "\"frame-pointer\"=\"all\" requests retained frame pointers; \"min-legal-vector-width\"=\"0\" records a code-generation width setting; \"no-trapping-math\"=\"true\" records a floating-point trapping assumption; \"stack-protector-buffer-size\"=\"8\" is a stack-protector threshold setting. The target-cpu, target-features, and tune-cpu strings select available machine features and tuning. They are not target-program string variables."
+            ],
+            [
+              "`!llvm.module.flags`, `!llvm.ident`, `!0`, and `!{ ... }`",
+              "These are metadata names/references and tuple nodes. !\"PIC Level\" is a metadata string; typed i32 values inside a node describe settings. They are not runtime struct/array objects or executable assignments. For example, the module-flag tuple’s first integer controls how a setting merges when modules are linked; 8 means Min, 7 Max. The following string names the setting and the final integer gives its value."
+            ],
+            [
+              "PIC/PIE, uwtable, frame-pointer metadata",
+              "These entries record position-independent code/executable settings and unwind/frame-pointer policy; !llvm.ident records compiler identity. They remain in the complete module for reproducibility while the lesson’s transformation changes function instructions."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Use amount = 1000 and level = 1: input %0 is amount and %1 is level. In the before listing, %4 holds amount, %5 level, %6 the selected percentage, and %3 the eventual result. The negative test is false; the original level switch chooses 5 percent. mul computes 5000, sdiv by 100 gives 50, and sub produces 950. The result slot is read and ret returns 950. In the after listing the state sequence is 1 → 3 → 6 → 7, routing through the level decision, rate-5 block, arithmetic block, and return block. Numeric block labels have been renumbered by inserted results; match their instructions and the dispatcher cases, not their old numbers.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -2159,7 +3862,7 @@
           "irComparison": true
         }
       ],
-      "words": 1408,
+      "words": 3193,
       "quiz": {
         "q": "What should the demo do if opt fails verification?",
         "choices": [
@@ -2279,6 +3982,157 @@
           "irComparison": true
         },
         {
+          "type": "heading",
+          "text": "Reading this LLVM program from zero",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Spelling in these listings",
+              "How to read it here"
+            ],
+            [
+              "`define i32 @count_to(i32 %limit) {`",
+              "`define` starts a function body. `@count_to` is the module-level function name; `i32` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks."
+            ],
+            [
+              "`i1` / `i32`",
+              "i1 means one bit: 0 is false and 1 is true for a condition; i32 means a 32-bit integer bit pattern; signed interpretation comes from operations such as slt or sdiv, not from a separate signed i32 type."
+            ],
+            [
+              "`ptr`",
+              "An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer."
+            ],
+            [
+              "`%i = ...`",
+              "The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register."
+            ],
+            [
+              "`entry:` and `label %entry`",
+              "The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol."
+            ],
+            [
+              "`i32 0`",
+              "This is a typed literal: the i-prefixed part specifies the bit width, and the decimal part is the constant value. For example, a case number or stored state ID is an integer value, unlike a `%name` or `name:` label."
+            ],
+            [
+              "`; preds = ...` / other `;` text",
+              "Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges."
+            ],
+            [
+              "`align 4`",
+              "Alignment is in bytes, not elements, bits, or a value to store. An aligned alloca provides suitably aligned storage; an aligned load/store promises that its pointer meets that alignment. It does not initialize memory or change the integer read/written."
+            ]
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Every instruction used in this pair",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction and an actual line",
+              "Meaning and operand order in these listings"
+            ],
+            [
+              "`add`: `%next = add i32 %i, 1`",
+              "Add the two same-typed operands and define the sum. In these unflagged i32 examples, arithmetic is modulo 2^32; the test inputs stay in the small intended range. This calculates data, such as the next loop counter or x + 1, rather than choosing a block."
+            ],
+            [
+              "`alloca`: `%ms.state = alloca i32, align 4`",
+              "Reserve storage for the shown element type in this function invocation and produce its address, not the stored integer. `alloca i32` reserves one i32 slot. The allocation does not initialize its contents; a store must supply a value before an intended read."
+            ],
+            [
+              "`br`: `br label %header`",
+              "`br label %B` always transfers control to block B. `br i1 %C, label %A, label %B` goes to A for true and B for false; their order matters. A branch is the block’s final instruction and produces no result. It does not execute both destinations."
+            ],
+            [
+              "`icmp`: `%continue = icmp slt i32 %i, %limit`",
+              "Compare two same-typed integers and produce i1, which can feed br or select. `slt` asks whether the left operand is smaller using signed integer interpretation, so a negative i32 is below zero. The comparison computes a condition; it does not jump by itself."
+            ],
+            [
+              "`icmp slt`: `%continue = icmp slt i32 %i, %limit`",
+              "Read left-to-right: compare the first integer operand with the second, then use the resulting i1 as a condition. For the loop it compares the current counter with the bound; for the discount kernel it checks whether the amount is negative."
+            ],
+            [
+              "`load`: `%i.reload = load i32, ptr %i.reg2mem, align 4`",
+              "Read a value from memory: in `load i32, ptr %slot`, i32 is the loaded value’s type and %slot is its address. The left-hand result gets the current contents, not another copy of the address. Each load defines a new SSA value; it does not compute the value that a missing earlier store should have supplied."
+            ],
+            [
+              "`phi`: `%i = phi i32 [ 0, %entry ], [ %next, %body ]`",
+              "Define one value by the edge just used to enter this block. Each `[ VALUE, %PREDECESSOR ]` pairs an incoming value with its source block; it is not an array access. The PHI’s i32 type applies to every incoming value, so a literal inside a bracket does not repeat the type. PHIs go at the start of a block. On a loop’s first entry choose its entry value, and on a back edge choose its carried value. Multiple PHIs select incoming values together, rather than sequentially overwriting each other."
+            ],
+            [
+              "`ret`: `ret i32 %i`",
+              "End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch."
+            ],
+            [
+              "`select`: `%ms.next = select i1 %continue, i32 1, i32 2`",
+              "Produce a value from `select i1 CONDITION, TYPE TRUE_VALUE, TYPE FALSE_VALUE`. A true condition chooses the first alternative, false the second; alternatives have the same type. This does not branch or conditionally execute the instructions that computed the operands. Here the chosen result is either a destination’s state number or the final return value."
+            ],
+            [
+              "`store`: `store i32 0, ptr %i.reg2mem, align 4`",
+              "Write memory: in `store i32 VALUE, ptr ADDRESS`, the first operand is the value and the second is the destination address. A store has an effect but no result name. Writing a state slot changes the next routing choice; writing a demotion slot transports an original program value."
+            ],
+            [
+              "`switch`: `switch i32 %ms.current, label %ms.invalid [`",
+              "Transfer control according to one integer value. The destination immediately after the condition is the default for no matching case. Each line inside `[...]` pairs a typed case constant with `label %DESTINATION`; only one destination is taken. An original switch chooses a program outcome; a dispatcher switch decodes the stored state ID. The brackets are a case list, not a runtime array."
+            ],
+            [
+              "`unreachable`: `unreachable`",
+              "End the block by asserting that execution never reaches this point on a defined run. Actually executing it is undefined behavior; it is not error recovery, a return, or a C++ exception. The state-machine invariant must prevent a bad stored ID from taking this default path."
+            ]
+          ],
+          "coveredOpcodes": [
+            "add",
+            "alloca",
+            "br",
+            "icmp",
+            "load",
+            "phi",
+            "ret",
+            "select",
+            "store",
+            "switch",
+            "unreachable"
+          ],
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Keep address, contents, and loaded value separate. For example, an alloca result is the address of a slot; a store writes an integer into that slot; a later load defines a new SSA name for the integer read back. The pointer name does not become the stored number. A value slot preserves program data, whereas ms.state (when present) stores a control-flow destination encoding.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "heading",
+          "text": "Walk one concrete execution",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Call count_to with limit = 2. The initial counter is 0; the signed-less-than test is true for 0 and 1, so the body increments it to 1 and then 2. At 2 the test is false and exit returns 2. A PHI selects initial 0 on entry and the previous body’s next value on a back edge; after demotion the loop-variable slot carries those same values. The complete after listing stores state 0 for header, 1 for body, or 2 for exit. State storage controls where to run; separate value slots carry the counter. The default unreachable path is never an intended outcome.",
+          "irComparison": true,
+          "irReadingGuide": true
+        },
+        {
           "type": "deep",
           "lens": "llvm",
           "title": "Read the complete before-and-after LLVM modules",
@@ -2314,7 +4168,7 @@
           "irComparison": true
         }
       ],
-      "words": 832,
+      "words": 2126,
       "quiz": {
         "q": "What is the final evidence for a fixed O2-only wrong-code bug?",
         "choices": [
