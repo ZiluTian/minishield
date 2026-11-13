@@ -1,5 +1,5 @@
 MiniShield — Day 2: the step-by-step teaching guide
-Study notes and future exercises · expanded 2026-11-12
+Study notes and future exercises · expanded 2026-11-13
 
 Read the chapter-based book at https://zilutian.github.io/minishield/#day2.
 
@@ -13,6 +13,24 @@ exercise must be written before running commands that depend on them.
 
 0. Before changing the IR
 =========================
+
+### Why changing a branch can break a value
+
+We work with LLVM intermediate representation (IR), the instructions between source code and machine code. A function body is divided into basic blocks: straight-line instruction sequences ending in a terminator such as a branch or return. Branches connect blocks into a control-flow graph (CFG). A predecessor is a block with an incoming edge to the block we are discussing; a successor is a destination of an outgoing edge. An instruction defines a result when it produces a value, and another instruction uses that result when it consumes it.
+
+Day 1 described programs. Day 2 changes how they execute. Our goal is to route decisions through one dispatcher while preserving the answers, effects, and termination of every execution covered by our support contract. This is why we cannot start by replacing all the branches: a program carries both control flow (which block runs next) and data flow (which computed values later instructions use).
+
+Why route decisions through a dispatcher at all? Ordinary branches expose familiar shapes such as a diamond for an if/else and a back edge for a loop. Control-flow flattening aims to obscure that direct structure by making many transitions use one shared routing mechanism. We still owe the caller the same computation. This project lets us study that representation change and its costs; whether it remains difficult to analyze after optimization is a separate question.
+
+Imagine one block computes a subtotal and another returns it. The old route guarantees that calculation happens before the return. New dispatcher edges change the routes LLVM sees. Even if our state numbers are intended to choose the right order at runtime, the rewritten IR must still obey LLVM’s rules for where each value can be used.
+
+| Stage | Problem it solves | What you should understand before coding |
+| --- | --- | --- |
+| Prepare values | Existing value dependencies were designed for the old graph. | Where each value comes from and how a later use receives it. |
+| Construct and connect states | The next block must be selected through the dispatcher. | How each old decision becomes a next-state choice. |
+| Check the result | A valid-looking graph may still compute the wrong answer. | Which structural rules and observable results must remain true. |
+
+The first lessons therefore concentrate on values, especially PHIs. These are preparation steps for flattening, not unrelated instruction-counting exercises. Each later lesson explains which part of the same control-and-data problem it addresses.
 
 Task: Read this context before editing FlatteningPass. Day 1 built the plugin, statistics, CFG analysis, and eligibility checker. Day 2 starts changing eligible functions.
 
@@ -91,6 +109,47 @@ Answer: A. PHIs are valid LLVM IR. It is our planned CFG restructuring that can 
 
 1. Collect PHIs without changing them
 =====================================
+
+### Why a compiler needs a PHI at a join
+
+Start with a familiar source-language variable. A conditional can assign that variable on either path, and code after the conditional must use whichever assignment actually happened:
+
+```cpp
+int chosen;
+if (condition)
+    chosen = 10;
+else
+    chosen = 20;
+return chosen;
+```
+
+LLVM commonly represents computed values in static single assignment form, or SSA: each named instruction result has one defining instruction; a function argument is a value supplied at function entry. This makes dependencies explicit. An optimizer can follow a name back to one definition instead of searching through every possible reassignment of a mutable variable. One static definition can execute many times in a loop; “single assignment” describes the IR definition, not a promise to execute it only once.
+
+At a join, however, the available value depends on the path taken. We cannot give one SSA name two separate defining assignments. A PHI expresses that choice in one definition. In tests/ir/phi.ll, the relevant instruction is:
+
+```llvm
+join:
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+```
+
+Read each bracket as “value, incoming predecessor.” If execution enters join from left, value is 10; if it enters from right, value is 20. The predecessor is the block whose edge was just taken. The PHI does not rerun the condition, execute both paths, or take whichever value appears first in the text. This example uses constants; real incoming values can be results computed on the different paths.
+
+### Why PHIs matter to our flattening pass
+
+```text
+Before: left  ───────→ join     PHI can distinguish left from right.
+        right ───────→ join
+
+Later:  left/right → dispatcher → join
+                               The last predecessor is now dispatcher.
+```
+
+If we change the edges but keep the old PHI unchanged, its incoming labels no longer describe the predecessors of join. The PHI is both a useful account of the original value choice and a dependency on the original graph. We need to preserve that choice in another form before replacing those edges.
+
+This lesson only finds those instructions and records their addresses. The next lessons use that worklist to replace predecessor-based choices with explicit memory transfers. A count of zero means this preparation step has nothing to do; it does not mean the function has no other data-flow constraints.
+
+Checkpoint: If join is entered from right, why must the PHI select 20? What information would disappear if the immediate predecessor became dispatcher?
 
 Task: Collect PHI nodes in the existing FlatteningPass::run(), after the eligibility guard. This lesson does not modify IR.
 
@@ -172,16 +231,22 @@ Checkpoint: What does the vector own? Why do we retain pointers rather than copi
 
 ### Check your understanding
 
-What does phis.push_back(phi) copy?
+Why prepare PHIs before routing incoming paths through one dispatcher?
 
-A. The entire PHI instruction
-B. Only the pointer value
-C. The function containing the PHI
+A. Their value choice refers to incoming edges that the rewrite will change
+B. PHIs are invalid in every ordinary LLVM function
+C. The dispatcher can infer the old predecessor from the order of cases
 
-Answer: B. LLVM owns the instruction. The vector keeps its address so a later pass stage can find it.
+Answer: A. A PHI associates incoming values with predecessor edges. Preserve that association before replacing those edges.
 
 2. Keep the typed pointer from dyn_cast
 =======================================
+
+### Why the worklist needs a more specific kind of instruction
+
+The previous lesson identified PHIs as the operations whose incoming choices must be preserved. But the loop visits every instruction: arithmetic, loads, branches, returns, and PHIs. The later PHI-demotion helper accepts a PHINode*, so the worklist must contain instructions proven to be PHIs.
+
+A typed pointer records that knowledge in C++. Testing whether an instruction is a PHI does not change the declared type of the original loop variable. Keeping the pointer returned by dyn_cast carries the successful check into the vector and then into the transformation call. This is how the conceptual selection becomes a type-safe worklist; it creates no new IR object.
 
 Task: Fix the pointer-type mismatch encountered while collecting PHIs. Work in the inner instruction loop from the previous lesson.
 
@@ -269,6 +334,30 @@ Answer: B. I keeps its declared type. The returned pointer is the value with the
 
 3. Demote PHIs after collection
 ===============================
+
+### What demotion changes, and why we want it
+
+We have located the places where the old graph chooses a value by predecessor. Before routing those paths through a shared dispatcher, we need another way to communicate that choice. PHI demotion replaces the implicit “which incoming edge?” selection with explicit writes and reads of a shared storage slot.
+
+```text
+Path from left:  write 10 into slot ─┐
+                                    ├→ join: read slot → return result
+Path from right: write 20 into slot ─┘
+```
+
+Only the executed path writes its incoming value for this diamond. join reads the stored value. Thus the path still determines the result, but join no longer needs a PHI mentioning left and right as its direct predecessors. This prepares the value transport for later edge changes; demotion itself does not create or connect the dispatcher.
+
+“Demote” means lowering a selected SSA value into memory-based storage. The slot can be written on different paths; each load from it still defines its own SSA result. We are not switching LLVM out of SSA, deleting the selected computation, or merely renaming a variable.
+
+| Before PHI demotion | After PHI demotion |
+| --- | --- |
+| One PHI defines the selected result. | An entry-allocated slot carries the selected value. |
+| The predecessor edge identifies the incoming value. | Incoming paths arrange the writes; users read the slot. |
+| The PHI must agree with the old incoming edges. | The PHI is removed, and its users receive loaded values. |
+
+This representation can add memory operations and make optimization harder. For this prototype, that cost buys a simpler foundation for CFG rewriting. A later optimizer may eliminate some storage again; the word “stack” here does not guarantee that every slot survives into machine code.
+
+Checkpoint: Why is removing a PHI without replacing its users and incoming-value selection insufficient?
 
 Task: After collecting PHIs, replace each PHI with stack-based data flow. This is the first lesson that actually changes the program’s IR.
 
@@ -371,16 +460,26 @@ Checkpoint: Trace both outcomes of the condition. Which store executes? What doe
 
 ### Check your understanding
 
-Why collect PHIs before demoting them?
+What does demoting the PHI in the diamond preserve?
 
-A. The utility deletes the PHI and can invalidate ordinary traversal
-B. A vector is required by the LLVM API
-C. PHIs have no operands until put into a vector
+A. The incoming path determines which value the later use receives
+B. Both paths execute and the larger result wins
+C. The name of the original PHI remains unchanged
 
-Answer: A. Demotion mutates the instruction list. A worklist separates discovery from deletion.
+Answer: A. Path-specific writes and later reads replace the predecessor-based choice. Removing an instruction alone is not the goal.
 
 4. Find values that cross block boundaries
 ==========================================
+
+### Why removing PHIs is only half of preparation
+
+A PHI is one way blocks exchange values, but ordinary instructions can also define a value in one block that another block uses. For example, entry can calculate sum, branch to exit, and have exit return sum. That function has no PHI at all.
+
+LLVM requires an ordinary definition to dominate its uses: every entry-to-use path must pass through the definition. Think of a receipt that must be written before any reader can refer to it. Adding a dispatcher edge to the reader can create a graph route that bypasses the writer. The verifier checks the graph relationship; it does not accept “our state IDs will never choose that order” as a replacement for SSA dominance.
+
+PHI demotion can itself produce a load whose result is used in another block. We therefore inspect ordinary cross-block dependencies after the PHI stage. This worklist finds remaining value transport to prepare, rather than assuming “no PHIs” means “safe to rewire.” Here “escaping” means crossing a block boundary, not escaping to another function or heap object.
+
+Checkpoint: Can a two-block function with no merge point still have a value dependency that flattening must prepare? Give an example.
 
 Task: After PHI demotion, collect remaining instruction results used outside their defining block. Do not demote this new collection yet.
 
@@ -493,6 +592,18 @@ Answer: A. SSA dependencies are not limited to PHIs. A load or add defined in on
 5. Ask whether an instruction produces a value
 ==============================================
 
+### An operation can have an effect without producing a value
+
+Instructions do different jobs. add computes a result that later instructions can consume. store changes memory but supplies no result value. ret ends a function invocation; a call can either return a value or be void. These effects matter, even when the operation has no result.
+
+Our current question is narrow: which instruction results need a different way to reach another block? A void-result instruction has no such result to spill. Filtering it out means “leave this operation out of the value worklist,” not “delete the operation” or “ignore its side effects.” We will handle branch terminators separately when changing control flow.
+
+| Operation | Produces a usable result? | Role in this stage |
+| --- | --- | --- |
+| %sum = add i32 %x, 1 | Yes: an i32. | Consider its uses. |
+| store i32 %sum, ptr %slot | No: void result. | Keep the effect; do not demote a nonexistent result. |
+| %p = alloca i32 | Yes: a pointer. | Needs the separate storage filter in the next lesson. |
+
 Task: Fill in the void-result filter inside the inner instruction loop. This prevents collecting operations that produce no value.
 
 ### The template to start with
@@ -568,6 +679,14 @@ Answer: B. The returned operand has type i32. The ret instruction itself has no 
 6. Recognize the stack allocation itself
 ========================================
 
+### Why the storage itself is a different kind of result
+
+The demotion strategy gives a value a storage slot, writes its value into that slot, and loads it where needed. alloca creates the slot and returns its address. That address naturally appears in stores and loads in several blocks, so a generic “used outside its block” test would select the allocation too.
+
+For this preparation algorithm, storage pointers are the stable foundation we rely on. Adding another slot just to transport the address of the first slot is not the intended repair. We exclude AllocaInst from the ordinary value worklist and require supported storage allocations to remain in the original entry, where they dominate all the later memory accesses.
+
+Skipping an alloca is not proof that every allocation is safe. A non-entry alloca might be bypassed by a new edge; a variable-sized or repeated allocation may have meaningful execution/lifetime behavior. The stricter eligibility lesson rejects those cases before full rewriting. A normal entry slot is allocated once per function invocation, not once for the whole program.
+
 Task: Add an AllocaInst filter alongside the void-result filter. Keep the worklist focused on values to demote, not their storage allocations.
 
 ### The template to start with
@@ -621,16 +740,27 @@ Checkpoint: Why would skipping only void instructions leave alloca in considerat
 
 ### Check your understanding
 
-Why does the alloca instruction need a separate filter?
+Why does the ordinary value worklist exclude an entry alloca?
 
-A. It returns a pointer, so it is not void
-B. It is a function declaration
-C. It is never represented as an LLVM instruction
+A. Its address is the storage foundation used by the loads and stores
+B. alloca has a void result
+C. Every allocation can safely be moved to entry
 
-Answer: A. The allocated element is i32, but the allocation instruction’s result is a pointer to that storage.
+Answer: A. The slot pointer crosses blocks intentionally and must dominate its uses. This is separate from rejecting unsafe allocation forms.
 
 7. Finish collection without a premature return
 ===============================================
+
+### Why each preparation stage must get a chance to run
+
+The earlier PHI-only exercise could stop when its PHI worklist was empty. The pass now has another responsibility: ordinary values crossing block boundaries. An empty first worklist says nothing about whether the second one is empty.
+
+```text
+entry: compute %sum → exit: return %sum
+No PHI, but %sum still travels between blocks.
+```
+
+Think of this as a sequence of independent inspections. Each stage can do zero edits without cancelling the remaining stages. The final changed flag summarizes whether any stage edited the IR. This distinction prevents a function that happens to lack PHIs from skipping all later preparation and construction.
 
 Task: Review the complete preparation flow so every eligible function reaches cross-block inspection.
 
@@ -725,6 +855,12 @@ Answer: B. The worklist is C++ bookkeeping. Update changed when a transformation
 8. Read the demotion helper signatures
 ======================================
 
+### The helper interface connects our worklist to the edit
+
+The worklist stores handles to existing IR objects. The utility must receive the actual object it will modify, rather than a copy of an arithmetic result in the program being compiled. This is why reading the C++ parameter type matters: Instruction& and PHINode* are two ways these APIs borrow mutable IR objects.
+
+Dereferencing an Instruction* to bind an Instruction& does not execute the target instruction or load its runtime value. It gives the C++ helper access to that IR object. Both demotion utilities change the function’s representation; the signature tells you how to pass the object, while the helper’s semantic contract tells you what edits and lifetime changes to expect.
+
 Task: Read both helper declarations in llvm/Transforms/Utils/Local.h before adding the next call.
 
 ### The template to complete
@@ -800,6 +936,19 @@ Answer: A. Dereferencing the stored pointer supplies the existing instruction as
 
 9. Demote the escaping values
 =============================
+
+### What ordinary-value demotion preserves
+
+For an ordinary instruction, the calculation is already in the right block. The problem is how a later block obtains its result. DemoteRegToStack keeps the defining calculation, stores its result into entry-allocated storage, and supplies loads for uses. The direct SSA connection across blocks becomes explicit communication through memory.
+
+```text
+Before: calculate %sum ─────────────→ another block uses %sum
+After:  calculate %sum → store slot → another block loads slot → uses load
+```
+
+The name “Reg” refers to LLVM’s register-like SSA results, not a physical CPU register we are choosing. This step can add instructions; it is preparation for changing the graph, not a speed optimization.
+
+Memory transport does not make arbitrary execution orders correct. The final state machine must still arrange for the appropriate store to execute before its corresponding load, preserving the original computation’s behavior. Preparation makes the IR representation suitable for that later rewrite; it does not prove the rewrite correct.
 
 Task: Add cross-block value demotion after escapingValues collection. The eligibility guard still runs before either transformation.
 
@@ -886,16 +1035,24 @@ Checkpoint: Which transformation ran if phis is empty but escapingValues is not?
 
 ### Check your understanding
 
-What happens to the original add instruction after DemoteRegToStack?
+After ordinary-value demotion, what must the final rewrite still preserve?
 
-A. It is replaced by a PHI
-B. It remains; its result is stored and uses become loads
-C. It moves into the C++ vector
+A. The right calculation/store must happen before a use reads the value
+B. Any order of state execution is now correct
+C. Every stack slot must survive machine-code optimization
 
-Answer: B. Ordinary-value demotion keeps the computation and changes how its result reaches users.
+Answer: A. Memory transport removes selected direct SSA dependencies; it does not make arbitrary schedules semantically equivalent.
 
 10. Trace ordinary-value demotion
 =================================
+
+### Use a small trace to see what the helper is responsible for
+
+The utility call is short enough to hide its purpose. This two-block example makes the value’s journey visible: compute x + 1 in entry, then return that same result from exit. For input x = 4, both versions must return 5.
+
+Trace where the calculation happens, where its result is written, and what the return reads. The arithmetic stays in entry. Only the way its result reaches exit changes. A new load has a new SSA name because it is a separate definition; matching the old name is not the correctness condition.
+
+After this exercise you should be able to explain an unfamiliar demotion dump from the data path, even if LLVM has chosen different temporary names. That skill will matter when a later verifier error points to an old direct cross-block use.
 
 Task: Trace the cross-block example by hand, then compare its generated IR. This is a reading exercise, not another transformation to add.
 
@@ -1003,6 +1160,19 @@ Answer: A. The integer is written into the allocated memory. The SSA result of a
 11. Trace PHI demotion by predecessor
 =====================================
 
+### A PHI carries a choice, not just one calculation
+
+Ordinary-value demotion moves the result of one defining calculation through memory. PHI demotion has a different source of truth: the executed incoming path decides which of several incoming values should be carried. Preserving a PHI therefore requires preserving the path/value association.
+
+```text
+condition=true  → left  → choose 10 → join returns 10
+condition=false → right → choose 20 → join returns 20
+```
+
+In the demoted diamond, each chosen path writes its own incoming value and join reads the slot. Writing both 10 and 20 unconditionally before join would always leave the last write; allocating a slot without the path-specific writes would not encode any choice. The memory operations are a replacement for the PHI’s meaning, not merely a way to make the PHI instruction disappear.
+
+Loops use the same abstraction to choose an initial value on entry and a carried value on later iterations. More complex edges and interacting PHIs make placement subtle. The hand trace below explains this diamond; the LLVM utility is responsible for the general mechanics used by the prototype.
+
 Task: Trace the phi.ll diamond on both paths. Do not add a second demotion loop—this lesson explains the utility already used.
 
 ### The PHI to start with
@@ -1108,6 +1278,20 @@ Answer: B. Control flow selects which store executes. The load reads the value w
 12. Assign states before changing edges
 =======================================
 
+### Why blocks become states
+
+An original branch names its next block directly. A shared dispatcher needs a value it can inspect to choose that next block. A state ID is our encoding of the next block’s identity: store a number, reach dispatch, and let its switch decode the number back to a destination.
+
+```text
+Original intention: run left next.
+Encoded intention:  next state = 0.
+Dispatcher rule:    state 0 means left.
+```
+
+The numbers have no intrinsic meaning. Any unique, consistently used assignment would work. Mapping the prepared blocks in function order gives us deterministic dumps and a simple table to inspect. Mapping after demotion also includes any blocks introduced during preparation.
+
+The original entry is setup rather than a recurring state: its allocations must execute once per invocation, and the entry block cannot acquire predecessors. Excluding it keeps dispatcher cycles from re-entering setup. We assign IDs before appending dispatch/invalid so the machine’s own machinery does not accidentally become an original program state.
+
 Task: After both demotion stages, map the original non-entry blocks to unsigned state IDs. Do not create dispatcher blocks during this traversal.
 
 ### Before you begin — what a state represents
@@ -1207,6 +1391,12 @@ Answer: A. Setup executes once. The dispatcher routes between the other blocks; 
 
 13. Fix pointer keys and pair insertion
 =======================================
+
+### The map must identify the exact destination object
+
+The state table connects a block object to its encoding. When we later read an old branch’s successor, LLVM gives us a BasicBlock*. Using block addresses as map keys lets us find the encoding of that exact destination without relying on a display name.
+
+Names may be absent or changed. Numbers may be reused accidentally if a lookup silently inserts an entry. A correct mapping must give every supported original destination one unique state ID and let missing destinations be recognized as a violated assumption. The C++ pointer and pair syntax in this exercise implements that semantic relationship.
 
 Task: Review the state-mapping draft and fix its three type/syntax errors before building a dispatcher.
 
@@ -1309,6 +1499,24 @@ Answer: A. The map declaration requires a pointer. Take &BB when iterating block
 
 14. Construct a complete dispatcher block
 =========================================
+
+### What the dispatcher adds to the program
+
+A dispatcher is a shared decision block. Instead of every original branch choosing another program block directly, each rewritten transition will write the desired state and jump to this block. The dispatcher reads the state and uses its switch to choose the corresponding original block.
+
+```text
+entry setup → [write next state] → dispatch
+                                  read state
+                                  switch 0 → left
+                                         1 → right
+                                         2 → join
+```
+
+We use one i32 memory slot because many different blocks must update the same next-state information. A single SSA name cannot be repeatedly assigned by all those transitions. Its alloca lives in entry so the address is available everywhere; the stored contents change as execution moves between states. An alternative design could maintain SSA PHIs for state, but this course chooses memory so we do not have to repair those PHIs while restructuring the graph.
+
+This lesson deliberately constructs complete but disconnected machinery. It separates “can we build a valid load/switch/case structure?” from “have we redirected execution correctly?” An unreachable dispatcher does not demonstrate flattening yet, and its uninitialized slot must not be read on a live path. The next connection lesson supplies the first write before making it reachable.
+
+The invalid default expresses the invariant that our own transitions store only mapped state IDs. Ending it with unreachable makes that assumption explicit to LLVM; it is not a safe fallback if the assumption is broken.
 
 Task: After state mapping, add an i32 state slot and two complete new blocks. Preserve the old branch structure at this construction checkpoint.
 
@@ -1449,16 +1657,22 @@ Checkpoint: Which block executes the allocation? Why is a switch destination not
 
 ### Check your understanding
 
-Does CreateSwitch(..., 3) create three cases?
+Why is a valid but disconnected dispatcher only an intermediate checkpoint?
 
-A. No; it reserves capacity, and addCase creates the cases
-B. Yes, it automatically assigns IDs 0, 1, and 2
-C. Only if the function has exactly three blocks
+A. Execution still follows the old graph, so live transitions have not been translated
+B. A switch becomes active just because it is named ms.dispatch
+C. LLVM forbids all unreachable blocks
 
-Answer: A. Capacity and contents are separate. Add each integer constant and destination explicitly.
+Answer: A. First construct valid machinery, then make the intended execution paths use it with initialized state.
 
 15. Separate block names from C++ variables
 ===========================================
+
+### A block has an identity, a label, and an ending
+
+Three different ideas appear when we create a block. The C++ variable lets the pass refer to the block object. The IR name makes printed output readable. The block’s instructions and final terminator determine what the generated program actually does. Spelling a block ms.dispatch does not give it dispatcher behavior.
+
+Likewise, naming a block invalid does not make it an exception handler or give it an implicit exit. LLVM requires a terminator even in a currently unreachable block. The default case needs a defined IR structure that accurately states our invariant, rather than an empty block that merely has a plausible label.
 
 Task: Review the BasicBlock creation statements and the empty invalid block found in the first draft.
 
@@ -1530,6 +1744,19 @@ Answer: B. The return value is the block pointer. The string argument supplies t
 
 16. Connect an unconditional entry branch
 =========================================
+
+### Why the first state must come from the old entry edge
+
+The dispatcher exists, but the original entry still follows its old branch. To make execution use the new route, we must translate that branch’s intention into a stored state ID, then send control to dispatch. For loop.ll, the old destination is header, so the first stored state must decode to header.
+
+```text
+Before: entry ─────────────────────────────→ header
+After:  entry → store ID(header) → dispatch → header
+```
+
+The order is essential: dispatch loads the slot, so entry must write it first. A universal store of zero would be correct only if the actual destination happened to have ID zero. We read the destination and consult the map because the mapping, not the numeric spelling, defines the meaning.
+
+This first connection handles an unconditional branch: there is one intended successor. It leaves header/body loop edges direct, so it demonstrates only the first dispatcher hop. A conditional entry needs to encode a choice, and full flattening must translate the other original transitions as well.
 
 Task: Connect only an unconditional entry branch first. Use loop.ll, whose entry branches to header, mapped to state 0. This is still a partial transformation.
 
@@ -1750,6 +1977,14 @@ Answer: B. This connects the first hop. Full flattening needs later successor-se
 17. Define the supported input before mutation
 ==============================================
 
+### Why a transformation needs a support contract
+
+A read-only pass can inspect instructions without taking responsibility for new execution paths. A transformation has a stronger obligation: every accepted case must still mean the same thing after our edits. The fact that LLVM accepts an input does not mean this particular algorithm knows how to transform it.
+
+For example, an allocation in a later block may be valid in the original graph because every use follows that block. Dispatching directly to a use can bypass the allocation. Simply skipping alloca during value collection does not repair that relationship. Other constructs have special calling, exception, or value-type rules that our simple rewrite does not maintain.
+
+Preflight makes these assumptions executable: unsupported input is rejected before the first edit. This keeps a rejected function intact instead of leaving it half-demoted or half-rewired. A narrow accepted subset is a deliberate semantic boundary, not a claim that rejected LLVM features are generally invalid.
+
 Task: Future exercise: expand FunctionEligibility before enabling the complete rewrite below. These chapters are a book draft; your working implementation has not been updated for you.
 
 ### Why the old guard is not enough
@@ -1877,6 +2112,14 @@ Answer: A. Hoisting can change program semantics. The prototype rejects these al
 18. Give state-machine construction its own class
 =================================================
 
+### Why separate the builder from the pass
+
+The transformation now has three distinct questions: may we edit this function, have its values been prepared, and how do we construct the new graph? Mixing all three in one long run() makes it harder to identify which assumption a failure violates.
+
+StateMachineBuilder gives graph construction one boundary. Its input is a valid, accepted, prepared function; its job is to translate that function’s control flow. This separation lets us test a prepared graph directly while keeping rejection and preparation in the orchestration pass.
+
+A precondition is an obligation on the caller, not an automatic check performed by a C++ class. Extracting the code does not make unsafe input safe. Naming those obligations is what lets another reader understand when this helper may be used.
+
 Task: Future exercise: declare StateMachineBuilder and move dispatcher construction into it. Keep eligibility and value preparation in FlatteningPass.
 
 ### The template to start with
@@ -1975,6 +2218,20 @@ Answer: A. Rewriting the dispatcher’s own switch as though it were an original
 19. Choose states for conditional branches
 ==========================================
 
+### A conditional transition chooses a number instead of an edge
+
+An original conditional branch answers “which block next?” from an i1 condition. We want the same runtime decision to survive, but with both paths first going through dispatch. Replace the edge choice with a value choice: select the true destination’s state ID when the condition is true, otherwise the false destination’s ID.
+
+```text
+Original: if C, go to A; otherwise go to B.
+Rewritten: next = C ? ID(A) : ID(B);
+           store next; go to dispatch.
+```
+
+LLVM select is an instruction/value in the generated program. The C++ pass constructs that decision; it does not execute the target program’s condition while building IR. Swapping the two state IDs preserves valid types but reverses behavior, so testing both outcomes is necessary.
+
+Both select alternatives here are state constants. We are not moving the side effects of both original paths into one block; dispatch still executes only the selected destination. This distinction matters because select chooses already available values rather than making arbitrary computations conditional.
+
 Task: Future exercise: replace a conditional original branch with a selected state, a store, and a branch to dispatch. This applies to conditional entries and conditional state blocks.
 
 ### The template to start with
@@ -2059,6 +2316,20 @@ Answer: A. The builder constructs IR. The target program evaluates the condition
 
 20. Lower original switches to state selection
 ==============================================
+
+### A switch still needs its complete decision rule
+
+A source switch can have several named cases and a default for every other value. Flattening must preserve that entire mapping. We encode the original outcome as a next-state value instead of letting the old switch transfer control directly.
+
+```text
+Start: next = ID(default destination).
+For case value k: if input == k, choose ID(case destination).
+Finally: store next and go to dispatch.
+```
+
+Starting from the default is what preserves unmatched inputs. Comparing every case to the same original condition preserves the case decisions; valid case values are distinct, although multiple values may share one destination. The condition’s integer type can differ from the i32 type chosen for state IDs.
+
+There are now two different switches in the story. The original switch represents a program decision that this lesson translates into comparisons and selects. The new dispatcher switch decodes the state ID and must remain in place. Confusing the two can make the transformer rewrite its own routing machinery.
 
 Task: Future exercise: handle original SwitchInst terminators, not the newly created dispatcher switch.
 
@@ -2148,6 +2419,21 @@ Answer: A. Case values must be unique. Destinations may be shared, and the trans
 
 21. Rewrite every original terminator
 =====================================
+
+### Full flattening is a repeated protocol, not just a new switch
+
+Creating a dispatcher and connecting entry changes only one hop. The complete machine requires each original non-terminal transition to follow the same protocol: compute the intended next state, store it, then branch to dispatch. The switch chooses the next block, whose own transition repeats that process.
+
+```text
+setup → choose/store state → dispatch → original block
+                               ↑              |
+                               └─ store next ─┘
+An original return finishes the invocation instead of taking the loop back.
+```
+
+This is the key behavioral invariant: at each dispatcher visit, the slot encodes exactly the destination the original program would have chosen at that transition. A valid number is not enough; it must be the correct number for the original condition and path.
+
+Snapshot original terminators before appending new blocks so the rewrite applies only to the old program’s transitions. Keep ret and unreachable terminal rather than manufacturing another state after they have already ended a path. The shared store/branch tail is appropriate only when a next state exists.
 
 Task: Future exercise: complete StateMachineBuilder.cpp using the previous branch cases. This reference assumes the strict preflight and value-preparation stages.
 
@@ -2299,6 +2585,22 @@ Answer: A. Original switches become state selection. The dispatcher switch imple
 22. Orchestrate policy, preparation, and construction
 =====================================================
 
+### Why the order of phases is part of correctness
+
+The pass is now a pipeline within a pipeline. Eligibility protects the input boundary; preparation changes how values travel; construction changes how blocks are reached; preservation reporting tells later passes which cached facts remain usable. Each phase establishes assumptions needed by the next.
+
+```text
+reject unsupported input before edits
+    ↓
+prepare values for a different graph
+    ↓
+translate control-flow decisions into states
+    ↓
+report whether cached analyses became stale
+```
+
+Reordering these calls is not just a style change. Rewiring first can leave old PHIs and SSA uses invalid. Rejecting last leaves unsupported functions mutated. Reporting no change after demotion lets later passes reuse obsolete results. Track all phases’ changes without accidentally skipping a phase whose call has side effects.
+
 Task: Future exercise: replace the prototype’s inline construction with the strict guard, preparation stage, and StateMachineBuilder call.
 
 ### The template to start with
@@ -2413,6 +2715,14 @@ Answer: A. C++ || short-circuits. Use a separate result or an accumulation form 
 23. Inspect the final shape with LLVM tools
 ===========================================
 
+### What inspecting the final graph can establish
+
+A compiler transformation has two separate obligations: produce well-formed IR and preserve intended behavior. Structural inspection addresses the first and checks our design invariants. We want to see a live entry-to-dispatch path, valid state storage, the intended cases, and the rewritten transitions.
+
+The mere presence of a switch or a block named ms.dispatch is weak evidence: it might be unreachable while the original graph still runs unchanged. Follow actual successors from entry and verify the relations among blocks. LLVM’s verifier also checks rules such as types, terminators, and dominance; it does not prove our state IDs choose the right answers.
+
+This is why the next lesson compares executions. A true/false ID swap can be structurally legal yet wrong. Keep structural checks and behavioral checks as complementary tests rather than expecting one to replace the other.
+
 Task: Future exercise: establish structural evidence for the complete rewrite before measuring performance.
 
 ### The template to start with
@@ -2473,6 +2783,14 @@ Answer: A. A block name is a display aid. Reachability and transition behavior e
 
 24. Compare observable behavior on a defined domain
 ===================================================
+
+### Why valid IR is not enough
+
+Imagine a rewrite that reverses the destinations of a conditional branch. The result can have correct types, terminators, and dominance, but return the wrong discount. To test meaning, run the original and protected versions on the same inputs and compare what a caller can observe.
+
+This is differential testing: one implementation is the reference for the other. Our small driver exposes a numeric result on stdout and an exit status. The test domain must use defined arithmetic and valid arguments; otherwise a disagreement might come from a broken fixture rather than our transformation.
+
+We compile one common input IR and vary whether MiniShield transforms it. Keeping the driver, compiler settings, and final optimization the same helps isolate that difference. Finite tests give evidence for the tested cases, not proof for all inputs. Also inspect the graph: a stub that does nothing can pass every output comparison.
 
 Task: Future exercise: write a C input function and a separate driver. Transform the function’s IR, not the driver that parses arguments and prints results.
 
@@ -2577,6 +2895,14 @@ Answer: A. A fair comparison holds unrelated pipeline choices constant. It still
 25. Add difficult CFG fixtures deliberately
 ===========================================
 
+### Why a simple diamond is not a sufficient test corpus
+
+A diamond exercises one merge and two paths. It does not exercise a loop’s repeated value choices, two PHIs that depend on each other, a switch’s default, several returns, or an edge that needs special placement during demotion. A transformer can handle the first example perfectly and still break on these different relationships.
+
+Choose each new fixture to stress one assumption. An initial/loop-carried value tests first versus later iterations. Shared switch destinations test whether values and destinations were confused. Parallel PHIs test whether old values are preserved before any replacement overwrites them.
+
+The goal is not simply more lines of IR. Small focused fixtures let you predict the graph and results independently, recognize a specific failure, and keep a regression that explains the bug. Unsupported cases need equally deliberate rejection tests rather than being silently omitted.
+
 Task: Future exercise: grow the fixture corpus before claiming the transformer handles general control flow.
 
 ### The template to start with
@@ -2643,6 +2969,14 @@ Answer: A. Back-edge count and natural-loop count are different metrics.
 26. Account for optimizers, debug data, and limitations
 =======================================================
 
+### The pass is one stage in a larger compiler
+
+The IR we print immediately after flattening is not necessarily the code that ships. Later optimizations can remove redundant loads, simplify state choices, restructure loops, or eliminate some dispatcher machinery. Earlier optimization can introduce forms outside our prototype’s support contract.
+
+We therefore need two kinds of observation: does the complete pipeline preserve results, and does the final artifact still have the structure we intend to study? A fast, correct executable may no longer demonstrate flattening if optimization simplified it away.
+
+Debug locations and branch-weight metadata also describe program relationships. New instructions and edges do not automatically inherit all the old relationships correctly. Documenting what we preserve, reject, or leave unsupported keeps the technical claim aligned with the actual implementation.
+
 Task: Future exercise: record the transformation’s placement relative to optimization and inspect both intermediate and final artifacts.
 
 ### The template to start with
@@ -2698,6 +3032,12 @@ Answer: A. unreachable states an invariant to the optimizer. It is not a recover
 
 27. Close Day 2 with an evidence checklist
 ==========================================
+
+### What finishing Day 2 should mean
+
+Reaching the last line of a builder is not the same as establishing a working transformation. We need an accepted-input boundary, correctly transported values, faithful state transitions, valid output IR, and tested behavior. The checklist turns those broad goals into evidence we can inspect.
+
+Keep three states separate: a chapter is written, you have implemented its exercise, and its behavior has been checked. A full reference in the book establishes the first; it does not automatically establish the other two in your working tree. Day 3 makes the checks repeatable and measures the resulting artifacts.
 
 Task: Future exercise: review the implementation and evidence before beginning Day 3. The chapters describe work to do; they do not mark it done for you.
 
@@ -2758,6 +3098,12 @@ Answer: A. Reading and planning are not execution evidence. Keep those states di
 
 28. Look up a Day 2 term
 ========================
+
+### Use terms to recover the reason for an operation
+
+Definitions are most useful when they reconnect a word to the problem it solves. If “PHI” is unclear, revisit lesson 1’s path-dependent choice. If “demotion” is unclear, compare the value transport in lessons 3, 9, and 11. If “state” is unclear, follow the original destination through its encoding in lesson 12 and its decoding in lesson 14.
+
+This glossary is a reminder rather than a prerequisite to understanding the main lessons. Each concept is introduced in context before the exercise that depends on it.
 
 Task: Use this reference when a term interrupts your progress. The Day 1 glossary remains available under the Day 1 tab.
 
