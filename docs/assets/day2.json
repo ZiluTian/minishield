@@ -11383,6 +11383,10 @@
           "text": "General CS and compiler concepts"
         },
         {
+          "type": "paragraph",
+          "text": "The compiler-background terms the Day 2 lessons build on: the representation invariants (SSA, dominance), the techniques the pass uses (demotion, worklists), and the safety vocabulary (undefined behavior, differential tests) used when judging what a check proves."
+        },
+        {
           "type": "heading",
           "text": "SSA"
         },
@@ -11566,6 +11570,10 @@
           "text": "Project vocabulary"
         },
         {
+          "type": "paragraph",
+          "text": "The names this project gives its own machinery — state IDs, the dispatcher, the support contract — so the book, the code, and the terminal output refer to the same objects."
+        },
+        {
           "type": "heading",
           "text": "State ID"
         },
@@ -11723,7 +11731,7 @@
           ]
         }
       ],
-      "words": 2054,
+      "words": 2121,
       "quiz": {
         "q": "A load reads %slot, but nothing in the function ever stored to it. What does the load read?",
         "choices": [
@@ -11803,6 +11811,10 @@
         {
           "type": "heading",
           "text": "Printed-IR vocabulary"
+        },
+        {
+          "type": "paragraph",
+          "text": "How to read a printed module: what each mark — %, @, :, ;, align — denotes, and which symbols name values, which name blocks, and which name functions."
         },
         {
           "type": "heading",
@@ -11960,6 +11972,10 @@
           "text": "Memory"
         },
         {
+          "type": "paragraph",
+          "text": "The constructs that decide where a value lives: the PHI this pass demotes, the slots that hold demoted values, and the load/store pair that moves them."
+        },
+        {
           "type": "heading",
           "text": "PHI"
         },
@@ -12081,6 +12097,10 @@
           "text": "Control flow"
         },
         {
+          "type": "paragraph",
+          "text": "The instructions that end a block and choose the next one: every edge in the graph is defined by a terminator, and the pass rewrites exactly these."
+        },
+        {
           "type": "heading",
           "text": "Terminator"
         },
@@ -12170,6 +12190,10 @@
         {
           "type": "heading",
           "text": "Calls and attributes"
+        },
+        {
+          "type": "paragraph",
+          "text": "How one function may call another, and which flags on the call or the callee change what the compiler may assume — the guard rejects the calls it cannot preserve."
         },
         {
           "type": "heading",
@@ -12350,6 +12374,10 @@
           "text": "Function and block properties"
         },
         {
+          "type": "paragraph",
+          "text": "The properties the guard queries before editing: which functions are intrinsics or coroutines, which blocks are address-taken or EH pads, and which terminators the pass rewrites."
+        },
+        {
           "type": "heading",
           "text": "Intrinsic"
         },
@@ -12470,6 +12498,10 @@
         {
           "type": "heading",
           "text": "The C++ API side"
+        },
+        {
+          "type": "paragraph",
+          "text": "The host-side C++ API the pass uses to read and build the IR, as opposed to the target program the IR describes: the context, the builders, the maps, and the free functions that perform the demotion."
         },
         {
           "type": "heading",
@@ -12657,7 +12689,7 @@
           ]
         }
       ],
-      "words": 4409,
+      "words": 4583,
       "quiz": {
         "q": "Which pair denotes a type and a value, respectively?",
         "choices": [
@@ -12725,6 +12757,10 @@
         {
           "type": "heading",
           "text": "Pointers and references"
+        },
+        {
+          "type": "paragraph",
+          "text": "How the pass holds and borrows IR objects: pointers for the worklists that must point at instructions, references for the parameters that must not copy them, and the spelling choices between the two."
         },
         {
           "type": "heading",
@@ -12817,6 +12853,10 @@
         {
           "type": "heading",
           "text": "Types and conversion"
+        },
+        {
+          "type": "paragraph",
+          "text": "How C++ chooses and moves types without being told: deduction, the element type a range-for hands you, implicit conversions, and the short-circuit and if-initializer forms the pass relies on."
         },
         {
           "type": "heading",
@@ -12914,6 +12954,10 @@
         {
           "type": "heading",
           "text": "Classes and translation units"
+        },
+        {
+          "type": "paragraph",
+          "text": "How the pass is split into files: namespaces and headers, declaration versus definition, and the class layout that keeps each pipeline stage in its own translation unit."
         },
         {
           "type": "heading",
@@ -13052,7 +13096,7 @@
           ]
         }
       ],
-      "words": 1653,
+      "words": 1742,
       "quiz": {
         "q": "In the declaration static bool build(llvm::Function &F), what does the & do to F?",
         "choices": [

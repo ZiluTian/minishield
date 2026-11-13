@@ -6964,6 +6964,8 @@ Task: Use this reference when a term interrupts your progress. The [Day 1 glossa
 
 ### General CS and compiler concepts
 
+The compiler-background terms the Day 2 lessons build on: the representation invariants (SSA, dominance), the techniques the pass uses (demotion, worklists), and the safety vocabulary (undefined behavior, differential tests) used when judging what a check proves.
+
 ### SSA
 
 See the [Day 1 glossary](#lesson-26) entry "SSA (static single assignment)": every value in LLVM IR is defined exactly once and used only after that definition; merges are handled by PHI nodes instead of redefining names, and `verify` checks the constraint.
@@ -7126,6 +7128,8 @@ Day 2 compares executions in lesson 24 over a defined input domain and records t
 See [differential testing on Wikipedia](https://en.wikipedia.org/wiki/Differential_testing).
 
 ### Project vocabulary
+
+The names this project gives its own machinery — state IDs, the dispatcher, the support contract — so the book, the code, and the terminal output refer to the same objects.
 
 ### State ID
 
@@ -7306,6 +7310,8 @@ Task: Use this document when an LLVM term interrupts your progress. General comp
 
 ### Printed-IR vocabulary
 
+How to read a printed module: what each mark — %, @, :, ;, align — denotes, and which symbols name values, which name blocks, and which name functions.
+
 ### define vs declare
 
 See the [Day 1 glossary](#lesson-26) entry "Declaration vs. definition (function)": a `declare` signature announces a function with no body; a `define` provides the body, and passes only run on definitions — `F.isDeclaration()` detects the former.
@@ -7438,6 +7444,8 @@ See [the syntax section](https://llvm.org/docs/LangRef.html#syntax) in LangRef.
 
 ### Memory
 
+The constructs that decide where a value lives: the PHI this pass demotes, the slots that hold demoted values, and the load/store pair that moves them.
+
 ### PHI
 
 See the [Day 1 glossary](#lesson-26) entry "PHI node / phi": at a block’s entry a PHI picks which value flows in from which predecessor — `%x = phi i32 [ 1, %left ], [ 2, %right ]` — because SSA forbids redefining a value’s name at a merge point.
@@ -7540,6 +7548,8 @@ See [aggregate types](https://llvm.org/docs/LangRef.html#aggregate-types) in Lan
 
 ### Control flow
 
+The instructions that end a block and choose the next one: every edge in the graph is defined by a terminator, and the pass rewrites exactly these.
+
 ### Terminator
 
 See the [Day 1 glossary](#lesson-26) entry "Terminator": the last instruction of a basic block, which transfers control (`br`, `switch`, `ret`, `unreachable`, …); Day 1’s policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only.
@@ -7611,6 +7621,8 @@ Lesson 15 finishes the invalid block with it, and the dispatcher’s default cas
 
 See [the unreachable instruction](https://llvm.org/docs/LangRef.html#unreachable-instruction) in LangRef.
 ### Calls and attributes
+
+How one function may call another, and which flags on the call or the callee change what the compiler may assume — the guard rejects the calls it cannot preserve.
 
 ### call
 
@@ -7786,6 +7798,8 @@ See [functions](https://llvm.org/docs/LangRef.html#functions) in LangRef.
 
 ### Function and block properties
 
+The properties the guard queries before editing: which functions are intrinsics or coroutines, which blocks are address-taken or EH pads, and which terminators the pass rewrites.
+
 ### Intrinsic
 
 See the [Day 1 glossary](#lesson-26) entry "Intrinsic": an operation declared by LLVM itself under the reserved `llvm.` namespace, whose semantics LLVM knows and which is lowered directly to target code; in IR it appears as an ordinary `call`.
@@ -7863,6 +7877,8 @@ std::pair<bool, const char *> check_terminator(const llvm::BasicBlock &BB) {
 See [terminator instructions](https://llvm.org/docs/LangRef.html#terminator-instructions) in LangRef; the whitelist itself is this pass’s design, introduced in lesson 17.
 
 ### The C++ API side
+
+The host-side C++ API the pass uses to read and build the IR, as opposed to the target program the IR describes: the context, the builders, the maps, and the free functions that perform the demotion.
 
 ### isa / cast / dyn_cast
 
@@ -8058,6 +8074,8 @@ Task: Use this document when a C++ term interrupts your progress. LLVM-specific 
 
 ### Pointers and references
 
+How the pass holds and borrows IR objects: pointers for the worklists that must point at instructions, references for the parameters that must not copy them, and the spelling choices between the two.
+
 ### Pointer vs reference
 
 See the [Day 1 glossary](#lesson-26) entry "Reference vs. pointer": a reference is another name for an existing object; a pointer stores an object’s address. Day 2’s worklists store pointers because they must point at the instruction; pass parameters take references because they borrow it.
@@ -8130,6 +8148,8 @@ Lessons 1 and 3 make the collect-then-mutate order explicit; the lesson 12 note 
 See [vector::erase on cppreference](https://en.cppreference.com/w/cpp/container/vector/erase.html) for how erasure invalidates positions.
 
 ### Types and conversion
+
+How C++ chooses and moves types without being told: deduction, the element type a range-for hands you, implicit conversions, and the short-circuit and if-initializer forms the pass relies on.
 
 ### auto deduction
 
@@ -8218,6 +8238,8 @@ Lessons 1–2 introduce the form, and lesson 17 uses it throughout the guard.
 See [if on cppreference](https://en.cppreference.com/w/cpp/language/if.html).
 
 ### Classes and translation units
+
+How the pass is split into files: namespaces and headers, declaration versus definition, and the class layout that keeps each pipeline stage in its own translation unit.
 
 ### namespace
 
