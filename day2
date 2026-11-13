@@ -3588,6 +3588,165 @@ isStaticAlloca() encodes LLVM’s entry/constant-size rule, including restrictio
 
 The full reference rejects non-scalar instruction results, naked functions, inline assembly calls, convergent calls, operand bundles, returns_twice, musttail, and intrinsic calls. Explain the reason for each before relaxing it; rejection is a defined limitation, not a bug to hide.
 
+### Study-session walkthrough — operation, result, and storage are different
+
+These are the smaller steps used in our live lesson. Write each guard inside the existing instruction loop in FunctionEligibility::check, then test it before adding the next. Eligibility inspects the original IR without changing it; the flattening pass must call it before demotion.
+
+```llvm
+%sum = add i32 %x, 1
+%slot = alloca i32
+store i32 %sum, ptr %slot
+%loaded = load i32, ptr %slot
+```
+
+This is an illustrative instruction fragment, not a complete function. add computes a 32-bit integer. alloca reserves storage for an i32 but produces a pointer to that storage. store writes an integer through the pointer and produces no result. load reads an integer through the pointer and defines a new i32 result. The memory contents can change, although each named SSA instruction result still has one static definition.
+
+| Question | Example API | What it asks |
+| --- | --- | --- |
+| Which operation is this? | llvm::isa<llvm::AllocaInst>(I) | Is the instruction an allocation? |
+| What result does it produce? | I.getType()->isPointerTy() | Is its result a pointer? |
+| What element does this allocation reserve? | allocation->getAllocatedType()->isIntegerTy(32) | Is the allocated element i32? |
+
+Do not confuse I.getType() with the allocated element type. For %slot = alloca i32, I.getType() is ptr. Integer arithmetic and an integer load can both produce i32 while being different operations.
+
+### Study-session walkthrough — why an allocation must dominate its uses
+
+```llvm
+define i32 @nonentry_alloca() {
+entry:
+  br label %allocate
+allocate:
+  %slot = alloca i32
+  store i32 7, ptr %slot
+  br label %read
+read:
+  %value = load i32, ptr %slot
+  ret i32 %value
+}
+```
+
+define starts a function returning i32; the empty parentheses mean no arguments. Each colon starts a basic block. br label %allocate transfers execution to that block. %slot names the address returned by alloca; store i32 7, ptr %slot writes 7 into that address. The next branch reaches read, where load reads the stored integer. ret returns it, so the original program returns 7.
+
+Originally every route to read passes through allocate. Dispatcher edges can create a route to read that bypasses allocate, so the pointer definition no longer dominates its use. Excluding allocations from the ordinary value-demotion worklist does not repair this relationship. Our prototype rejects allocations that are not supported static entry allocations.
+
+```cpp
+if (const auto *allocation = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
+    if (!allocation->isStaticAlloca())
+        return {false, "only static entry allocas are supported"};
+}
+```
+
+dyn_cast returns a typed pointer to the existing instruction, or nullptr for another instruction class. isStaticAlloca checks LLVM’s static-entry allocation classification; it is not merely a test for the word alloca. Entry storage executes once per function invocation. Hoisting arbitrary allocations yourself could change allocation frequency or lifetime, so rejection is the current policy.
+
+### Study-session walkthrough — build the result-type guard
+
+LLVM supports more value types than this prototype promises to transform. We deliberately accept ordinary integer, floating-point, and pointer results, plus operations with no result. This is a conservative support boundary, not a claim that LLVM cannot store structures or vectors.
+
+```cpp
+const auto *type = I.getType();
+const bool supported =
+    type->isVoidTy() || type->isIntegerTy() ||
+    type->isFloatingPointTy() || type->isPointerTy();
+if (!supported)
+    return {false, "only scalar instruction results are supported"};
+```
+
+Each method returns a C++ bool. The || operators mean any one category is allowed; !supported means no category matched. const auto * borrows the LLVM Type object without allowing mutation through that pointer. This is compiler-side inspection, not a target-program instruction.
+
+| Instruction | Result type | Decision at this guard |
+| --- | --- | --- |
+| %sum = add i32 %x, 1 | i32 | Accept. |
+| %slot = alloca i32 | ptr | Accept here; the separate allocation guard still applies. |
+| store i32 %sum, ptr %slot | void | Accept the operation, although it has no result to demote. |
+| %pair = insertvalue { i32, i32 } zeroinitializer, i32 %x, 0 | { i32, i32 } | Reject this aggregate result. |
+
+Eligibility and worklist filtering answer different questions. A void store is an allowed operation, so eligibility accepts it. During ordinary value demotion we skip it because there is no produced value to spill. Rejecting every void result would incorrectly reject stores, branches, and returns.
+
+```llvm
+define i32 @aggregate_result(i32 %x) {
+entry:
+  %pair = insertvalue { i32, i32 } zeroinitializer, i32 %x, 0
+  %first = extractvalue { i32, i32 } %pair, 0
+  ret i32 %first
+}
+```
+
+The braces { i32, i32 } describe a structure with two integer fields, not a control-flow block. zeroinitializer supplies zero for both fields. insertvalue creates a new aggregate with field 0 replaced by x; extractvalue reads field 0 from that aggregate, without a pointer or memory load. The original function returns x. Our guard rejects %pair because the result is a structure, even though %first and the function’s return type are i32.
+
+### Study-session walkthrough — an intrinsic is a special operation expressed as a call
+
+An LLVM intrinsic has semantics defined by LLVM rather than an ordinary user-supplied function body. Many are represented with call instructions naming llvm.* functions. The call is the instruction; the intrinsic identifies the operation it invokes. Intrinsics can describe arithmetic, memory, lifetime, coroutine, and other operations with different constraints.
+
+```llvm
+declare i32 @llvm.ctpop.i32(i32)
+
+define i32 @count_bits(i32 %x) {
+entry:
+  %count = call i32 @llvm.ctpop.i32(i32 %x)
+  ret i32 %count
+}
+```
+
+declare supplies a signature without a body. @llvm.ctpop.i32 is a module-level name for the intrinsic that counts set bits in an i32. define starts our ordinary wrapper function. Its i32 %x argument is supplied by a caller; call passes that value to the intrinsic and binds the returned i32 to %count. ret returns that result. For x = 7, binary 111, the answer is 3.
+
+A scalar result does not establish that every operation is supported by our control-flow rewrite. We reject explicit intrinsic calls conservatively until their individual semantics are covered. This does not mean every intrinsic is unsafe. The ordinary recursive call in recursion.ll remains outside this blanket intrinsic restriction.
+
+```cpp
+if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(&I)) {
+    if (intrinsic->getCalledFunction()->getName().starts_with("llvm.coro."))
+        return {false, "coroutine intrinsic is unsupported"};
+    return {false, "intrinsic calls are outside this prototype's scope"};
+}
+```
+
+Keep the specific coroutine diagnostic first, then reject the other intrinsic calls. This incremental version uses IntrinsicInst; the full reference below recognizes intrinsic callees within its broader CallBase checks. Both implement the conservative policy, while the full version also checks other special call forms.
+
+### Study-session walkthrough — musttail is a requirement, not a hint
+
+```llvm
+declare i32 @callee(i32)
+
+define i32 @forward(i32 %x) {
+entry:
+  %result = musttail call i32 @callee(i32 %x)
+  ret i32 %result
+}
+```
+
+Here @callee is an ordinary declared function, not an intrinsic. musttail modifies the call and requires a tail-call transfer under LLVM’s rules. The function returns its result immediately. This is a stronger contract than an ordinary call that can return to surrounding code and continue doing work.
+
+The required call/return relationship constrains the instructions permitted between them, with limited exceptions in LLVM’s rules. A generic spill or CFG rewrite must not insert arbitrary work there. Our prototype rejects musttail before any edit instead of promising to preserve those constraints. The unchanged example is valid; the rejection is about the transformation’s scope.
+
+```cpp
+if (const auto *call = llvm::dyn_cast<llvm::CallInst>(&I)) {
+    if (call->isMustTailCall())
+        return {false, "musttail calls are unsupported"};
+}
+```
+
+CallInst recognizes the call instruction class; isMustTailCall asks whether this particular call carries the mandatory marker. An ordinary call passes this check. This is separate from the intrinsic check because an ordinary function can be the target of a musttail call.
+
+### Verify these guards independently
+
+Write each complete module above as a separate test input: nonentry-alloca.ll, aggregate-result.ll, intrinsics.ll, and musttail.ll under tests/ir/. These are suggested learner-written fixtures, not files the book silently creates. The instruction fragment at the start is not a standalone fixture. Build first, then verify each original fixture and run the plugin. Exact diagnostics below apply to the incremental guards shown here; the full reference uses some broader wording.
+
+```bash
+cmake --build build
+opt -passes=verify -disable-output tests/ir/musttail.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/musttail.ll -o build/musttail-checked.ll
+```
+
+| Fixture | Expected rejection |
+| --- | --- |
+| nonentry-alloca.ll | only static entry allocas are supported |
+| aggregate-result.ll | only scalar instruction results are supported |
+| intrinsics.ll | intrinsic calls are outside this prototype's scope |
+| musttail.ll | musttail calls are unsupported |
+
+For each rejection, the original program and emitted program must be identical after canonical printing through opt. No new allocations, spill operations, or dispatcher blocks should appear. Repeat positive checks on loop.ll and recursion.ll so a too-broad condition does not reject supported input. The next checks cover additional special call semantics; these four rules do not complete the support contract by themselves.
+
 ### The full eligibility reference
 
 ```cpp
