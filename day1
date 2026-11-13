@@ -236,6 +236,11 @@ Task: Small writing step: Point to one file belonging to the plugin and one file
 
 Checkpoint: Explain what opt -disable-output suppresses: it prevents writing the transformed module, not compiler-side diagnostic printing. Before writing a pass, be able to name which program each code example belongs to.
 
+### Model answer
+
+1. `-disable-output` suppresses the output module: `opt` keeps the IR in memory and writes nothing — no `-o` file, no printed IR. It does not suppress compiler-side diagnostic printing: the pass's `llvm::errs()` reports still reach stderr, which is exactly why the flag is used when you only want the diagnostics the pass printed.
+2. There are two programs to keep separate. The compiler-side plugin — your C++ pass sources (`lib/Plugin.cpp`, `lib/FlatteningPass.cpp`) that the compiler/linker turn into `build/libMiniShield.so` — is the code that runs *inside* `opt`. The target program — the LLVM IR module (for example `tests/ir/phi.ll` or `tests/ir/minishield-input.ll`) — is the program `opt` inspects or rewrites. So printing a message in `StatsPass` executes inside `opt`, while creating an `add` instruction inserts a computation for the target program to execute later; a successful plugin build does not by itself run either one.
+
 0. Create the minishield Conda environment
 ==========================================
 
@@ -313,6 +318,13 @@ LIBRARY_PATH supplies link-time library search paths used by the compiler driver
 
 Checkpoint: distinguish these four operations: install the environment, activate the environment, configure the project with CMake, and build the project with Ninja. They are separate steps.
 
+### Model answer
+
+1. Install the environment: `conda env create -f environment.yml` (the recorded session used `conda create -y -n minishield -c conda-forge clang lld llvmdev gtest cmake ninja`) downloads prebuilt packages into a separate prefix. It compiles nothing and changes no shell.
+2. Activate the environment: `conda activate minishield` changes only the current shell — it puts the environment's `bin/` at the front of `PATH` and sets `CONDA_PREFIX`, so commands resolve to the environment's tools (the LLVM 23.1.5 release, including `clang++-23` rather than a plain `clang++`). Activation does not compile the project, and a new terminal starts unactivated.
+3. Configure with CMake: `cmake -G Ninja -S . -B build ...` reads `CMakeLists.txt`, locates the installed LLVM through `-DLLVM_DIR` / `find_package(LLVM REQUIRED CONFIG)`, and *generates* `build/build.ninja`. It does not compile anything itself.
+4. Build with Ninja: `cmake --build build` executes the generated instructions, compiling only the changed files and linking `build/libMiniShield.so`.
+
 ### Study-session walkthrough — activation selects tools; the manifest describes their installation
 
 Treat environment.yml as the package recipe and activation as a change to the current shell’s tool selection. If minishield already exists, inspect its tools before recreating anything. A working environment and a configured project build are separate prerequisites.
@@ -331,6 +343,11 @@ environment.yml records the named environment and its dependencies. Creating it 
 Task: Small writing step: Inspect the existing environment and tool versions first. Read the manifest entries before changing any package; do not create a second environment merely to repeat a successful setup.
 
 Checkpoint: Check that the selected opt/llvm-config report the intended LLVM 23 toolchain. When linking with this Conda setup, also set LIBRARY_PATH as the setup section explains; activation and compiler library search are distinct pieces of the configuration.
+
+### Model answer
+
+1. After `conda activate minishield`, check what the shell actually selected: `command -v opt` should point inside `$CONDA_PREFIX/bin`, and `opt --version` and `llvm-config --version` should both report the intended 23.1.5 release. A fresh terminal can silently fall back to different (host) tools, which is why you verify the selected tools instead of assuming the activation worked.
+2. Before linking, `export LIBRARY_PATH="$CONDA_PREFIX/lib"` adds that directory to the conda clang driver's *link-time* `-L` search, because its default search paths (the gcc-layout directories and the sysroot) do not include where the `libstdcxx` package installed `libstdc++.so`; without it the link fails with `x86_64-conda-linux-gnu-ld: cannot find -lstdc++`. Activation (which `PATH` entries the shell uses) and `LIBRARY_PATH` (which directories the driver searches at link time) are distinct pieces of configuration, and `LIBRARY_PATH` is different from `LD_LIBRARY_PATH` (runtime library loading) and from `LLVM_DIR` (where CMake finds `LLVMConfig.cmake`).
 
 1. Understand what CMake is configuring
 =======================================
@@ -499,6 +516,11 @@ record of decisions it does.
 
 Checkpoint: explain why finding a header and linking a library are separate
 operations. Including a declaration does not supply compiled implementation.
+
+### Model answer
+
+1. Headers are declarations, not code: `target_include_directories(MiniShield PRIVATE ${LLVM_INCLUDE_DIRS} ...)` only adds LLVM's header directories (as `-I` options) to the compiler's search paths, so source files can name LLVM types and functions and be type-checked. Including a header does not link LLVM's implementation — a declaration is not code, so this line alone leaves the target unable to resolve LLVM's symbols.
+2. Linking is the separate operation that supplies the implementation: `target_link_libraries(MiniShield PRIVATE LLVM)` resolves the imported `LLVM` target (declared by `find_package(LLVM REQUIRED CONFIG)`) to the prebuilt `libLLVM-23.so`, and its machine code satisfies the symbol references the compiler emitted. The two lines answer different questions — where are the declarations, versus where is the compiled library code — and because it links the same library `opt` already loads, the process ends with one LLVM, not two.
 
 ### Deep dive: Why `find_package(LLVM REQUIRED CONFIG)`?
 
@@ -738,6 +760,11 @@ Task: Small writing step: Explain each line against the error it could address: 
 
 Checkpoint: Reconfigure after changing CMake and rebuild. Finding LLVMConfig.cmake discovers package information; it does not magically compile missing project .cpp files or teach opt a pipeline name.
 
+### Model answer
+
+1. Reconfigure (`cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$CONDA_PREFIX/bin/clang++-23" -DLLVM_DIR="$CONDA_PREFIX/lib/cmake/llvm"`) should complete with CMake reporting that configuration and generation succeeded — it prints `Found llvm 23.1.5 at ...`, and the `Could NOT find ZLIB / LibXml2 / zstd` warnings are harmless — and then `cmake --build build` recompiles the changed files and relinks `build/libMiniShield.so`.
+2. That result proves only the discovery step: finding `LLVMConfig.cmake` fills in `LLVM_INCLUDE_DIRS`, `LLVM_DEFINITIONS`, and the imported `LLVM` target. It does not compile project `.cpp` files you forgot to list in `add_library` (the source list decides what is compiled and linked into the plugin), and it does not teach `opt` any pipeline name (that comes from the parsing callback in `Plugin.cpp`). The real check comes after: an `opt` run with `-load-pass-plugin` and the named pass must recognize the name and run.
+
 2. Generate the build instructions before trying to build
 =========================================================
 
@@ -837,6 +864,11 @@ Task: Small writing step: Run configuration first and resolve its first real fai
 
 Checkpoint: The later “ninja: no work to do” message means the build graph considers its outputs up to date; it is not a test result. Run an opt smoke/verification command next rather than interpreting an unchanged build as proof of correct behavior.
 
+### Model answer
+
+1. `ninja: no work to do` means the build graph considers its outputs up to date — no source file is newer than the `build/libMiniShield.so` the earlier build produced. It is not a test result, nor an indication that the plugin succeeded or failed; it simply means there was nothing left to compile or link.
+2. So the next step is a behavioral check, not another build: run an `opt` smoke/verification command, for example `opt -load-pass-plugin="$PWD/build/libMiniShield.so" -passes='function(minishield-flatten),verify' -S tests/ir/minishield-input.ll -o build/minishield-output.ll`. You expect the plugin to load, the stub to print `[MiniShield] function: add_one, blocks: 1`, and `verify` to pass. Only that run shows the pass actually executes; an unchanged build shows only that nothing needed rebuilding.
+
 3. Split the plugin into an entry point and a pass
 ==================================================
 
@@ -911,6 +943,12 @@ This is a file-role sketch. Each .cpp is compiled as a translation unit; it must
 Task: Small writing step: Write/check the header interface first, include it from both users, then supply exactly one matching method definition. Read compiler diagnostics around complete C++ statements and aggregate initializers.
 
 Checkpoint: A successful link establishes that referenced definitions were supplied. Loading the module and recognizing a pipeline name are subsequent checks. Keep those layers separate when locating the next error.
+
+### Model answer
+
+1. A successful link establishes one thing and only one: every symbol the plugin referenced was supplied — `lib/Plugin.cpp` and `lib/FlatteningPass.cpp` compiled, and the definitions (for example `FlatteningPass::run` and the aggregate returned from `llvmGetPassPluginInfo`) resolved into `build/libMiniShield.so`.
+2. Loading the module and recognizing a pipeline name are subsequent, separate checks: loading is `opt` `dlopen()`-ing the `.so` through `-load-pass-plugin` and calling the exported `llvmGetPassPluginInfo()` entry point; recognition is the `registerPipelineParsingCallback` callback matching `minishield-flatten` and calling `FPM.addPass(minishield::FlatteningPass())`.
+3. Keep those layers separate when locating the next error: a link error (an unresolved definition) points at the C++ sources or the CMake source list; a load failure points at the `.so` path or the plugin's exported entry point; an unknown-function-pass error points at the registration callback or the spelling in the `-passes` string. A green link proves none of the later layers, so it must not make you skip them.
 
 4. Choose optional or required pass behavior explicitly
 =======================================================
@@ -991,6 +1029,11 @@ Task: Small writing step: Choose and explain the mixin for each pass. Leave pars
 
 Checkpoint: Use an optnone fixture to check skipping behavior once registration works. Do not treat “required” as meaning the pass is always present in every compiler pipeline, automatically loaded, or semantically necessary for the target program to run.
 
+### Model answer
+
+1. Once registration works, exercise the skipping policy on the `optnone` fixture: run `minishield-stats` over `tests/ir/instruction-kinds.ll` — its `without_optimization` function carries `optnone`, and because `StatsPass` inherits `RequiredPassInfoMixin` (`isRequired()` is true) the pass still runs there and must produce its report. Run the optional `minishield-flatten` on the same input: declared with `OptionalPassInfoMixin`, it may be skipped on that `optnone` function, so one fixture demonstrates both behaviors.
+2. `required` is only a skipping policy, not a presence guarantee: it decides whether normal pass-skipping mechanisms may skip the pass, but it does not load the plugin (that is `-load-pass-plugin`), register the pipeline name (that is the parsing callback), or schedule the pass automatically — required does not automatically add the pass to a pipeline; it must still be registered and scheduled. It is also unrelated to the target program: the pass is an inspection tool `opt` runs, and nothing about the program's own behavior requires it.
+
 5. Register the pass name that opt will recognize
 =================================================
 
@@ -1016,6 +1059,13 @@ unexpected nested pipelines by checking InnerPipeline.
 
 Checkpoint: trace how the string minishield-flatten results in constructing
 FlatteningPass and adding it to the function pass manager.
+
+### Model answer
+
+1. Before any parsing happens, `opt` loads `build/libMiniShield.so` through `-load-pass-plugin` (`dlopen`) and calls the exported `llvmGetPassPluginInfo()`. The returned `PassPluginLibraryInfo` includes the callback that calls `PB.registerPipelineParsingCallback(...)`, which installs the function-pipeline parsing callback with the `PassBuilder`.
+2. When the pipeline parser reaches the element inside `function(minishield-flatten)`, it hands the name `minishield-flatten` to the registered callback, together with the `FunctionPassManager` (`FPM`) and the inner pipeline (empty for a simple name).
+3. The callback first rejects an unexpected nested pipeline (`if (!InnerPipeline.empty()) return false;`), then compares `Name == "minishield-flatten"`. On a match it executes `FPM.addPass(minishield::FlatteningPass())` — constructing the pass object and scheduling it in the function pass manager — and returns `true`; any other name returns `false`, and the parser reports the element as unknown.
+4. When the pipeline later runs, the function pass manager invokes `FlatteningPass::run(F, AM)` once per function — that is where the string becomes behavior: the string names nothing by itself, and only the callback's `addPass` turns it into a concrete pass instance.
 
 ### Define the three stub files to turn the crank
 
@@ -1126,6 +1176,11 @@ Task: Small writing step: Add one recognized name and ensure its declaration is 
 
 Checkpoint: A typo in the command string, an unregistered name, or a stale plugin can all look like an unknown-pass failure. Loading the shared library successfully proves only that loading worked, not that this callback recognized the requested pipeline element.
 
+### Model answer
+
+1. The three causes converge on the same symptom — an unknown-function-pass error: a typo in the `-passes` string means the name never matches the callback's comparison; an unregistered name means the class exists but the callback has no branch that adds it (defining a class alone does not register it); a stale plugin means the `cmake --build build` after the registration edit failed, leaving the previous `.so` on disk, which `opt` loads without complaint but whose callback lacks the new branch.
+2. A successful load proves only the load-time relationship: that `dlopen` found the `.so` and its exported `llvmGetPassPluginInfo` ran. Recognition of the pipeline element is a separate, later step inside the parsing callback, and load success tells you nothing about it. So on an unknown-pass failure, check the layers in order: the command string's spelling, the callback's branch (including that `Plugin.cpp` includes the pass header), and that the plugin was actually rebuilt after the registration change.
+
 6. Run a small smoke input and distinguish validity from correctness
 ====================================================================
 
@@ -1176,6 +1231,14 @@ The shell quotes keep the pipeline as one argument. function(...) wraps a functi
 Task: Small writing step: Correct only the unmatched bracket/parenthesis first, then rerun the smoke command after a successful build.
 
 Checkpoint: Distinguish pipeline-parse failure, plugin-load failure, verifier failure, and wrong program results. A well-formed unchanged stub can pass verify, and a well-formed wrong transformation can too. The before/after example and later behavioral tests answer different questions.
+
+### Model answer
+
+1. Pipeline-parse failure: the `-passes` string is not valid pipeline syntax — the observed error was an extra closing bracket in `function(minishield-flatten)]`. `opt` rejects it before running any pass, because pipeline syntax must be valid before LLVM can run anything.
+2. Plugin-load failure: `opt` cannot load the `.so` named by `-load-pass-plugin` (missing file, wrong path, or an incompatible plugin export). This fails at load time, before the pipeline is even parsed.
+3. Verifier failure: `verify`, the built-in pass that checks structural rules (types, SSA constraints, PHI incoming edges, return types), rejects IR that the pipeline produced — the pass emitted structurally invalid IR.
+4. Wrong program results: the IR passes `verify` yet behaves differently from the input — a well-formed wrong transformation.
+5. The last two are indistinguishable to `verify`, which is the point of the checkpoint: an unchanged stub and a wrong-but-valid rewrite both pass it, so validity says nothing about behavior. The before/after example answers “did this pass change anything?” (for a read-only pass the IR must stay unchanged), while later behavioral tests answer “does the transformed program still compute the same results?” — different questions, different evidence.
 
 ### LLVM program before and after this checkpoint
 
@@ -1253,6 +1316,11 @@ implementation of the traversal.
 Checkpoint: compare the declaration with the later definition. Class name,
 namespace, parameter types, and return type must agree.
 
+### Model answer
+
+1. The header declares the interface: class `StatsPass` in `namespace minishield`, publicly inheriting `RequiredPassInfoMixin<StatsPass>`, with the public method `llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &AM);`. It says `run` borrows a mutable `Function` and an analysis manager and returns preservation information — a promise made to both `Plugin.cpp` and `StatsPass.cpp`.
+2. The out-of-line definition in `lib/StatsPass.cpp` must agree with it on all four axes: the namespace (`minishield`), the class name (`StatsPass`), the parameter types (`Function &` and `FunctionAnalysisManager &`, in that order), and the return type (`PreservedAnalyses`). The compiler matches the definition to the declaration exactly on these, which is why the lesson says to check the declaration against the intended definition before adding counting logic — any deviation (a value instead of a reference parameter, a missing `minishield::` qualifier, a different return type) is a compile error.
+
 ### Study-session walkthrough — finish a small interface before solving its behavior
 
 Start StatsPass with a small header interface, then supply its implementation and registration separately. Completing a class declaration does not provide the method definition or add a name to the loaded plugin.
@@ -1270,6 +1338,11 @@ This public declaration belongs in the pass class. It says run borrows a mutable
 Task: Small writing step: Check the declaration against the intended definition before adding counting logic. Include the header in the implementation and plugin source.
 
 Checkpoint: A header can compile in one file while another translation unit still lacks its include. The next integration lesson handles the namespace-member error and unknown pipeline name separately; neither should be “fixed” by duplicating the class definition in Plugin.cpp.
+
+### Model answer
+
+1. Each `.cpp` is compiled as its own translation unit and sees only the declarations it includes: `StatsPass.cpp` can compile fine with `#include "minishield/StatsPass.h"` while `Plugin.cpp` — which forgot that include (or included `FlatteningPass.h` twice instead) — fails with “no member named 'StatsPass' in namespace 'minishield'”. The CMake source list supplies the implementation at link time; it does not replace includes at compile time.
+2. The two integration errors are separate, and each has its own fix: the namespace-member error is a compile-time visibility problem (add the include in `Plugin.cpp`), and the unknown pipeline name is a registration problem (extend the parsing callback to `FPM.addPass(minishield::StatsPass())` and rebuild the `.so`). Duplicating the class definition in `Plugin.cpp` would fix neither: it breaks the single-definition rule (the same class defined in two translation units), and the callback would still have no name registered — so neither error should be “fixed” that way.
 
 8. Count blocks and instructions before classifying instructions
 ================================================================
@@ -1295,6 +1368,11 @@ has changed. Using const references makes the read-only intent visible.
 Checkpoint using phi.ll: merge has four blocks and five instructions:
 three branches, one PHI, and one return.
 
+### Model answer
+
+1. Run the stats pass on `tests/ir/phi.ll` and check the report for function `merge`: four blocks (`entry`, `left`, `right`, `join` — `F.size()` supplies the block count) and five static instructions in total: three branch instructions (the conditional `br i1 %condition, label %left, label %right` in `entry`, plus the unconditional `br label %join` in each of `left` and `right`), one PHI (`%value = phi i32 [ 10, %left ], [ 20, %right ]` in `join`), and one return (`ret i32 %value` in `join`).
+2. That count is what a hand count gives you: read labels for blocks and actual instruction lines for instructions — the `; preds = ...` text is a printer comment, not an instruction. The report is only correct if the traversal visits every block and every instruction exactly once (the nested `for (const llvm::BasicBlock &BB : F)` / `for (const llvm::Instruction &I : BB)` loop), so a wrong total points at the traversal before you add any classification.
+
 ### Study-session walkthrough — the function manager already chose the function
 
 Count blocks and instructions before classifying opcodes. A small initial traversal gives you an independent checkpoint: if the total is wrong, investigate traversal before adding more counters that depend on it.
@@ -1313,6 +1391,11 @@ This fragment belongs inside run(). F is already the function selected by LLVM�
 Task: Small writing step: First report only the block total and instruction total. Hand-count phi.ll before adding any classification branch or switch.
 
 Checkpoint: The fixture has four blocks and five instructions. Count static instructions, not runtime visits: a loop can execute one static instruction many times. Printing diagnostics and incrementing C++ counters should leave canonical LLVM output unchanged.
+
+### Model answer
+
+1. Counting is static, not dynamic: the counters count what is written in the IR, so one static instruction may execute many times at runtime (in a loop, the body's `add` runs once per iteration but counts once). That is why the counts are properties of the fixture, predictable by hand, and independent of any input.
+2. The traversal must not touch the program: `StatsPass` only prints to `llvm::errs()` (stderr) and increments C++ counters in host memory — it inserts, deletes, or rewrites no instruction, and returns `PreservedAnalyses::all()` because no IR changed. So the canonical LLVM output is identical with and without the pass, and the diagnostic lines never mix into the IR stream.
 
 ### LLVM program before and after this checkpoint
 
@@ -1438,6 +1521,14 @@ Task: Small writing step: Check the include, target source list, and callback br
 
 Checkpoint: Classify the failure by stage: compiler visibility, linker definition, loader, or parser. Do not read an unknown-pass error from a stale .so as evidence that your newly edited callback was actually tested.
 
+### Model answer
+
+1. Compiler visibility: “no member named 'StatsPass' in namespace 'minishield'” means `Plugin.cpp`'s translation unit lacks the declaration. The fix is `#include "minishield/StatsPass.h"` in that file; the CMake list is irrelevant here.
+2. Linker definition: an undefined-reference error at link time means the `.cpp` that defines the missing symbol is not in `add_library`'s source list. The fix is adding it to the target — the source list decides what is compiled and linked into the plugin.
+3. Loader: `opt` fails to load the `.so` (wrong path, or a failed build left no usable file at `build/libMiniShield.so`). This is a `dlopen`-time problem that happens before any pass name is parsed.
+4. Parser: “unknown function pass 'minishield-stats'” means the loaded plugin's parsing callback did not recognize the name — it is not registered, or the pipeline string is misspelled.
+5. The stale-`.so` warning: a failed build leaves the previous `libMiniShield.so` on disk, and it loads successfully. An unknown-pass error seen through that old file does not test your newly edited callback at all, because the new callback was never compiled into it. Rebuild successfully first, then rerun `opt` — only then does the error, or its absence, say anything about the new registration.
+
 10. Add instruction classifications in small increments
 =======================================================
 
@@ -1515,6 +1606,12 @@ This is a classification fragment inside the instruction traversal. A case choos
 Task: Small writing step: Implement the two branch cases first using Instruction.def from this installation, then add the remaining opcodes and their report fields.
 
 Checkpoint: On phi.ll expect one conditional and two unconditional branches. Its conditional contributes two CFG edges but only one branch instruction. Confirm every requested counter is printed and that a switch fixture alone increments the switch count.
+
+### Model answer
+
+1. On `tests/ir/phi.ll` expect one conditional branch and two unconditional branches: `entry` holds `br i1 %condition, label %left, label %right` (opcode `CondBr`), and `left` and `right` each hold `br label %join` (opcode `UncondBr`) — three `br` instructions total, in this installation's LLVM 23 spelling (there is no `Instruction::Br`; `llvm/IR/Instruction.def` lists the authoritative names).
+2. The conditional branch contributes two CFG edges — `entry -> left` and `entry -> right` — because `llvm::successors(&BB)` yields both possible destinations, but it is still only one branch instruction. Instructions and edges are different measures: `phi.ll` has three branch instructions but four outgoing edges in total, which is why branch instructions are not the same as successor edges.
+3. Confirm that every requested counter is printed — including the zeros (the observed omission was that `switches` was counted but initially absent from the printed report) — and that the switch classification works in isolation: the switch fixture (`tests/ir/switch.ll`, function `select_case`) contains a `switch` and no `br`, so its report must increment only the switch counter (one switch, three returns, zero branches), which also catches a missing-`break` fallthrough that would leak a branch count into the switch counter.
 
 ### LLVM program before and after this checkpoint
 
@@ -1737,6 +1834,12 @@ Task: Small writing step: Write the expected row for one fixture before running 
 
 Checkpoint: A matching table is evidence for these fixture expectations, not a behavior-preservation test. Keep expected counts separate from measured runtime frequency, and add an assertion/failure status when turning the readable report into a real test.
 
+### Model answer
+
+1. The expectations are hand counts — for example `phi.ll`/`merge`: four blocks, one conditional and two unconditional branches, one PHI, one return; `loop.ll`/`count_to`: four blocks, one conditional branch, two unconditional branches, one PHI, one return — computed by reading labels and instruction lines, not by a second copy of the counting algorithm. A report matching that table is evidence the pass *counts* correctly on known fixtures; it is not a behavior-preservation test, which asks whether a transformed program still computes the same results (a property `verify` also does not check).
+2. Expected counts are static — what is written in the IR, fixed in place with the fixture — while measured runtime frequency is dynamic, how often an instruction executes, which depends on the input. Keeping them separate is what makes the expectation knowable by hand before the run, and including fixtures where a field is zero as well as fixtures where it is nonzero is what stops a counter that always prints zero from appearing correct.
+3. The shell loop runs `opt` per file but does not automatically compare the reported numeric counts against expected values — that is a separate testing responsibility. Turning the readable report into a real test means the runner compares each reported field against the hand-counted row and reports an assertion/failure status (a nonzero exit) on mismatch, instead of merely printing a table.
+
 ### LLVM program before and after this checkpoint
 
 Hand-count the loop fixture before comparing the statistics report.
@@ -1890,6 +1993,11 @@ Task: Small writing step: Correct the closing word and run bash -n before execut
 
 Checkpoint: Check a successful input and an intentionally failing command. A nice table must not hide nonzero opt status, and running all files does not assert their expected counts unless the runner actually compares them.
 
+### Model answer
+
+1. `llvm::errs()` writes to stderr, so the runner captures diagnostics with `output=$(opt ... 2>&1)` and the `if` checks `opt`'s exit status: on success it parses and prints the report lines; on failure it must show the file and the diagnostic and then exit with failure. A verifier failure must remain a failure, not become a plausible empty table row — and you can only prove that path works by exercising it with an intentionally failing command, alongside a successful input.
+2. The table (built by `awk -F ', '` over the `[MiniShield] function: ` lines, printing `key=value` only for nonzero fields) displays measured values. Running all files under `tests/ir/*.ll` still does not assert their expected counts, because nothing compares the printed fields to the hand-counted expectations — without that comparison and a failure status, the runner exits 0 even when every count is wrong.
+
 13. Check that inspection preserves the IR
 ==========================================
 
@@ -1933,6 +2041,11 @@ Both commands parse/print the same original input, so harmless differences betwe
 Task: Small writing step: Run the comparison after a successful rebuild. Keep these generated files under build/; the book’s sample output is not a reason to commit before/after artifacts.
 
 Checkpoint: State what this establishes and what it does not: unchanged IR is expected for stats, whereas a real flattener should change accepted input and needs other correctness evidence.
+
+### Model answer
+
+1. What it establishes: the stats pass is read-only. The comparison prints canonical LLVM output of `tests/ir/phi.ll` with and without the pass — both through LLVM's printer, so formatting differences between the handwritten source and printed IR do not confuse the comparison — and `diff -u build/phi-before.ll build/phi-after.ll` is empty, so the inspection changed no IR at all. That is consistent with returning `PreservedAnalyses::all()`: a promise that cached facts remain valid because nothing was touched.
+2. What it does not: the empty diff says only that this pass touched nothing; it is not a general behavior-preservation proof, and it does not run the verifier. A real flattener has the opposite expectation — it should change accepted input, restructuring the CFG into a dispatcher — so for it an empty diff would be the wrong result, and it needs other correctness evidence (behavioral tests of the transformed program), generally returning `PreservedAnalyses::none()` unless particular analyses are explicitly maintained.
 
 ### LLVM program before and after this checkpoint
 
@@ -2040,6 +2153,11 @@ as predecessors; entry has none in this fixture. Printing block names is
 helpful for this exercise, but names are not guaranteed to exist on all LLVM
 blocks and should not be used as the graph's identity.
 
+### Model answer
+
+1. Predecessors reverse the successor relationship: in `phi.ll` the successor edges are `entry -> left`, `entry -> right`, `left -> join`, `right -> join`, so `join` has `left` and `right` as predecessors — the two blocks with an edge into it, the same pairs that feed its PHI — while `entry` has no predecessor in this fixture, because no edge goes into it; it is the function entry.
+2. Printing block names is helpful for the exercise because you can check the report against the fixture's labels (`entry`, `left`, `right`, `join`), but names are not guaranteed to exist on all LLVM blocks. So names are a display convenience, not the graph's identity: the reusable `BlockInfo` records identify blocks by pointer, not by name.
+
 ### Study-session walkthrough — one branch instruction can represent two graph edges
 
 Draw the successor/predecessor relation for phi.ll before interpreting its report. The conditional entry has two destinations, left/right both lead to join, and join’s predecessor print order need not match a left-to-right drawing.
@@ -2056,6 +2174,12 @@ This is a graph sketch, not runnable LLVM syntax. entry ends in one conditional 
 Task: Small writing step: Draw each successor edge from the report, then annotate the final opcode of every block. Add terminator reporting after the basic successor report works.
 
 Checkpoint: For the diamond, predict entry’s br, left/right’s br, and join’s ret before running. Do not require join’s predecessors to print in a particular order; compare the relation itself. Use the existing interactive diamond to trace both outcomes.
+
+### Model answer
+
+1. Before running, predict each block's final instruction: `entry` ends in the conditional `br i1 %condition, label %left, label %right`; `left` and `right` each end in the unconditional `br label %join`; `join` ends in `ret i32 %value`, so it has no successor. The report should show exactly that — `entry -> left right`, `left -> join`, `right -> join`, `join ->` — and predicting first is what makes the check meaningful rather than reading the program's own output back.
+2. Do not require `join`'s predecessors to print in any particular order: `llvm::predecessors` iteration order is not significant (the fixture's own printer writes `; preds = %right, %left`), so compare the relation itself — that `join` has exactly `left` and `right` as predecessors — rather than the sequence in which the names appear.
+3. Trace both outcomes on the diamond (`phi.ll`): with `condition = true` control goes `entry -> left -> join` and the PHI selects the `[ 10, %left ]` incoming value, returning 10; with `condition = false` it goes `entry -> right -> join` and the PHI selects `[ 20, %right ]`, returning 20. Both paths are data choices on the same static IR — executing either one creates no new blocks or edges.
 
 ### LLVM program before and after this checkpoint
 
@@ -2183,6 +2307,12 @@ must respect analysis invalidation rather than continue using stale data.
 Checkpoint: explain how returning BlockInfo objects will let a future pass
 use the graph without parsing text printed by StatsPass.
 
+### Model answer
+
+1. `StatsPass`'s output is a printed line on stderr (the `[MiniShield] function: ...` report), which a consumer would have to re-parse with brittle text matching — exactly the dependency the `awk` table parser has on the report's field layout. `CFGAnalyzer::run()` instead returns a `Result` of `BlockInfo` records, and each record holds the block pointer plus `std::vector`s of successor and predecessor block pointers, so a future pass reads typed C++ fields directly without parsing text.
+2. The hand-off goes through the analysis manager: after the analysis is registered, a pass requests `AM.getResult<CFGAnalyzer>(F)`, and the manager computes the result once and caches it — the static `AnalysisKey` gives the analysis its unique identity — so repeated requests reuse the same data with no re-traversal and no string parsing.
+3. The records borrow, not copy: the pointers refer to blocks owned by the function, and `Result` neither copies nor owns the blocks. If later transformations change the IR, consumers must respect analysis invalidation rather than keep using stale records.
+
 ### Deep dive: Start a reusable CFG analysis (task 1.3)
 
 A control-flow graph (CFG) treats basic blocks as nodes and possible control
@@ -2279,6 +2409,11 @@ This is a record fragment inside the analysis class. The vector owns its pointer
 Task: Small writing step: Declare the minimal records and run() interface, then provide the single out-of-line AnalysisKey definition in the implementation. Do not add a separate static-key definition to every include site.
 
 Checkpoint: Explain how StatsPass can ask FAM for the result without parsing diagnostic strings. Also explain why a later CFG rewrite cannot keep using stale pointers/relations without respecting analysis invalidation.
+
+### Model answer
+
+1. Asking the FAM: in `Plugin.cpp` the analysis is registered with the function analysis manager (`PB.registerAnalysisRegistrationCallback(...)` wrapping `AM.registerPass([] { return minishield::CFGAnalyzer(); })`), and `StatsPass`'s `run()` then requests it with `const auto &cfg = AM.getResult<CFGAnalyzer>(F);`. The manager computes the result (running `CFGAnalyzer::run` once) and caches it, and `StatsPass` iterates `cfg.blocks` to print the stored block, successor, and predecessor records — consuming the analysis instead of traversing LLVM's CFG again or parsing diagnostic strings.
+2. Stale pointers: the `BlockInfo` records hold pointers into blocks owned by the `Function`, and the successor/predecessor vectors describe the edges as they were when computed. If a later CFG rewrite (the flattener) deletes or inserts blocks and rewires terminators, those cached pointers can dangle and the cached relations no longer describe the IR. The `PreservedAnalyses` contract is the mechanism for this: a pass that changes the IR declares which analyses survive (a CFG rewrite generally returns `PreservedAnalyses::none()`), the manager invalidates the stale results, and consumers must re-request through the manager instead of reusing the old `Result`.
 
 ### LLVM program before and after this checkpoint
 
@@ -2448,6 +2583,12 @@ Recursion cycles between function calls, not blocks within a function. Print loo
 
 Checkpoint: explain why an analysis result is requested by reference, why dominance argument order matters, and why back-edge count is not automatically a loop count.
 
+### Model answer
+
+1. The manager computes the analysis and owns its result, so `getResult<llvm::LoopAnalysis>(F)` hands back a reference to a cached object: binding `const auto &` lets the pass read `loopCount` without copying the loop structure into its own frame, and the result stays alive until the manager invalidates it — which the pass’s `PreservedAnalyses` return governs.
+2. `dominates(D, B)` asks whether D dominates B, so the dominator comes first. The back-edge test needs “does the destination dominate the source”, which is why the loop writes `DT.dominates(successor, &BB)` — destination first, as the deep dive states. Swapped, the call would ask whether the source dominates the destination: the forward-edge relation, false on the loop’s own back edge (in `loop.ll`, `header` dominates `body`, not the other way round), so the test would find no back edges at all.
+3. A back edge is an edge into a header; a natural loop is the set of blocks flowing around it. One loop can be entered by several back edges — any structure with two paths that both return to the header contributes two back edges to a single loop — so the back-edge count counts edges while `LI.getLoopsInPreorder()` counts loops (nested loops included; iterating `LI` directly visits only the top level). The two agree only when every loop has exactly one back edge, as in `loop.ll` (1 and 1); in a graph with multiple entries, cycles that are not natural loops exist in neither count.
+
 ### Deep dive: why `info.block = &BB` but `push_back(successor)` needs no `&`
 
 In the basic analysis you do two different things with blocks: you **walk**
@@ -2484,6 +2625,12 @@ This is the basic run() body fragment. {} initializes each record; &BB obtains t
 Task: Small writing step: Start with block and successor records, check the diamond, then fill predecessors and final opcodes. Add reachable dominator back-edge/LoopInfo queries as the documented extension.
 
 Checkpoint: Expect four records and four edges for phi.ll. On a loop, keep loop count separate from back-edge count: several latch edges can belong to one natural loop. The analysis itself must leave LLVM IR unchanged.
+
+### Model answer
+
+1. For `phi.ll`, `Result.blocks` should contain four `BlockInfo` records — one per basic block (`entry`, `left`, `right`, `join`) — and the recorded successor edges should total four: `entry -> left`, `entry -> right`, `left -> join`, `right -> join`, with the conditional branch contributing two. That matches the hand-drawn diamond: three branch instructions, four outgoing edges.
+2. Keep the two counts separate: a natural loop is defined by its back edge (an edge `A -> B` where `B` dominates `A`), but several latch/back edges can belong to one natural loop, so `result.loopCount` (from `LI.getLoopsInPreorder().size()`) and the `backEdges` vector answer different questions. In `loop.ll` both are 1 (`body -> header` is the only back edge), while `phi.ll` and `recursion.ll` have 0 of each — recursion cycles between function calls, not blocks within a function.
+3. The analysis itself leaves the IR unchanged: `run()` only records addresses, successors, predecessors, and terminator opcodes into the `Result` it returns — no instruction, block, or PHI is inserted into the module. So a canonical before/after comparison stays empty, and the printed records come from the cached analysis rather than a fresh traversal of the target.
 
 ### LLVM program before and after this checkpoint
 
@@ -2641,6 +2788,12 @@ Checkpoint: explain why the guard runs before any transformation, why
 `PreservedAnalyses::all()` is correct on the rejected path, and why an empty
 canonical diff, not a successful `verify`, is what proves a rejected function
 was left untouched.
+
+### Model answer
+
+1. The guard runs first because the flattening pass may only rewrite functions it fully understands: `FunctionEligibility::check(F)` inspects the function and returns `{eligible, reason}`, rejecting conservatively — declarations, presplit coroutine functions, personality routines, coroutine intrinsic calls, address-taken blocks, EH pads, and unsupported terminators (the supported set is `CondBr`, `UncondBr`, `Switch`, `Ret`, `Unreachable`). A negative decision must leave the function intact, and a positive one only permits the later stages to proceed, so in `lib/FlatteningPass.cpp` the decision is requested after the declaration check and the rejection path prints the reason and returns before any transformation code runs.
+2. `PreservedAnalyses::all()` is correct on the rejected path because nothing was edited: the rejection only prints the function name and reason to `llvm::errs()`, so the promise that every cached analysis remains valid is true — the same reasoning that makes `all()` correct for the read-only `StatsPass`. (A real flattening rewrite, by contrast, generally returns `none()` unless it explicitly maintains particular analyses.)
+3. An empty canonical diff, not a successful `verify`, proves the function was left untouched because `verify` proves only validity — that the IR obeys structural rules — and a module can be valid yet changed: a well-formed wrong transformation passes `verify` too. The rejection contract is byte-for-byte identity in canonical form: print the rejected function's IR with and without the pass (for example `tests/ir/coroutine.ll`) through LLVM's printer and require `diff -u build/before.ll build/after.ll` to be empty. Only that check rules out partial edits.
 
 18. C++ concepts
 ================
