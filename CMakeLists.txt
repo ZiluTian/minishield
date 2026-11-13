@@ -1,3 +1,7 @@
+# Copyright (c) 2026 ZiluTian
+#
+# MiniShield code is licensed under MIT; see LICENSE.
+# The MiniShield books (day1, day2, day3, docs/, PLAN.md) are CC BY-NC 4.0.
 cmake_minimum_required(VERSION 3.15)
 project(MiniShield CXX)
 
@@ -19,6 +23,7 @@ add_library(MiniShield MODULE
 	lib/StatsPass.cpp
 	lib/CFGAnalyzer.cpp
 	lib/FunctionEligibility.cpp
+	lib/StateMachineBuilder.cpp
 )
 
 separate_arguments(MS_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})

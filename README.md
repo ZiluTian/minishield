@@ -1,5 +1,8 @@
 # MiniShield
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC%20BY--NC%204.0-yellow.svg)](LICENSE)
+
 An LLVM pass-plugin study project for control-flow flattening. The study covers IR inspection, CFG analysis, eligibility, and control-flow
 rewriting. The learner implementation is in progress; the books include future
 exercises and complete reference examples.
@@ -77,3 +80,18 @@ python3 -m http.server 8000 --directory docs
 Open http://localhost:8000. No Node installation or frontend build is needed.
 The book supports chapter search, reading progress, focus mode, copyable code,
 and interactive concept diagrams. Source files are in [docs](docs).
+
+## License
+
+This repository uses a split license; see [LICENSE](LICENSE) for the full text.
+
+- **Code** — the pass-plugin source (`include/`, `lib/`), build files, tests,
+  and scripts are licensed under the [MIT License](LICENSE).
+- **Book and teaching content** — the teaching sources ([day1](day1),
+  [day2](day2), [day3](day3)), the rendered book site ([docs](docs)), and the
+  roadmap ([PLAN.md](PLAN.md)) are licensed under
+  [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). You may
+  share and adapt them for non-commercial purposes with attribution, but
+  commercial use requires prior written permission.
+- **Fonts** — `docs/assets/fonts/` remains under the SIL Open Font License,
+  as stated in the accompanying `*-OFL.txt` files.

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 ZiluTian
+//
+// MiniShield code is licensed under MIT; see LICENSE.
+// The MiniShield books (day1, day2, day3, docs/, PLAN.md) are CC BY-NC 4.0.
 #include "minishield/FunctionEligibility.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
