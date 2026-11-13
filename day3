@@ -475,25 +475,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — diamond inspect
 
-```llvm
-define i32 @choose(i1 %c) {
-entry:
-  br i1 %c, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  ret i32 7
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -638,25 +621,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — diamond inspect
 
-```llvm
-define i32 @choose(i1 %c) {
-entry:
-  br i1 %c, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  ret i32 7
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1047,20 +1013,8 @@ done:                                             ; preds = %entry
 }
 ```
 
-### After — dynamic full
 
-```llvm
-define i32 @dynamic(i32 %n) {
-entry:
-  %storage = alloca i8, i32 %n, align 1
-  br label %done
-
-done:                                             ; preds = %entry
-  ret i32 %n
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 

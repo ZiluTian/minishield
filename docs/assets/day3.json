@@ -767,17 +767,8 @@
               "text": "define i32 @choose(i1 %c) {\nentry:\n  br i1 %c, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  ret i32 7\n}"
             },
             {
-              "type": "heading",
-              "text": "After — diamond inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @choose(i1 %c) {\nentry:\n  br i1 %c, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  ret i32 7\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -788,7 +779,7 @@
           "irComparison": true
         }
       ],
-      "words": 1331,
+      "words": 1290,
       "quiz": {
         "q": "Why declare the LLVMContext before the Module owner?",
         "choices": [
@@ -1021,17 +1012,8 @@
               "text": "define i32 @choose(i1 %c) {\nentry:\n  br i1 %c, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  ret i32 7\n}"
             },
             {
-              "type": "heading",
-              "text": "After — diamond inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @choose(i1 %c) {\nentry:\n  br i1 %c, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  ret i32 7\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -1042,7 +1024,7 @@
           "irComparison": true
         }
       ],
-      "words": 1166,
+      "words": 1125,
       "quiz": {
         "q": "What must happen before CFGAnalyzer can request DominatorTreeAnalysis?",
         "choices": [
@@ -1591,17 +1573,8 @@
               "text": "define i32 @dynamic(i32 %n) {\nentry:\n  %storage = alloca i8, i32 %n, align 1\n  br label %done\n\ndone:                                             ; preds = %entry\n  ret i32 %n\n}"
             },
             {
-              "type": "heading",
-              "text": "After — dynamic full"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @dynamic(i32 %n) {\nentry:\n  %storage = alloca i8, i32 %n, align 1\n  br label %done\n\ndone:                                             ; preds = %entry\n  ret i32 %n\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -1612,7 +1585,7 @@
           "irComparison": true
         }
       ],
-      "words": 1296,
+      "words": 1268,
       "quiz": {
         "q": "Why compare the exact rejection reason?",
         "choices": [
