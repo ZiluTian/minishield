@@ -3,7 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC%20BY--NC%204.0-yellow.svg)](LICENSE)
 
-An LLVM pass-plugin study project for control-flow flattening. The study covers IR inspection, CFG analysis, eligibility, and control-flow
+An LLVM pass-plugin study project that is also a **framework for code-hardening
+techniques** — control-flow flattening is its first named pass, and the same plugin
+hosts others (opaque predicates, function splitting, forward CFI, name obfuscation).
+The study covers IR inspection, CFG analysis, eligibility, and control-flow
 rewriting. The learner implementation is in progress; the books include future
 exercises and complete reference examples.
 
