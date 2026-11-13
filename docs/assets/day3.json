@@ -177,7 +177,16 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which test would catch a wrong state constant that still names an existing block?"
+          "text": "Checkpoint: Which test would catch a wrong state constant that still names an existing block?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "A behavioral test — the original/protected differential comparison — would catch it. A wrong constant that still names an existing block (for example storing state 1 where the true outcome should store 0) keeps the module well formed: `verifyModule` accepts it, and even a structural check that each expected state appears once can pass, because the swapped constant still points at a real block. The lesson’s walk states that a verifier can accept state constants whose true/false meanings are swapped and that a behavioral test must catch that: on the merge example the true input would return 20 instead of 10, and only comparing the original and protected exit status and output on both outcomes exposes the swap."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -367,7 +376,7 @@
           "irComparison": true
         }
       ],
-      "words": 1810,
+      "words": 1940,
       "quiz": {
         "q": "What does a successful verifier establish?",
         "choices": [
@@ -460,7 +469,16 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Which target supplies the plugin entry point, and which supplies CFGAnalyzer::Key?"
+              "text": "Checkpoint: Which target supplies the plugin entry point, and which supplies CFGAnalyzer::Key?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "`MiniShield`, the MODULE target, supplies the plugin entry point: its only source is `lib/Plugin.cpp`, and opt loads the resulting shared library as the plugin. `MiniShieldCore`, the STATIC archive, supplies `CFGAnalyzer::Key`: `lib/CFGAnalyzer.cpp` — the translation unit holding the single out-of-line definition of the analysis key — is listed in its sources alongside the pass, eligibility, and builder implementations. The deep-dive rule is what keeps them apart: do not list the same implementation .cpp in both targets, because a second `AnalysisKey` definition in one linked image breaks linkage or identity assumptions, and a header declaration alone does not supply the definition."
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -475,7 +493,16 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why can linking succeed while gtest_discover_tests fails to launch the executable?"
+              "text": "Checkpoint: Why can linking succeed while gtest_discover_tests fails to launch the executable?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Because link-time and run-time resolution happen in different layers. `LIBRARY_PATH` tells the compiler driver where to find libraries while linking, so the link can complete, but it does not tell the Linux dynamic loader where to find the shared GoogleTest libraries at execution time. When `gtest_discover_tests` launches the executable to enumerate its TEST cases, the loader cannot resolve those shared objects and the launch fails before any TEST executes — an infrastructure failure, not an LLVM assertion. The reference’s fix is `BUILD_RPATH`, which embeds `$<TARGET_FILE_DIR:GTest::gtest_main>`, `$<TARGET_FILE_DIR:GTest::gtest>`, and `$<TARGET_FILE_DIR:LLVM>` into the unit executable; that is a build-tree setting, and installation/relocation needs its own policy."
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -485,10 +512,19 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why does PIC belong on the static core even though that target is not itself a shared library?"
+          "text": "Checkpoint: Why does PIC belong on the static core even though that target is not itself a shared library?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Because the archive’s objects will be linked into the shared `MiniShield` MODULE, and a shared object can only contain position-independent code. Setting `POSITION_INDEPENDENT_CODE ON` on the `MiniShieldCore` STATIC target compiles its object files as PIC before they are archived; the archive kind is irrelevant to that. The property belongs to the objects, not to the target type: the core is never loaded by opt — only the `MiniShield` plugin is — and the plugin links the core’s PIC objects in."
+              ]
+            }
+          ]
         }
       ],
-      "words": 491,
+      "words": 786,
       "quiz": {
         "q": "Should the test executable link the MiniShield MODULE directly?",
         "choices": [
@@ -591,13 +627,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why can moving a unique_ptr transfer module ownership without extending the context lifetime?"
+              "text": "Checkpoint: Why can moving a unique_ptr transfer module ownership without extending the context lifetime?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "A move changes which variable owns the pointer, not which context the Module depends on. `parse` takes the caller’s `LLVMContext&` and returns a `unique_ptr<Module>` that will be destroyed through that same context, so handing the pointer to another `unique_ptr` extends nothing about the context’s lifetime — the Module still has to die before the context it references. That is why the test declares `context` first and the module owner second: reverse local destruction order destroys the module before its context. A helper that created its own context and returned a module tied to it would leave a dangling dependency, because that context dies when the helper returns."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Explain the difference between ASSERT_FALSE(verifyModule(...)) and EXPECT_TRUE(decision.eligible)."
+          "text": "Checkpoint: Explain the difference between ASSERT_FALSE(verifyModule(...)) and EXPECT_TRUE(decision.eligible).",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "They guard different subjects with different failure policies. `ASSERT_FALSE(llvm::verifyModule(*module, &llvm::errs()))` validates the fixture before any of your code is tested: LLVM’s verifier returns true for broken IR, so a false result means the input is valid, and the assertion (not an expectation) stops the test, because continuing after malformed IR is unsafe — a later rejection could then look like an unsupported feature when it is really a parsing problem. `EXPECT_TRUE(decision.eligible)` tests your own eligibility decision on a known-good input: it is a non-fatal expectation that records the failure and lets the test continue, and streaming `<< decision.reason` into the message keeps an unexpected restriction visible."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -734,7 +788,7 @@
           "irComparison": true
         }
       ],
-      "words": 1106,
+      "words": 1331,
       "quiz": {
         "q": "Why declare the LLVMContext before the Module owner?",
         "choices": [
@@ -842,7 +896,16 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why can an arbitrary cyclic edge fail the natural-loop back-edge definition?"
+          "text": "Checkpoint: Why can an arbitrary cyclic edge fail the natural-loop back-edge definition?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Because being cyclic is not the definition: a natural-loop back edge must belong to a loop reachable from entry, with a header that dominates the latch and the recorded edge going latch → header. An edge that merely cycles inside unreachable code fails that reachable-back-edge rule — the lesson’s extension adds an unreachable cycle exactly to check that it is not counted as an entry-reachable natural loop. The lesson also keeps loop count separate from back-edge count, because several latches may belong to one loop."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -979,7 +1042,7 @@
           "irComparison": true
         }
       ],
-      "words": 1069,
+      "words": 1166,
       "quiz": {
         "q": "What must happen before CFGAnalyzer can request DominatorTreeAnalysis?",
         "choices": [
@@ -1081,13 +1144,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Which snapshot survives renaming, and which snapshot does not survive deletion?"
+              "text": "Checkpoint: Which snapshot survives renaming, and which snapshot does not survive deletion?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Pointer identity survives renaming: `original` stores the addresses of the existing `BasicBlock` objects, so a comparison such as `oneCase.getCaseSuccessor() == block` still asks whether the case targets that same object even if a block is renamed. Pointer identity does not survive deletion: the vector owns only pointer values — it neither copies nor destroys blocks — so erasing an original block would invalidate the stored pointer and any comparison with it becomes meaningless. That is why the snapshot strategy is safe for this builder specifically: it appends `ms.dispatch` and `ms.invalid` and erases terminators, but never erases the original blocks."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: How could a test that only searches for the text “switch” pass on a broken implementation?"
+          "text": "Checkpoint: How could a test that only searches for the text “switch” pass on a broken implementation?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Because a substring search only proves the word occurs somewhere in the printed IR. A broken implementation could print a `switch` that is disconnected from entry, points its cases at the wrong or duplicated blocks, misses a state, or gives the default a non-terminal destination — and still contain the text “switch”. The lesson’s structural test instead follows the live edge: entry’s unconditional successor must be the dispatch block whose terminator is a `SwitchInst`, its case count must equal `original.size() - 1`, each original non-entry block must be a case successor exactly once, and the default destination must terminate in `unreachable`."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1272,7 +1353,7 @@
           "irComparison": true
         }
       ],
-      "words": 1933,
+      "words": 2145,
       "quiz": {
         "q": "When is the expected N + 2 block invariant measured?",
         "choices": [
@@ -1361,13 +1442,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why would returning all after a broken partial edit make the failure harder to diagnose?"
+              "text": "Checkpoint: Why would returning all after a broken partial edit make the failure harder to diagnose?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Because `all()` is a promise to the analysis manager, not an undo: it claims that every cached analysis — the dominator tree, the loop analysis, the `CFGAnalyzer` result — remains valid for the mutated IR. A broken partial edit that returns `all()` lets later passes and analyses consume those stale caches, and the resulting misbehavior surfaces wherever the stale information is next consumed — a different pass, a different function — while the pass itself looks fine, because `verifyModule` accepts the structurally valid IR. The lie is invisible at the point of mutation, which is why the prototype returns `none` after any real mutation (forcing recomputation) and reserves `all` for genuinely unchanged rejections, as the negative test asserts with `areAllPreserved()`."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: How would a missing preflight check be caught even if the final module still verifies?"
+          "text": "Checkpoint: How would a missing preflight check be caught even if the final module still verifies?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "By three assertions that are not the verifier. First the decision: `EXPECT_FALSE(decision.eligible)` and `EXPECT_EQ(decision.reason, \"only static entry allocas are supported\")` fail when the guard is removed and the function is accepted, or rejected for a different reason. Second the exact output comparison: `EXPECT_EQ(dump(*module), before)` compares canonical printed IR, so if the missing preflight lets the pass mutate the module, the output is no longer byte-identical even though the mutated module still verifies. Third the preservation result: a rejected function returns `areAllPreserved()`, while a transformed function in this prototype returns `none`. The verifier alone cannot catch any of this, because both the unchanged and the mutated module are structurally valid."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1513,7 +1612,7 @@
           "irComparison": true
         }
       ],
-      "words": 1053,
+      "words": 1296,
       "quiz": {
         "q": "Why compare the exact rejection reason?",
         "choices": [
@@ -1606,13 +1705,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why is a huge factorial input a poor first differential fixture for signed i32 arithmetic?"
+              "text": "Checkpoint: Why is a huge factorial input a poor first differential fixture for signed i32 arithmetic?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Because factorial leaves the defined domain almost immediately: once its intermediate results overflow i32, the execution is undefined, and the deep dive states that signed overflow is outside the promised behavior of both programs. On an invalid input the oracle itself stops being meaningful — a mismatch between original and protected output cannot by itself establish a transformation bug — and the `nsw` arithmetic in the kernels is a no-overflow promise only on the bounded domain the lesson fixes (amount −1000..10000, level 0..5). A first fixture should stay inside a documented domain where both programs are defined, so a mismatch actually means a bug."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: What additional observations would a function that writes to a file require?"
+          "text": "Checkpoint: What additional observations would a function that writes to a file require?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "It must also observe the file itself: run each program with its own output path (or in separate working directories) so the two cannot overwrite each other’s file, then include the written file’s bytes — and its existence — in the compared observations, exactly as stdout, stderr, and exit status are compared for the pure driver. The lesson states that programs with files, time, randomness, or external side effects require a richer controlled oracle than byte comparison of the printed result."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1878,7 +1995,7 @@
           "irComparison": true
         }
       ],
-      "words": 3240,
+      "words": 3437,
       "quiz": {
         "q": "If both programs exit with status 2 and print nothing, should this runner pass?",
         "choices": [
@@ -1981,13 +2098,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Which layer interprets $<TARGET_FILE:MiniShield>?"
+              "text": "Checkpoint: Which layer interprets $<TARGET_FILE:MiniShield>?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "CMake — before any shell is involved. `$<TARGET_FILE:MiniShield>` is a CMake generator expression evaluated to the actual output library (the `libMiniShield.so` in `CMAKE_BINARY_DIR`), which is why the reference avoids hardcoding a `.so` name or guessing an output directory. It is CMake syntax, not a C++ template or a shell substitution: it appears inside CMake `COMMAND` arguments to `add_test` and to the custom command, and CMake substitutes it when materializing the test’s command line. The deep-dive corollary: `COMMAND` arguments are not shell command strings, so the pipeline stays quoted as one CMake argument and paths stay distinct arguments, without invoking `bash -c`."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: What can pass in CTest even while an optional transform was skipped? Which test proves live rewriting?"
+          "text": "Checkpoint: What can pass in CTest even while an optional transform was skipped? Which test proves live rewriting?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The `IR.*` opt verification tests — and, in the limit, a green run with zero discovered tests, which the lesson notes can exit successfully. If opt skips the optional `minishield-flatten` pass (for example on an optnone function, or when the plugin never rewrites the intended function), the module is left unchanged; it still parses, loads, runs the pipeline, and verifies, so the exit-zero test passes. A skipped optional pass leaves the original module, which verifies just as well as the transformed one.",
+                "The structural unit tests prove live rewriting: `Builder.DispatchesOriginalStates` asserts the prepared count plus two blocks, a live `SwitchInst` at the entry successor, one case per original non-entry block exactly once, and the unreachable default; `Flattening.PreparesLoopCarriedPhi` asserts zero remaining PHIs and a live switch on a function that needs preparation. Output checks that the emitted IR changed (for example `protected.ll` differing from `common.ll`) provide the same proof; registration, loading, and verify alone do not."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2177,7 +2313,7 @@
           "irComparison": true
         }
       ],
-      "words": 1936,
+      "words": 2204,
       "quiz": {
         "q": "Does add_test create the differential executables?",
         "choices": [
@@ -2294,13 +2430,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why should the regression check output immediately after your pass as well as the final executable?"
+              "text": "Checkpoint: Why should the regression check output immediately after your pass as well as the final executable?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Because a false preservation claim or a dominance violation can survive your pass’s own output and fail only when a later pass consumes the bad information, so checking only the final executable tells you where the symptom appeared, not where the bug was born. Verifying immediately after the pass — `function(minishield-flatten),verify` writing `after-pass.ll` before the O2 step — pins the earliest broken invariant: if that module is invalid, the pass is responsible; if it verifies, the failure was introduced or exposed downstream. That boundary is what you reduce to, instead of blaming the last pass before the crash or “fixing” the symptom by disabling optimization."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: What property must a reduced wrong-code reproducer preserve besides syntactic validity?"
+          "text": "Checkpoint: What property must a reduced wrong-code reproducer preserve besides syntactic validity?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The defined execution and the failure itself: the reduced fixture must remain valid IR, keep the execution defined (no undefined behavior), and reproduce the same wrong observable result on the same defined input domain. Step 3 says to remove unrelated functions, blocks, and instructions while keeping valid IR and the same failure, and a smaller fixture that merely crashes from undefined behavior is not the same bug — the lesson’s own check confirms that deleting an instruction to turn a mismatch into uninitialized-memory behavior is not a useful reduction."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2490,7 +2644,7 @@
           "irComparison": true
         }
       ],
-      "words": 1858,
+      "words": 2063,
       "quiz": {
         "q": "If deleting an instruction turns a mismatch into uninitialized-memory behavior, is that a useful reduction?",
         "choices": [
@@ -2613,13 +2767,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: What would a very fast protected result mean if every function was rejected?"
+              "text": "Checkpoint: What would a very fast protected result mean if every function was rejected?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "It would mean nothing about the pass: if every function was rejected, `minishield-flatten` never mutated anything, so the “protected” binary is simply the original program compiled through the same pipeline, and its speed is the baseline’s, not a cost or benefit of flattening. That is exactly why the lesson says to define the accepted workload and report the actual accepted/transformed count rather than timing a silently skipped pass — a very fast protected result with zero transformed functions measures the original program. The record should say so explicitly instead of publishing a runtime delta, or a zero overhead, that the experiment did not establish."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why are executable file size, .text size, and IR instruction count three different metrics?"
+          "text": "Checkpoint: Why are executable file size, .text size, and IR instruction count three different metrics?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Because they measure different artifacts at different pipeline positions, in different units. Executable file size is the total bytes of the final binary — headers, all sections, and non-code data — and is still not process memory; .text size is only the code section of that same final artifact; IR instruction count is a static count taken at a chosen IR stage (before flattening, immediately after, or after final optimization). A static count is neither bytes nor executed operations, and later passes may simplify or remove the dispatcher entirely: this lesson’s follow-up shows the final optimizer reducing the whole state machine to one `select` choosing 10 or 20."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2833,7 +3005,7 @@
           "irComparison": true
         }
       ],
-      "words": 1879,
+      "words": 2102,
       "quiz": {
         "q": "What should a report show before measurements exist?",
         "choices": [
@@ -2953,13 +3125,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why would adding volatile to every variable change the experiment rather than simply make it “more accurate”?"
+              "text": "Checkpoint: Why would adding volatile to every variable change the experiment rather than simply make it “more accurate”?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Because `volatile` forbids the compiler from optimizing away or reordering those accesses, so the two binaries stop being the same experiment: both stop exercising the optimizer’s treatment of the kernel, and the recorded time measures volatile memory traffic, not the cost of the flattened state machine. The lesson deliberately makes the work observable another way — a changing state fed into each `benchmark_kernel` call plus the printed checksum — so both binaries compile normally and the only varied variable is the kernel transformation under an otherwise matched build. “More accurate” was never the goal; holding the experiment constant is."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which part of elapsed time does the Python subprocess wrapper exclude by reading the driver’s internal duration?"
+          "text": "Checkpoint: Which part of elapsed time does the Python subprocess wrapper exclude by reading the driver’s internal duration?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Everything outside the driver’s own `steady_clock` interval: launching and loading the process (dynamic linker and runtime setup), the Python `subprocess` machinery, and anything the driver does before `begin` or after `end`, such as printing the checksum and seconds and exiting. The driver brackets only the 20000-call `benchmark_kernel` loop and prints that duration; the wrapper parses `seconds` from stdout instead of timing the subprocess, so both reported runtimes measure the useful in-process work with startup cost excluded for both binaries."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3163,7 +3353,7 @@
           "irComparison": true
         }
       ],
-      "words": 2468,
+      "words": 2659,
       "quiz": {
         "q": "Why use the same untransformed driver object in both binaries?",
         "choices": [
@@ -3282,13 +3472,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: What evidence would be missing from a report saying only “blocks doubled, therefore secure”?"
+              "text": "Checkpoint: What evidence would be missing from a report saying only “blocks doubled, therefore secure”?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Everything except the structural observation. “Blocks doubled” is at most a structural claim about the visible CFG; the deep dive says resistance to an adversary requires a threat model and separate evaluation, and runtime/size measurements alone do not establish obfuscation quality. The report would also be missing the supported/rejected function counts, the correctness outcomes (fixture names and differential counts on the stated domain/seed), raw timings and sizes in labeled units, and whether the final optimized artifact still contains the dispatcher — this book’s verified example ends with the final optimizer reducing the whole machine to one `select`, so a pass-boundary block count says nothing about the shipped binary. It must also not equate a larger CFG with stronger security, or a green test suite with a formal proof."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Can a correct, fast result still be a poor demonstration of flattening? Explain using final optimization."
+          "text": "Checkpoint: Can a correct, fast result still be a poor demonstration of flattening? Explain using final optimization.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Yes. Correctness and speed only say the pipeline that ships produced the same observations at that cost; they do not say the flattening survived. In this lesson’s verified example the final optimizer removes the entire dispatcher: the after listing replaces the state slot, the demotion loads and stores, and the dispatch switch with one `select i1 %condition, i32 10, i32 20` and a return, so the shipped “flattened” program is structurally the original. A truthful report must inspect the final optimized IR or disassembly, state that the structure was removed when it was, and label the immediate transformation output separately from the final artifact — matching behavior alone does not establish persistent obfuscation."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3502,7 +3710,7 @@
           "irComparison": true
         }
       ],
-      "words": 1841,
+      "words": 2095,
       "quiz": {
         "q": "Can synthetic timing numbers be published as measured results to fill the table?",
         "choices": [
@@ -3590,13 +3798,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: How could a script exit zero after printing a failing test result?"
+              "text": "Checkpoint: How could a script exit zero after printing a failing test result?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "In several ways a script can swallow a failure: appending `|| true` (or an equivalent) turns a failing command into success; without `pipefail`, a pipeline’s exit status is the last command’s, so an earlier failing stage can be masked; and a CTest run with zero matching tests exits successfully, so a misnamed or unregistered differential test can “pass” without ever running — which is why the demo must ensure the differential test is actually listed and executed. `set -euo pipefail` is a useful baseline against unguarded commands, but it is not a substitute for understanding every command’s exit behavior, and an expected negative case belongs in an explicit assertion rather than in a relaxed exit status."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why does output equality alone fail to establish that a demo actually exercised flattening?"
+          "text": "Checkpoint: Why does output equality alone fail to establish that a demo actually exercised flattening?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Because an unchanged or stub pass produces a protected executable that is behaviorally identical to the original, so the differential checker passes on the whole stated domain without any rewrite having happened; the lesson’s verify step warns that an unchanged/stub pass can still produce matching outputs, and a demo must not silently reuse an old generated `protected.ll`. To establish that flattening actually ran, the demo must also inspect the transformed IR for a live dispatcher — the `ms.dispatch` switch, the state stores, and the demotion slots — in addition to the matched program observations."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3862,7 +4088,7 @@
           "irComparison": true
         }
       ],
-      "words": 3193,
+      "words": 3418,
       "quiz": {
         "q": "What should the demo do if opt fails verification?",
         "choices": [
@@ -3958,13 +4184,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Which rejected feature would you support next, and what new proof obligation would it introduce?"
+              "text": "Checkpoint: Which rejected feature would you support next, and what new proof obligation would it introduce?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Any choice is a new semantic commitment, so pick one and state its invariants before writing it. The cheapest candidate in this book’s own terms is the rejected dynamic entry alloca (the `dynamic` fixture, reason `only static entry allocas are supported`): supporting it extends the demotion protocol to a slot whose size is runtime data, and its proof obligation is that the slot is allocated before every use, that the state-machine invariants (prepared count + 2, one case per original non-entry block, unreachable default) still hold, plus a positive fixture, isolated negative fixtures for what remains unsupported (EH, coroutines, block addresses) with exact rejection reasons and byte-identical unchanged IR, and differential cases where the new function is defined. EH would be a larger jump: unwind edges cross blocks, so the dispatcher would have to model landing pads and the obligation would widen to exception-propagation semantics. The point is not the feature itself — it is the invariants, fixtures, and behavioral evidence."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Explain the pass architecture and its evidence in five minutes without reading the implementation."
+          "text": "Checkpoint: Explain the pass architecture and its evidence in five minutes without reading the implementation.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "One compact five-minute model. Architecture: `FlatteningPass::run` orchestrates three stages on each function. Eligibility (`FunctionEligibility::check`) defines the accepted subset and rejects before mutation with a specific reason — for example `only static entry allocas are supported` for a non-static entry alloca — and rejects EH/coroutine/block-address forms on isolated fixtures. Preparation demotes PHIs and escaping values to stack slots so no cross-block SSA use survives. Construction (`StateMachineBuilder::build`) keeps the entry setup, maps every original non-entry block to an i32 state, rewrites each original terminator to store its destination state and branch to the appended `ms.dispatch` block (whose switch decodes the loaded state, with an `ms.invalid`/`unreachable` default), leaves original returns terminal, and returns `PreservedAnalyses::none` after a real mutation and `all` for an unchanged rejection. Evidence: unit tests (`Eligibility.AcceptsSimpleDiamond`, `CFG.DiamondEdgesAndDominance` with 4 blocks, 4 edges, 0 loops, and entry dominating every block; `Builder.DispatchesOriginalStates` with prepared count + 2 blocks, a live switch, and the unreachable default; `Flattening.PreparesLoopCarriedPhi` with 0 PHIs, a live switch, and explicit invalidation; `Flattening.RejectsDynamicAllocaWithoutMutation` with the exact reason, byte-identical canonical IR, and `areAllPreserved`); opt integration tests that load `libMiniShield.so` and verify every tracked `tests/ir/*.ll` fixture; the differential runner (`differential.py`, seed 20261112, 42 boundary + 100 seeded cases comparing exit status, stdout, stderr) plus its self-test that a program returning 1 must fail; a clean `demo.sh` build from a fresh directory reproducing the evidence; and the benchmark plan (matched kernel/driver, `benchmark.py`) that stays “not measured” until it runs. Limits: a green suite is not a security proof, a larger CFG is not stronger security, and final optimization may remove the dispatcher."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4168,7 +4412,7 @@
           "irComparison": true
         }
       ],
-      "words": 2126,
+      "words": 2560,
       "quiz": {
         "q": "What is the final evidence for a fixed O2-only wrong-code bug?",
         "choices": [
@@ -4184,8 +4428,8 @@
       "id": 70,
       "number": 14,
       "day": 3,
-      "title": "Day 3 glossary",
-      "originalTitle": "Day 3 glossary",
+      "title": "Glossary. Terms used in Day 3",
+      "originalTitle": "Glossary. Terms used in Day 3",
       "summary": "A reference for ownership, test design, reproducibility, and performance vocabulary.",
       "takeaway": "Use a precise term to name the claim you are checking.",
       "source": "day3",
@@ -4216,7 +4460,7 @@
             ],
             [
               "Translation unit",
-              "A source file after preprocessing and inclusion, compiled as one unit."
+              "Covered in the [Day 1 glossary](#lesson-26) (“Translation unit”): one `.cpp` file, expanded with the headers it includes and compiled into one object file."
             ],
             [
               "ODR",
@@ -4228,7 +4472,7 @@
             ],
             [
               "Usage requirement",
-              "Build information propagated to consumers through a CMake target."
+              "Covered in the [Day 1 glossary](#lesson-26) (“Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`)”): who sees a target’s compile/link requirements; MiniShield is a plugin nothing links to, so everything is `PRIVATE`."
             ],
             [
               "extern C",
@@ -4293,7 +4537,7 @@
             ],
             [
               "CTest / GoogleTest",
-              "CTest orchestrates commands; GoogleTest defines C++ test cases/assertions."
+              "CTest orchestrates the commands; for the framework itself see the [Day 1 glossary](#lesson-26) (“GoogleTest (gtest)”): C++ test cases and assertions."
             ],
             [
               "Analysis invalidation",
@@ -4352,10 +4596,19 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Pick one term from each table and explain how using it precisely prevents a misleading completion claim."
+          "text": "Checkpoint: Pick one term from each table and explain how using it precisely prevents a misleading completion claim.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "One example set. PIC (C++/build table): it means position-independent machine code suitable for a shared object, not that the target is shared — used precisely, it supports claiming the core’s objects can be linked into the `MiniShield` MODULE without the false claim that the static archive itself loads in opt. Regression (test/LLVM table): it is a retained test for a known bug that must not return — “the bug is fixed” is only earned when the minimized reproducer and an assertion on the root-cause invariant are kept and pass, not when the behavioral suite alone is green. Final artifact (measurement table): it is the optimized executable actually measured, not pre-optimization IR — “the dispatcher costs X%” is only a valid claim after inspecting the final optimized code for whether the dispatcher survived at all."
+              ]
+            }
+          ]
         }
       ],
-      "words": 373,
+      "words": 552,
       "quiz": {
         "q": "Does a checksum match replace differential testing?",
         "choices": [
