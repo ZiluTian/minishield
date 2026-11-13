@@ -6796,14 +6796,14 @@
         },
         {
           "type": "task",
-          "text": "Task: Add the operand-bundle predicate inside the existing CallBase block and write tests/ir/operand-bundle.ll from this complete module. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.",
+          "text": "Task: Add the operand-bundle predicate inside the existing CallBase block and write tests/ir/operand_bundle.ll from this complete module. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
         {
           "type": "code",
           "language": "bash",
-          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/operand-bundle.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/operand-bundle.ll -o build/operand-bundle-checked.ll",
+          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/operand_bundle.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/operand_bundle.ll -o build/operand_bundle-checked.ll",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },

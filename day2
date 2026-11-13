@@ -4163,14 +4163,14 @@ Bundles are semantically meaningful, not disposable comments. For deopt, a suita
 
 observe is an ordinary external placeholder, not an intrinsic or a supplied deoptimization runtime implementation. This fixture is for parsing and guard recognition. It has neither a main function nor a body for observe, so it is not a standalone executable demonstration of deoptimization behavior.
 
-Task: Add the operand-bundle predicate inside the existing CallBase block and write tests/ir/operand-bundle.ll from this complete module. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.
+Task: Add the operand-bundle predicate inside the existing CallBase block and write tests/ir/operand_bundle.ll from this complete module. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.
 
 ```bash
 cmake --build build
-opt -passes=verify -disable-output tests/ir/operand-bundle.ll
+opt -passes=verify -disable-output tests/ir/operand_bundle.ll
 opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -passes='function(minishield-flatten),verify' \
-  -S tests/ir/operand-bundle.ll -o build/operand-bundle-checked.ll
+  -S tests/ir/operand_bundle.ll -o build/operand_bundle-checked.ll
 ```
 
 Checkpoint: Once the guard is implemented, expect “operand bundles are unsupported” and unchanged canonical output for this focused module. That plugin outcome remains expected here, not observed. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test.
