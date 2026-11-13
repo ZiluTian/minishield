@@ -217,3 +217,134 @@ Checkpoint: In the demo the `Derived` dispatch succeeds and the `Evil` dispatch 
 2. (b) The guard compares the object's vtable pointer against a local, compile-time-known vtable/type-info address. With default-visibility type-info symbols the dynamic linker can interpose a different copy from another shared object, and the check would silently test against the wrong address; `-fvisibility=hidden` pins the type-info symbols to the local copies, which is why clang accepts the flag only with it.
 
 3. (c) A corrupted slot inside a legitimate vtable: overwrite slot 0 of a real `Derived` vtable to point at attacker code and the vtable pointer still points into the right hierarchy, the check passes, and the dispatch is hijacked. CFI-VCALL verifies which class an object claims to be, not what that class's vtable points to.
+
+3.3.1 The stack canary check
+============================
+
+Stack canaries answer the control-data row of the threat table: an attacker overwrites the saved return address of a function — the classic buffer overflow — and the function returns into their code instead of its caller. The canary is a random value planted in the frame between the vulnerable buffer and the saved return address, and compared on the way out: if the overflow reached the return address, it crossed the canary, and the comparison aborts the process before the corrupted return executes. Unlike CFI, the canary changes what data the frame holds rather than what the control flow may target.
+
+One thing to hold in mind while reading this chapter: you will not find the canary in the IR. This is what clang 23.1.5 actually leaves behind, and where the check really lives.
+
+### The canary is not in the IR
+
+The vulnerable function is `process`, an unchecked copy of an attacker-controlled length into a 16-byte buffer. Compiled with `-fstack-protector-strong -O0`, the module is (attribute bundle trimmed; `opt -passes=verify` accepts it):
+
+```llvm
+target triple = "x86_64-conda-linux-gnu"
+
+declare i64 @strlen(ptr noundef)
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias writeonly, ptr noalias readonly, i64, i1 immarg)
+
+; clang 23.1.5, -fstack-protector-strong -O0; attribute bundle trimmed
+define dso_local i32 @process(ptr noundef %line) #0 {
+  %2 = alloca ptr, align 8
+  %3 = alloca [16 x i8], align 16
+  %4 = alloca i32, align 4
+  store ptr %line, ptr %2, align 8
+  store i32 0, ptr %4, align 4
+  %5 = getelementptr inbounds [16 x i8], ptr %3, i64 0, i64 0
+  %6 = load ptr, ptr %2, align 8
+  %8 = call i64 @strlen(ptr noundef %6)
+  call void @llvm.memcpy.p0.p0.i64(ptr align 16 %5, ptr align 1 %6, i64 %8, i1 false)
+  %9 = load i32, ptr %4, align 4
+  %10 = add nsw i32 %9, 1
+  ret i32 %10
+}
+
+attributes #0 = { sspstrong "stack-protector-buffer-size"="8" }
+```
+
+Grep this module for a canary and you find nothing: no intrinsic, no call, no store. The entire trace of the protection in the IR is `sspstrong` in the function's attribute bundle, alongside the `"stack-protector-buffer-size"` value. The default build of the same source is identical except that `sspstrong` is absent from the bundle — no other IR byte changes. (LLVM 23 does define an `llvm.stackprotector` intrinsic in its Intrinsics.td — it "writes the stack guard to the correct place on the stack frame" — but this C pipeline never emits it; the guard is materialized directly in machine code.) The backend, reading the attribute, is what generates the canary.
+
+### The machine code where the canary lives
+
+This is the backend's output for the same function (`-fstack-protector-strong -O0`; `.cfi` directives omitted). The frame is `subq $64`: the buffer at `-32(%rbp)`, the canary slot at `-8(%rbp)`, the saved return address at `+8(%rbp)`:
+
+```asm
+process:
+	pushq	%rbp
+	movq	%rsp, %rbp
+	subq	$64, %rsp
+	movq	%fs:40, %rax
+	movq	%rax, -8(%rbp)
+	movq	%rdi, -40(%rbp)
+	movl	$0, -44(%rbp)
+	movq	-40(%rbp), %rdi
+	movq	%rdi, -56(%rbp)
+	callq	strlen@PLT
+	movq	-56(%rbp), %rsi
+	movq	%rax, %rdx
+	leaq	-32(%rbp), %rdi
+	callq	memcpy@PLT
+	movl	-44(%rbp), %eax
+	incl	%eax
+	movl	%eax, -48(%rbp)
+	movq	%fs:40, %rax
+	movq	-8(%rbp), %rcx
+	cmpq	%rcx, %rax
+	jne	.LBB1_2
+	movl	-48(%rbp), %eax
+	addq	$64, %rsp
+	popq	%rbp
+	retq
+.LBB1_2:
+	callq	__stack_chk_fail@PLT
+```
+
+Read it in three beats. Entry: `movq %fs:40, %rax` loads the guard from per-process TLS, and `movq %rax, -8(%rbp)` plants the copy in the frame between the buffer and the return address — exactly the placement the `--help` text promises: the guard "must be positioned in the stack frame such that a buffer overflow from a vulnerable variable will overwrite the guard value before overwriting the function's return address." Exit: the guard is reloaded from TLS, compared with the planted copy, and a mismatch jumps to `callq __stack_chk_fail@PLT`, which aborts the process. Note the value's origin: one random number in TLS per process — the same value is planted in every protected frame, not one per frame.
+
+### Which functions get a canary
+
+The mode flag selects which frames the backend protects. Three function shapes in one TU, compiled four ways (clang 23.1.5, `-O0`):
+
+| Function | Shape | `-fstack-protector` | `-strong` | `-all` |
+| --- | --- | --- | --- | --- |
+| `f_array` | local `char[16]` | yes | yes | yes |
+| `f_ptr` | takes the address of a local | no | yes | yes |
+| `f_math` | pure arithmetic | no | no | yes |
+
+The `--help` text states the heuristics: plain mode protects functions with char arrays larger than 8 bytes; strong adds arrays of any type, `alloca` calls, and taking the address of a local variable; `-all` protects every function. Note that `f_ptr` trips strong because of `memcpy(&c, ...)` — the address of a local — not because of its pointer parameter. And the default of this toolchain is no canaries at all: many distributions' compilers turn on `-fstack-protector-strong` by default, but the conda clang here does not, which is why every command in this lesson spells the flag out.
+
+### Proof at runtime
+
+The demo builds a 56-byte payload in `main` — 24 bytes of padding, then the address of `sink` (a function that prints and exits) repeated four times — and passes it to `process` with its explicit length, so no NUL byte in the address can truncate the copy. The spray covers whichever 8-byte slot the saved return address lands in. As in the CFI chapter, `-no-pie` keeps the printed addresses stable across runs.
+
+```bash
+$ clang-23 -O0 -no-pie -fuse-ld=lld canary_pipe.c -o canary
+$ clang-23 -fstack-protector-strong -O0 -no-pie -fuse-ld=lld canary_pipe.c -o canary_strong
+$ ./canary self
+0x201810
+$ echo 0x201810 | ./canary
+HACKED: process returned into sink
+$ echo 0x201810 | ./canary_strong
+*** stack smashing detected ***: terminated
+Aborted (core dumped)
+```
+
+Without the canary, the overflow rewrites the saved return address to `sink`: the program prints `HACKED` and the hijack has succeeded silently — exit 0, no error of any kind. With the canary, the same overflow smashes the guard at `-8(%rbp)` on its way to the return address; the exit check finds the mismatch and aborts before the corrupted return executes — exit 134 (SIGABRT), "stack smashing detected." Same overflow, same payload: one build lets the attack land, the other turns it into a crash. That is the canary's value proposition, and it is the same shape as CFI's — a silent compromise becomes a visible abort — aimed at control data instead of control-flow targets.
+
+### What the canary does not stop
+
+- Global or heap function pointers: the canary guards the saved return address of one frame. It says nothing about a corrupted pointer in `.data` or on the heap, which never touches the frame.
+- Functions the heuristic did not protect: `f_math` above carries no guard and no check, so an overflow in an unprotected frame is invisible to the canary.
+- Corrupted locals used before the return: if an overflow stops short of the guard slot — say, clobbering a vtable pointer in a local object — the damage is done while the canary is still intact.
+- A known guard: the value is one random number per process, in TLS. An attacker who can read memory can read the canary and write it back around the overflow.
+- Buffers the final optimizer erases: at `-O2`, `process` becomes `movl $1, %eax; retq` — the buffer, the overflow, and the canary all disappear together, because the protection only survives as long as the state it protects does.
+
+The cost is small and local: one TLS load at entry, one store, one TLS load plus one compare at exit, per protected function, plus a cold branch to the abort. It is a runtime check in the same class as the CFI trap, not a compile-time property — and like the CFI trap, its whole value is in aborting loudly rather than continuing wrong.
+
+- The canary lives in machine code, not IR: grepping the `.ll` for a guard finds nothing. The evidence is the `sspstrong` attribute in the bundle and the `%fs:` load in the asm.
+- The guard is per-process, not per-frame: one TLS value for the whole address space. Leaking that one value defeats every canary in the process.
+- The demo is `-O0` on purpose: at `-O2` the optimizer erases the vulnerable buffer and the protection disappears with the state it protects.
+- Partial corruption of the guard slot is enough to trip the check: the compare covers all 8 bytes, so any overlap of the overflow with the guard aborts.
+- This toolchain's default is no canaries; the flag is explicit in every command in this lesson.
+
+Checkpoint: In the demo the no-canary build reaches `sink` and the canary build aborts. (a) Where does the guard value come from, and where in the frame is it planted? (b) What is the only trace of the protection in the IR, and why does that make the canary invisible to an IR-only reader? (c) Name one overflow that still succeeds against the canary build, and say why the canary cannot see it.
+
+### Model answer
+
+1. (a) The guard is a per-process value in TLS (`movq %fs:40, %rax` — the same number for every frame in the process). Entry stores a copy in the frame at `-8(%rbp)`, between the vulnerable buffer at `-32(%rbp)` and the saved return address at `+8(%rbp)`, so an overflow from the buffer must cross the guard to reach the return address.
+
+2. (b) `sspstrong` in the function's attribute bundle (with `"stack-protector-buffer-size"`). The frontend only records which frames are eligible; the backend materializes the load/store/compare from that attribute, so an IR-only reader sees no canary instructions at all — the protection is a property of the generated machine code, not of the IR.
+
+3. (c) For example, overwriting a global function pointer: the canary guards only the saved return address of protected frames. A corrupted dispatch pointer in `.data` never touches any frame's guard, the program dispatches through it, and no canary is ever consulted — the check exists only at the exit of instrumented functions, and only for their own return path.
