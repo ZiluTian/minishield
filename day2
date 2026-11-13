@@ -4058,7 +4058,7 @@ CallInst recognizes the call instruction class; isMustTailCall asks whether this
 
 At this resumed session checkpoint, the learner had implemented the musttail guard. The current build was up to date; the plugin rejected the focused musttail fixture with “musttail calls are unsupported,” and canonical before/after IR was identical. This records the observed result for that fixture, rather than converting every future support rule into a completed task.
 
-The inline-assembly guard was then implemented and checked in the resumed session. The existing build was up to date; tests/ir/inline_assembly.ll was rejected with the learner’s exact diagnostic “inline assembly is not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The convergent-call exercise below is the next assigned step, not a completed rejection check.
+The inline-assembly guard was then implemented and checked in the resumed session. The existing build was up to date; tests/ir/inline_assembly.ll was rejected with the learner’s exact diagnostic “inline assembly is not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The convergent-call exercise was assigned next; its completed check is recorded in the following walkthrough.
 
 ```cpp
 if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
@@ -4095,14 +4095,14 @@ Checkpoint: The observed inline-assembly diagnostic was “inline assembly is no
 
 ### Study-session walkthrough — a convergent call has participation constraints
 
-The next assigned check uses isConvergent() on the existing CallBase pointer. The input syntax below has been verified; implementation of this guard and its plugin rejection remain learner work at this checkpoint. An unchanged output from some other check would not prove this particular guard ran.
+The learner then implemented the isConvergent() guard on the existing CallBase pointer. In the resumed session, the current build was up to date; tests/ir/convergent.ll was rejected with the exact diagnostic “convergent calls are not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The operand-bundle guard below is the next assigned exercise.
 
 In grouped execution, such as GPU work, an operation can involve communication among participating threads. Which threads participate can depend on control flow. Convergent describes constraints on preserving that participation; it does not mean every thread takes the same path or simply that a function eventually returns. Routing through a shared dispatcher changes the graph, so this prototype excludes marked calls until it has a suitable correctness argument. This is conservative policy, not a rule that every CFG transformation is forbidden. See LLVM’s [Convergent Operation Semantics](https://llvm.org/docs/ConvergentOperations.html).
 
 ```cpp
 // Inside the existing successful dyn_cast<llvm::CallBase>(&I) block:
 if (call->isConvergent())
-    return {false, "convergent calls are unsupported"};
+    return {false, "convergent calls are not supported"};
 ```
 
 call is the already-checked borrowed pointer to a call-like instruction; use your existing variable name if it differs. isConvergent() returns a C++ bool for that call’s semantic marker. It is not a target-program test of how many threads arrived. Returning the rejection before demotion keeps the original function intact. This guard is separate from intrinsic recognition: an ordinary external function call can also be marked convergent.
@@ -4121,7 +4121,7 @@ Read the complete module locally: declare gives group_operation an i32 result an
 
 group_operation is a placeholder, not an LLVM intrinsic and not an implemented GPU primitive. This fixture isolates recognition of the convergent call marker. It is valid input for parsing/guard checks, but has no main or implementation of the external callee, so it is not a standalone executable or a behavioral simulation of thread communication.
 
-Task: Write the isConvergent guard inside the existing CallBase block, and save this focused input as tests/ir/convergent.ll. Keep the inline-assembly rule. Check this one additional restriction before adding the next special-call rule.
+Task: To replay this completed check, write the isConvergent guard inside the existing CallBase block and the focused tests/ir/convergent.ll input yourself. Keep the inline-assembly rule. Verify the intended rejection reason as well as unchanged output, rather than accepting any earlier rejection as coverage.
 
 ```bash
 cmake --build build
@@ -4131,7 +4131,49 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/convergent.ll -o build/convergent-checked.ll
 ```
 
-Checkpoint: After implementing this guard, expect “convergent calls are unsupported” and identical canonical output for this focused input. That plugin outcome is still expected, not observed, in this note. Explain why a scalar result and an ordinary external callee do not remove the participation contract.
+Checkpoint: The observed diagnostic for the focused convergent fixture was “convergent calls are not supported,” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. The next operand-bundle check is still an exercise, not a recorded plugin success.
+
+### Study-session walkthrough — an operand bundle is part of call semantics
+
+The next assigned rule rejects calls with operand bundles. The complete fixture below has valid parser/verifier syntax, but implementation and plugin rejection are still learner work at this checkpoint. Test it separately from the intrinsic, inline-assembly, and convergent inputs so those earlier guards do not mask this rule.
+
+```cpp
+// Inside the existing CallBase block:
+if (call->getNumOperandBundles() != 0)
+    return {false, "operand bundles are unsupported"};
+```
+
+getNumOperandBundles() returns the number of attached bundle groups. != 0 is a C++ comparison meaning at least one is present. It does not count ordinary callee arguments or count the values inside one bundle; even a bundle with no payload values is still a bundle. hasOperandBundles() is the installed API’s equivalent yes/no helper. Keep this check inside the successful CallBase cast and use your existing pointer variable name.
+
+```llvm
+declare void @observe(i32)
+
+define void @with_bundle(i32 %x) {
+entry:
+  call void @observe(i32 %x) [ "deopt"(i32 %x) ]
+  ret void
+}
+```
+
+Read the complete module: declare void @observe(i32) describes an external function taking one i32 and returning no value. define void @with_bundle(i32 %x) defines our wrapper. Its call passes %x as the ordinary argument inside @observe(i32 %x). Because the call returns void it has no named SSA result, but it still executes an operation; ret void then ends the wrapper.
+
+The separate square-bracket suffix [ "deopt"(i32 %x) ] attaches one operand bundle to that call site. The quoted string deopt is its tag; the typed %x is state payload carried by the bundle. This is not array indexing and not a second ordinary argument in observe’s function signature. The same local value happens to appear in both places, but those two uses have different semantic roles.
+
+Bundles are semantically meaningful, not disposable comments. For deopt, a suitable runtime can use attached state for an alternative continuation or reconstruction when deoptimizing compiled execution; attaching the bundle does not directly invoke deoptimization on every call. Different tags have different requirements. Our prototype excludes bundled calls conservatively until it preserves those requirements; this does not mean every bundle is inherently unsafe. See the primary [LLVM operand-bundle reference](https://llvm.org/docs/LangRef.html#operand-bundles).
+
+observe is an ordinary external placeholder, not an intrinsic or a supplied deoptimization runtime implementation. This fixture is for parsing and guard recognition. It has neither a main function nor a body for observe, so it is not a standalone executable demonstration of deoptimization behavior.
+
+Task: Add the operand-bundle predicate inside the existing CallBase block and write tests/ir/operand-bundle.ll from this complete module. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.
+
+```bash
+cmake --build build
+opt -passes=verify -disable-output tests/ir/operand-bundle.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/operand-bundle.ll -o build/operand-bundle-checked.ll
+```
+
+Checkpoint: Once the guard is implemented, expect “operand bundles are unsupported” and unchanged canonical output for this focused module. That plugin outcome remains expected here, not observed. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test.
 
 ### Verify these guards independently
 
