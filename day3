@@ -11,7 +11,7 @@ and checkpoints support that work. Reference snippets are teaching content;
 they do not change the learner's source files. Future files mentioned in an
 exercise must be written before running commands that depend on them.
 
-0. What evidence will make the pass trustworthy?
+3.1.1 What evidence will make the pass trustworthy?
 ================================================
 
 Task: Future exercise: finish the Volume 2 checklist, then build the evidence in this book. Reading this draft does not mean tests or benchmarks have run.
@@ -183,7 +183,7 @@ C. The program is faster
 
 Answer: A. Behavior and performance require their own evidence.
 
-1. Build one core that the plugin and tests can use
+3.1.2 Build one core that the plugin and tests can use
 ===================================================
 
 Task: Future exercise: after writing the Volume 2 builder, refactor CMake. This chapter supplies a proposed file; it does not modify your current build configuration.
@@ -303,7 +303,7 @@ C. Only if you copy Plugin.cpp into the test
 
 Answer: A. The MODULE exists for runtime loading by opt. The core provides the directly callable implementation.
 
-2. Parse tiny IR in a C++ unit test
+3.2.1 Parse tiny IR in a C++ unit test
 ===================================
 
 Task: Future exercise: create tests/unit/CoreTest.cpp. Start with the helper definitions and one accept test below, then append the next chapters’ TEST blocks.
@@ -492,7 +492,7 @@ C. unique_ptr copies both objects
 
 Answer: A. Reverse local destruction order destroys the module first. Its LLVMContext must remain alive during that lifetime.
 
-3. Test the graph and the analysis manager
+3.2.2 Test the graph and the analysis manager
 ==========================================
 
 Task: Future exercise: append the graph test to CoreTest.cpp. Follow the same parse → verify → run → assert pattern.
@@ -638,7 +638,7 @@ C. Count loop labels by spelling
 
 Answer: A. The manager can compute only analyses it knows how to construct.
 
-4. Assert that the dispatcher really controls the function
+3.2.3 Assert that the dispatcher really controls the function
 ==========================================================
 
 Task: Future exercise: append a builder test only after the complete Volume 2 StateMachineBuilder exists. The fixture below is already prepared because it contains no PHIs or escaping instruction results.
@@ -886,7 +886,7 @@ C. N is the unprepared fixture count even if edges split
 
 Answer: A. Preparation may add blocks. The builder invariant starts after that work.
 
-5. Make rejection tests prove that nothing changed
+3.2.4 Make rejection tests prove that nothing changed
 ==================================================
 
 Task: Future exercise: add the dynamic-allocation rejection test. Then create isolated EH, coroutine, address-taken, intrinsic, and non-scalar-result cases.
@@ -1030,7 +1030,7 @@ C. Because any failure automatically proves the right rejection
 
 Answer: A. A negative test should fail when the specific guard it targets is removed.
 
-6. Run differential cases with a reproducible seed
+3.3.1 Run differential cases with a reproducible seed
 ==================================================
 
 Task: Future exercise: write tests/integration/differential.py yourself from this reference. First write the discount kernel and driver from Volume 2 lesson 24, and build both executables using that common-IR pipeline.
@@ -1377,7 +1377,7 @@ C. Only if the seed is even
 
 Answer: A. Equality without successful execution can hide a broken test setup.
 
-7. Run the whole suite through CTest
+3.3.2 Run the whole suite through CTest
 ====================================
 
 Task: Future exercise: add integration registration inside the CMake BUILD_TESTING block after your unit tests work.
@@ -1604,7 +1604,7 @@ C. Only when their names end in .so
 
 Answer: A. Registration describes a command. Artifact production requires an explicit build or setup step.
 
-8. Prove the tests can fail, then minimize a failure
+3.3.3 Prove the tests can fail, then minimize a failure
 ====================================================
 
 Task: Future exercise: use a disposable branch or copied reference to inject one mistake. Do not alter the main working implementation merely to produce screenshots.
@@ -1793,7 +1793,7 @@ C. Only at O0
 
 Answer: A. Reduction must preserve the failure and the assumptions that make it evidence.
 
-9. Design measurements before writing a timing loop
+3.4.1 Design measurements before writing a timing loop
 ===================================================
 
 Task: Future exercise: design a small benchmark matrix after correctness checks pass. No performance measurements have been supplied by this draft.
@@ -1980,7 +1980,7 @@ C. Zero overhead
 
 Answer: A. A draft plan is valuable, but it is not performance evidence.
 
-10. Time useful work, not process startup
+3.4.2 Time useful work, not process startup
 =========================================
 
 Task: Future exercise: write benchmarks/kernel.c, driver.cpp, and benchmark.py from these references. The listed iteration count is a starting workload, not a measured calibration.
@@ -2262,7 +2262,7 @@ C. To disable all compiler optimization
 
 Answer: A. The intended variable is the kernel transformation under an otherwise matched build.
 
-11. Write a report whose claims match the evidence
+3.5.1 Write a report whose claims match the evidence
 ==================================================
 
 Task: Future exercise: write a benchmark report only after collecting actual data. Keep pending fields visibly pending in the meantime.
@@ -2449,7 +2449,7 @@ C. Yes if the ratio looks reasonable
 
 Answer: A. The report must distinguish the plan from observations.
 
-12. Build a reproducible demo from a fresh directory
+3.5.2 Build a reproducible demo from a fresh directory
 ====================================================
 
 Task: Future exercise: write scripts/demo.sh yourself. This reference assumes the future Volume 3 CMake/tests and discount fixtures have been written. It does not alter or replace your local test_all.sh.
@@ -2782,7 +2782,7 @@ C. Print a warning and report success
 
 Answer: A. Stale artifacts must not masquerade as a successful current transformation.
 
-13. Handle the simulated O2 bug and close Volume 3
+3.5.3 Handle the simulated O2 bug and close Volume 3
 ===============================================
 
 Task: Future exercise: the “protected application fails only at O2” scenario is simulated. It is a debugging exercise, not a report of a current MiniShield incident.
@@ -2985,7 +2985,7 @@ C. Removing the failing input
 
 Answer: A. The fix must address the underlying invariant and retain a test that would catch its return.
 
-14. Terms used in Volume 3
+3.6.1 Terms used in Volume 3
 ==================
 
 ### C++ and build concepts

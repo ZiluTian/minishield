@@ -241,7 +241,7 @@ Checkpoint: Explain what opt -disable-output suppresses: it prevents writing the
 1. `-disable-output` suppresses the output module: `opt` keeps the IR in memory and writes nothing — no `-o` file, no printed IR. It does not suppress compiler-side diagnostic printing: the pass's `llvm::errs()` reports still reach stderr, which is exactly why the flag is used when you only want the diagnostics the pass printed.
 2. There are two programs to keep separate. The compiler-side plugin — your C++ pass sources (`lib/Plugin.cpp`, `lib/FlatteningPass.cpp`) that the compiler/linker turn into `build/libMiniShield.so` — is the code that runs *inside* `opt`. The target program — the LLVM IR module (for example `tests/ir/phi.ll` or `tests/ir/minishield-input.ll`) — is the program `opt` inspects or rewrites. So printing a message in `StatsPass` executes inside `opt`, while creating an `add` instruction inserts a computation for the target program to execute later; a successful plugin build does not by itself run either one.
 
-0. Create the minishield Conda environment
+1.2.1 Create the minishield Conda environment
 ==========================================
 
 Volume 1 builds toward one decision — which functions a control-flow-flattening pass may touch. Everything before that decision is inspection, and inspection needs a plugin that actually loads. This part is the ground every later lesson stands on: a consistent Conda toolchain and a CMake project that turns your source into a loadable library.
@@ -349,7 +349,7 @@ Checkpoint: Check that the selected opt/llvm-config report the intended LLVM 23 
 1. After `conda activate minishield`, check what the shell actually selected: `command -v opt` should point inside `$CONDA_PREFIX/bin`, and `opt --version` and `llvm-config --version` should both report the intended 23.1.5 release. A fresh terminal can silently fall back to different (host) tools, which is why you verify the selected tools instead of assuming the activation worked.
 2. Before linking, `export LIBRARY_PATH="$CONDA_PREFIX/lib"` adds that directory to the conda clang driver's *link-time* `-L` search, because its default search paths (the gcc-layout directories and the sysroot) do not include where the `libstdcxx` package installed `libstdc++.so`; without it the link fails with `x86_64-conda-linux-gnu-ld: cannot find -lstdc++`. Activation (which `PATH` entries the shell uses) and `LIBRARY_PATH` (which directories the driver searches at link time) are distinct pieces of configuration, and `LIBRARY_PATH` is different from `LD_LIBRARY_PATH` (runtime library loading) and from `LLVM_DIR` (where CMake finds `LLVMConfig.cmake`).
 
-1. Understand what CMake is configuring
+1.2.2 Understand what CMake is configuring
 =======================================
 
 Task: read CMakeLists.txt and identify the target named MiniShield.
@@ -765,7 +765,7 @@ Checkpoint: Reconfigure after changing CMake and rebuild. Finding LLVMConfig.cma
 1. Reconfigure (`cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$CONDA_PREFIX/bin/clang++-23" -DLLVM_DIR="$CONDA_PREFIX/lib/cmake/llvm"`) should complete with CMake reporting that configuration and generation succeeded — it prints `Found llvm 23.1.5 at ...`, and the `Could NOT find ZLIB / LibXml2 / zstd` warnings are harmless — and then `cmake --build build` recompiles the changed files and relinks `build/libMiniShield.so`.
 2. That result proves only the discovery step: finding `LLVMConfig.cmake` fills in `LLVM_INCLUDE_DIRS`, `LLVM_DEFINITIONS`, and the imported `LLVM` target. It does not compile project `.cpp` files you forgot to list in `add_library` (the source list decides what is compiled and linked into the plugin), and it does not teach `opt` any pipeline name (that comes from the parsing callback in `Plugin.cpp`). The real check comes after: an `opt` run with `-load-pass-plugin` and the named pass must recognize the name and run.
 
-2. Generate the build instructions before trying to build
+1.2.3 Generate the build instructions before trying to build
 =========================================================
 
 Task: from the project root, activate the environment and configure CMake:
@@ -869,7 +869,7 @@ Checkpoint: The later “ninja: no work to do” message means the build graph c
 1. `ninja: no work to do` means the build graph considers its outputs up to date — no source file is newer than the `build/libMiniShield.so` the earlier build produced. It is not a test result, nor an indication that the plugin succeeded or failed; it simply means there was nothing left to compile or link.
 2. So the next step is a behavioral check, not another build: run an `opt` smoke/verification command, for example `opt -load-pass-plugin="$PWD/build/libMiniShield.so" -passes='function(minishield-flatten),verify' -S tests/ir/minishield-input.ll -o build/minishield-output.ll`. You expect the plugin to load, the stub to print `[MiniShield] function: add_one, blocks: 1`, and `verify` to pass. Only that run shows the pass actually executes; an unchanged build shows only that nothing needed rebuilding.
 
-3. Split the plugin into an entry point and a pass
+1.3.1 Split the plugin into an entry point and a pass
 ==================================================
 
 Now the toolchain is in place; this part makes LLVM actually run your code. You split the plugin into an entry point, a pass declaration, and a pass implementation, then prove the result loads by having opt find your pass. Every later pass — stats, analysis, and flattening — runs only if this chain works, so each link is built and checked on its own.
@@ -950,7 +950,7 @@ Checkpoint: A successful link establishes that referenced definitions were suppl
 2. Loading the module and recognizing a pipeline name are subsequent, separate checks: loading is `opt` `dlopen()`-ing the `.so` through `-load-pass-plugin` and calling the exported `llvmGetPassPluginInfo()` entry point; recognition is the `registerPipelineParsingCallback` callback matching `minishield-flatten` and calling `FPM.addPass(minishield::FlatteningPass())`.
 3. Keep those layers separate when locating the next error: a link error (an unresolved definition) points at the C++ sources or the CMake source list; a load failure points at the `.so` path or the plugin's exported entry point; an unknown-function-pass error points at the registration callback or the spelling in the `-passes` string. A green link proves none of the later layers, so it must not make you skip them.
 
-4. Choose optional or required pass behavior explicitly
+1.3.2 Choose optional or required pass behavior explicitly
 =======================================================
 
 Task: compare PassInfoMixin, OptionalPassInfoMixin, and RequiredPassInfoMixin
@@ -1034,7 +1034,7 @@ Checkpoint: Use an optnone fixture to check skipping behavior once registration 
 1. Once registration works, exercise the skipping policy on the `optnone` fixture: run `minishield-stats` over `tests/ir/instruction-kinds.ll` — its `without_optimization` function carries `optnone`, and because `StatsPass` inherits `RequiredPassInfoMixin` (`isRequired()` is true) the pass still runs there and must produce its report. Run the optional `minishield-flatten` on the same input: declared with `OptionalPassInfoMixin`, it may be skipped on that `optnone` function, so one fixture demonstrates both behaviors.
 2. `required` is only a skipping policy, not a presence guarantee: it decides whether normal pass-skipping mechanisms may skip the pass, but it does not load the plugin (that is `-load-pass-plugin`), register the pipeline name (that is the parsing callback), or schedule the pass automatically — required does not automatically add the pass to a pipeline; it must still be registered and scheduled. It is also unrelated to the target program: the pass is an inspection tool `opt` runs, and nothing about the program's own behavior requires it.
 
-5. Register the pass name that opt will recognize
+1.3.3 Register the pass name that opt will recognize
 =================================================
 
 Task: understand llvmGetPassPluginInfo() in Plugin.cpp.
@@ -1181,7 +1181,7 @@ Checkpoint: A typo in the command string, an unregistered name, or a stale plugi
 1. The three causes converge on the same symptom — an unknown-function-pass error: a typo in the `-passes` string means the name never matches the callback's comparison; an unregistered name means the class exists but the callback has no branch that adds it (defining a class alone does not register it); a stale plugin means the `cmake --build build` after the registration edit failed, leaving the previous `.so` on disk, which `opt` loads without complaint but whose callback lacks the new branch.
 2. A successful load proves only the load-time relationship: that `dlopen` found the `.so` and its exported `llvmGetPassPluginInfo` ran. Recognition of the pipeline element is a separate, later step inside the parsing callback, and load success tells you nothing about it. So on an unknown-pass failure, check the layers in order: the command string's spelling, the callback's branch (including that `Plugin.cpp` includes the pass header), and that the plugin was actually rebuilt after the registration change.
 
-6. Run a small smoke input and distinguish validity from correctness
+1.3.4 Run a small smoke input and distinguish validity from correctness
 ====================================================================
 
 Task: use the repository fixture tests/ir/minishield-input.ll:
@@ -1288,7 +1288,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: add_one still computes x + 1 and returns it from the same entry block.
 
-7. Start task 1.2 by declaring StatsPass
+1.4.1 Start task 1.2 by declaring StatsPass
 ========================================
 
 With a plugin that loads, you can write your first pass end to end: a read-only stats pass that walks each function's blocks and instructions and counts what it finds. Counting is the safe way to learn the traversal, because it changes nothing — you are reading IR, not rewriting it. The same loop shapes up for the analysis that follows.
@@ -1335,7 +1335,7 @@ Checkpoint: A header can compile in one file while another translation unit stil
 1. Each `.cpp` is compiled as its own translation unit and sees only the declarations it includes: `StatsPass.cpp` can compile fine with `#include "minishield/StatsPass.h"` while `Plugin.cpp` — which forgot that include (or included `FlatteningPass.h` twice instead) — fails with “no member named 'StatsPass' in namespace 'minishield'”. The CMake source list supplies the implementation at link time; it does not replace includes at compile time.
 2. The two integration errors are separate, and each has its own fix: the namespace-member error is a compile-time visibility problem (add the include in `Plugin.cpp`), and the unknown pipeline name is a registration problem (extend the parsing callback to `FPM.addPass(minishield::StatsPass())` and rebuild the `.so`). Duplicating the class definition in `Plugin.cpp` would fix neither: it breaks the single-definition rule (the same class defined in two translation units), and the callback would still have no name registered — so neither error should be “fixed” that way.
 
-8. Count blocks and instructions before classifying instructions
+1.4.2 Count blocks and instructions before classifying instructions
 ================================================================
 
 Task: write lib/StatsPass.cpp. Include the StatsPass header, Function.h,
@@ -1447,7 +1447,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: Locate one conditional branch in entry and two unconditional branches, then find the PHI and return in join.
 
-9. Make the new pass available, then rebuild the plugin
+1.4.3 Make the new pass available, then rebuild the plugin
 =======================================================
 
 Task: add lib/StatsPass.cpp to the existing CMake target. Include StatsPass.h
@@ -1502,7 +1502,7 @@ Checkpoint: Classify the failure by stage: compiler visibility, linker definitio
 4. Parser: “unknown function pass 'minishield-stats'” means the loaded plugin's parsing callback did not recognize the name — it is not registered, or the pipeline string is misspelled.
 5. The stale-`.so` warning: a failed build leaves the previous `libMiniShield.so` on disk, and it loads successfully. An unknown-pass error seen through that old file does not test your newly edited callback at all, because the new callback was never compiled into it. Rebuild successfully first, then rerun `opt` — only then does the error, or its absence, say anything about the new registration.
 
-10. Add instruction classifications in small increments
+1.4.4 Add instruction classifications in small increments
 =======================================================
 
 First exercise: count conditional and unconditional branches separately.
@@ -1553,7 +1553,7 @@ calls alongside ordinary function calls — it means **all** call instructions,
 not just calls to user-defined functions. What an intrinsic is, and why the
 class chain `Instruction` to `CallBase` to `CallInst` to `IntrinsicInst`
 still leaves the opcode as `Call`, is in the LLVM concepts reference
-(section 19).
+(section 1.7.2).
 
 ### Study-session walkthrough — switch classification still needs the installed opcode names
 
@@ -1645,7 +1645,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: Both the conditional and unconditional branches retain their original destinations.
 
-11. Cross-check the supplied fixtures
+1.4.5 Cross-check the supplied fixtures
 =====================================
 
 Task: compare each report against the IR and the expected table in README.
@@ -1859,7 +1859,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: Follow entry → header → body → header and header → exit. Static instruction counts are not iteration counts.
 
-12. Turn test_all.sh output into a readable table
+1.4.6 Turn test_all.sh output into a readable table
 =================================================
 
 Task: keep the loop, but capture each opt invocation's diagnostic output:
@@ -1933,7 +1933,7 @@ Checkpoint: Check a successful input and an intentionally failing command. A nic
 1. `llvm::errs()` writes to stderr, so the runner captures diagnostics with `output=$(opt ... 2>&1)` and the `if` checks `opt`'s exit status: on success it parses and prints the report lines; on failure it must show the file and the diagnostic and then exit with failure. A verifier failure must remain a failure, not become a plausible empty table row — and you can only prove that path works by exercising it with an intentionally failing command, alongside a successful input.
 2. The table (built by `awk -F ', '` over the `[MiniShield] function: ` lines, printing `key=value` only for nonzero fields) displays measured values. Running all files under `tests/ir/*.ll` still does not assert their expected counts, because nothing compares the printed fields to the hand-counted expectations — without that comparison and a failure status, the runner exits 0 even when every count is wrong.
 
-13. Check that inspection preserves the IR
+1.4.7 Check that inspection preserves the IR
 ==========================================
 
 Task: produce canonical LLVM output with and without the stats pass:
@@ -2041,7 +2041,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: The listing keeps the same PHI, constants, block order, and edges.
 
-14. Start task 1.3 by printing successor relationships
+1.5.1 Start task 1.3 by printing successor relationships
 ======================================================
 
 Counting told you what is in a function; this part captures its shape. You turn the walk into a control-flow graph — block addresses, successors, and predecessors — returned as an analysis that LLVM can cache and hand to another pass. The flattening pass will ask for exactly this graph, so it is built as reusable data, not as diagnostic text.
@@ -2157,7 +2157,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: entry has two successors; left and right each lead to join; join has none.
 
-15. Declare a reusable CFGAnalyzer analysis
+1.5.2 Declare a reusable CFGAnalyzer analysis
 ===========================================
 
 Task: write include/minishield/CFGAnalyzer.h. This header is now drafted.
@@ -2378,7 +2378,7 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: The loop’s header still selects the initial 0 or the preceding body’s next value.
 
-16. Next exercise: implement the basic analysis before adding loops
+1.5.3 Next exercise: implement the basic analysis before adding loops
 ===================================================================
 
 The next small step is lib/CFGAnalyzer.cpp. The learner should write it.
@@ -2480,7 +2480,7 @@ the mirror image: `llvm::successors(&BB)` already yields block pointers, so
 `successor` is a pointer and you store it as-is with `push_back(successor)`;
 writing `push_back(&successor)` would store a `BasicBlock **`, one level too
 deep. The full reference-versus-pointer treatment is in the C++ concepts
-reference (section 18).
+reference (section 1.7.1).
 
 ### Study-session walkthrough — fill one record completely, then append it
 
@@ -2570,15 +2570,16 @@ This listing is a complete LLVM module defining the example function, not a frag
 
 Follow the values and edges: Compare actual branch operands rather than the order of a diagnostic list.
 
-17. The eligibility decision
+1.5.4 The eligibility decision
 ============================
 
 MiniShield's product is a control-flow-flattening pass: it rewrites a
 function's branching into a single dispatcher. It can only run on functions it
 fully understands, so the first job is a guard — an eligibility policy that
 accepts a function only if every block, terminator, and call is supported, and
-rejects everything else without changing it. This is the one decision Volume 1
-ends on; the flattening rewrite itself is Volume 2.
+rejects everything else without changing it. This closes the control-flow
+analysis chapter. The next chapter introduces IR construction; the full
+flattening rewrite is Volume 2.
 
 ### The guard returns a decision, not an edit
 
@@ -2619,7 +2620,7 @@ presplit coroutine functions, personality routines, coroutine intrinsic calls,
 address-taken blocks, EH pads, and unsupported terminators. The supported
 terminators in this LLVM 23 API are `CondBr`, `UncondBr`, `Switch`, `Ret`, and
 `Unreachable`. What an EH pad, a personality routine, and a coroutine intrinsic
-actually are is in the LLVM concepts reference (section 19).
+actually are is in the LLVM concepts reference (section 1.7.2).
 
 ### One unsupported feature per negative fixture
 
@@ -2656,7 +2657,298 @@ was left untouched.
 2. `PreservedAnalyses::all()` is correct on the rejected path because nothing was edited: the rejection only prints the function name and reason to `llvm::errs()`, so the promise that every cached analysis remains valid is true — the same reasoning that makes `all()` correct for the read-only `StatsPass`. (A real flattening rewrite, by contrast, generally returns `none()` unless it explicitly maintains particular analyses.)
 3. An empty canonical diff, not a successful `verify`, proves the function was left untouched because `verify` proves only validity — that the IR obeys structural rules — and a module can be valid yet changed: a well-formed wrong transformation passes `verify` too. The rejection contract is byte-for-byte identity in canonical form: print the rejected function's IR with and without the pass (for example `tests/ir/coroutine.ll`) through LLVM's printer and require `diff -u build/before.ll build/after.ll` to be empty. Only that check rules out partial edits.
 
-18. C++ concepts
+1.6.1 Create instructions with IRBuilder
+========================================
+
+LLVM IRBuilder is the API this book uses to create and place LLVM IR
+instructions. A transformation pass does more than describe a change: it must
+create typed values, attach them to a basic block, and keep the function
+structurally valid. IRBuilder provides methods for constructing instructions
+at a chosen insertion point. The pass still decides what the instructions
+should mean and where control should go.
+
+### A simple model: position, create, use
+
+A builder remembers an insertion point, where its next instruction will go.
+A `Create...` method constructs an LLVM value or instruction there. If the
+method returns a value, a later builder call can use that result as an operand.
+This lets a transformation build an instruction sequence in execution order.
+
+IRBuilder does not decide whether the transformation is correct and does not
+erase old instructions automatically. It also does not promise that every
+`Create...` call inserts an instruction: when operands are constants, LLVM may
+fold the operation into a constant value.
+
+### Example: replace a return with x + 1
+
+Assume the function has one i32 argument and currently returns a placeholder
+constant. This helper inserts an add and a new return before the old
+terminator, then erases the old return:
+
+```cpp
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instruction.h"
+
+void replaceReturnWithAdd(llvm::Function &F) {
+    llvm::BasicBlock &entry = F.getEntryBlock();
+    llvm::Instruction *oldTerminator = entry.getTerminator();
+    llvm::IRBuilder<> B(oldTerminator);
+
+    llvm::Value *x = F.getArg(0);
+    llvm::Value *sum = B.CreateAdd(x, B.getInt32(1), "sum");
+    B.CreateRet(sum);
+    oldTerminator->eraseFromParent();
+}
+```
+
+The builder is positioned before the existing return. `CreateAdd` inserts `%sum`
+and returns an LLVM `Value *` that `CreateRet` can use. `CreateRet` inserts the
+new terminator before the old one; `eraseFromParent` removes the placeholder
+return. A later lesson focuses on choosing insertion points safely.
+
+| C++ expression | What it means |
+| --- | --- |
+| `IRBuilder<> B(oldTerminator)` | Construct a builder that inserts before the existing return. |
+| `B.getInt32(1)` | Create the typed i32 constant 1. A constant is an operand, not an instruction. |
+| `B.CreateAdd(x, ..., "sum")` | Insert an i32 add. Its result is an LLVM `Value *` that another instruction can use. |
+| `B.CreateRet(sum)` | Insert a return terminator that returns the computed value. |
+| `oldTerminator->eraseFromParent()` | Remove the old return instruction from its parent block. IRBuilder does not do this automatically. |
+
+### LLVM IR before and after this builder step
+
+Before, the function returns a placeholder value:
+
+```llvm
+define i32 @add_one(i32 %x) {
+entry:
+  ret i32 0
+}
+```
+
+After, `add` defines `%sum`, and `ret` returns that value:
+
+```llvm
+define i32 @add_one(i32 %x) {
+entry:
+  %sum = add i32 %x, 1
+  ret i32 %sum
+}
+```
+
+`define` starts a function definition; `@add_one` is its module-level name.
+The function accepts an i32 argument named `%x` and returns i32. Here i32 is a
+32-bit integer type. `entry:` names a basic block. In the after module, `add`
+combines `%x` and the constant 1 and defines the local SSA value `%sum`. `ret
+i32 %sum` ends this call and returns that value to the caller. The type on
+`add` makes the literal 1 an i32 operand. The builder's constant helper
+supplies that typed constant; it does not print as a separate instruction.
+
+Task: Read the helper in order. Mark the insertion point, the instruction-
+creating calls, the returned `Value *`, and the operation that removes the old
+terminator.
+
+Checkpoint: Why does `CreateAdd` return something `CreateRet` can use, while
+`getInt32(1)` does not appear as its own instruction?
+
+### Model answer
+
+`CreateAdd` inserts an add instruction and returns its result as an LLVM
+`Value *`; `CreateRet` uses that value as its return operand. `getInt32(1)`
+creates a constant, not an operation to execute. LLVM prints the constant
+inline as the add's operand, so there is no separate constant instruction.
+
+1.6.2 Build a dispatcher with IRBuilder
+=======================================
+
+Volume 2 uses IRBuilder to build the control-flow dispatcher. The high-level
+plan is to load the current state ID, then let one switch choose the basic
+block for that ID. Each switch case adds one control-flow edge; a default
+edge goes to the invalid-state block.
+
+### Build one dispatcher block
+
+Suppose the pass has created a dispatcher block, an invalid block, an i32
+state slot, and a list of state blocks. This helper loads the current state
+and creates the switch:
+
+```cpp
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+
+void buildDispatcher(
+    llvm::BasicBlock *dispatcher,
+    llvm::BasicBlock *invalidBlock,
+    llvm::Value *stateSlot,
+    llvm::ArrayRef<llvm::BasicBlock *> stateBlocks) {
+    llvm::IRBuilder<> B(dispatcher);
+
+    llvm::LoadInst *current =
+        B.CreateLoad(B.getInt32Ty(), stateSlot, "ms.current");
+    llvm::SwitchInst *dispatch = B.CreateSwitch(
+        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));
+
+    for (unsigned id = 0; id < stateBlocks.size(); ++id)
+        dispatch->addCase(B.getInt32(id), stateBlocks[id]);
+}
+```
+
+The caller creates the block and then asks the helper to fill it. This is a
+call-site fragment inside a function that already has `F`, `invalidBlock`,
+`stateSlot`, and `stateBlocks`:
+
+```cpp
+llvm::BasicBlock *dispatcher =
+    llvm::BasicBlock::Create(F.getContext(), "ms.dispatch", &F);
+buildDispatcher(dispatcher, invalidBlock, stateSlot, stateBlocks);
+```
+
+The helper assumes the slot points to i32 storage, every state block belongs
+to the same function, and the vector order is the state-ID order. It builds
+one block. Another pass step must initialize the slot and route control to
+the dispatcher.
+
+### Read each builder call
+
+| C++ expression | LLVM IR it creates | Meaning |
+| --- | --- | --- |
+| `IRBuilder<> B(dispatcher)` | No instruction | Chooses the end of the empty dispatcher as the insertion point. |
+| `B.getInt32Ty()` | No instruction | Gets the i32 type from the LLVM context. It is a type, not the number 32 or an i32 value. |
+| `B.CreateLoad(type, address, name)` | `%ms.current = load i32, ptr %ms.state` | Reads an i32 from the address held by `stateSlot`. The pointer supplies the address; the explicit i32 says which value type to load. |
+| `B.CreateSwitch(value, default, count)` | `switch i32 %ms.current, label %ms.invalid [...]` | Creates the block's terminator. It branches to the matching case or to the default destination. |
+| `dispatch->addCase(B.getInt32(id), block)` | `i32 0, label %left` | Adds a typed case value and destination to the existing switch. It does not append another instruction. |
+| `B.getInt32(id)` | No instruction | Creates an i32 constant used as a switch case. A constant is data, not executable work. |
+
+`CreateLoad` returns a C++ `LoadInst *`; this C++ pointer is different from
+the LLVM `ptr` value being loaded through. `CreateSwitch` returns a C++
+`SwitchInst *`. Other methods have other return types: `CreateStore` returns
+`void` because a store has no SSA result. The word `Create` does not promise
+that every method returns an `Instruction *`.
+
+A switch is a terminator, so it must be last in its block. `addCase` edits the
+switch already created. If an unknown state must never occur, the invalid
+block can end in `unreachable`, which marks execution there as impossible in
+a defined program; it is not a fallback return.
+
+### LLVM IR before and after constructing the dispatcher
+
+Before, the function has no dispatcher block:
+
+```llvm
+define i32 @dispatch_demo(i32 %state) {
+entry:
+  %ms.state = alloca i32, align 4
+  store i32 %state, ptr %ms.state, align 4
+  br label %left
+
+left:
+  ret i32 10
+
+right:
+  ret i32 20
+
+ms.invalid:
+  unreachable
+}
+```
+
+The caller creates `ms.dispatch`, then the helper inserts the load and switch:
+
+```llvm
+define i32 @dispatch_demo(i32 %state) {
+entry:
+  %ms.state = alloca i32, align 4
+  store i32 %state, ptr %ms.state, align 4
+  br label %left
+
+left:
+  ret i32 10
+
+right:
+  ret i32 20
+
+ms.invalid:
+  unreachable
+
+ms.dispatch:
+  %ms.current = load i32, ptr %ms.state, align 4
+  switch i32 %ms.current, label %ms.invalid [
+    i32 0, label %left
+    i32 1, label %right
+  ]
+}
+```
+
+The signature defines `@dispatch_demo`, which accepts and returns i32. `%state`
+is the argument value; `%ms.state` is an alloca result, a pointer to stack
+storage. `store` writes the argument to that address. `br label %left`
+transfers control to the `left` block, where `ret i32 10` returns 10. `right`
+returns 20. `unreachable` says the invalid block cannot execute in a defined
+program.
+
+In the after module, `load i32, ptr %ms.state` reads the saved state into
+`%ms.current`. The opaque pointer type `ptr` names an address; the i32 before
+it tells `load` which value type to read. `switch` compares `%ms.current` with
+typed constants 0 and 1, branches to the corresponding block, and sends every
+other value to `ms.invalid`. Labels are control-flow destinations, not data
+values. A switch chooses one destination; it does not run every case.
+
+This construction step adds the dispatcher but does not connect it. No edge
+enters `ms.dispatch`: entry still branches directly to `left`, so the new
+switch does not affect execution. The next builder step stores a state ID and
+rewrites the entry edge. Both modules are structurally valid, but `verify`
+alone cannot prove completed flattening or behavior preservation.
+
+### Choose a safe insertion point
+
+A builder made from a basic block inserts at the block's end. That is useful
+for an empty new block. For an existing block with a terminator, inserting at
+the end would place an instruction after `br` or `ret`, which is invalid. To
+insert setup before the old terminator, construct the builder with that
+instruction:
+
+```cpp
+llvm::Instruction *oldTerminator = entry->getTerminator();
+llvm::IRBuilder<> setup(oldTerminator);
+llvm::AllocaInst *stateSlot =
+    setup.CreateAlloca(setup.getInt32Ty(), nullptr, "ms.state");
+```
+
+`alloca i32` reserves stack storage for one i32 and produces a pointer; it
+does not initialize that storage. A later `CreateStore` writes a state ID.
+For the entry-block setup rule used here, `entry->getFirstInsertionPt()` also
+finds the first legal insertion position, after any PHIs. The expression
+`&*entry->getFirstInsertionPt()` dereferences the iterator to get the
+instruction and takes that instruction's address for the builder constructor.
+
+Each builder remembers its own insertion point. Use a separate builder for a
+separate block, or move one intentionally with `SetInsertPoint`; operands do
+not tell a builder which block should receive an instruction.
+
+Task: In `StateMachineBuilder`, build the dispatcher with one builder. Add the
+load and switch, then add a case for each `(state ID, block)` pair. Keep slot
+initialization and entry rewriting as separate steps.
+
+Checkpoint: Which calls insert instructions, which calls only provide a type
+or constant, and why does `addCase` not add a second terminator? Inspect the
+result with `opt` and run the verifier.
+
+### Model answer
+
+`CreateLoad` inserts the load and returns its `LoadInst *`. `CreateSwitch`
+inserts the terminator and returns its `SwitchInst *`. `getInt32Ty()` returns
+a type and `getInt32(id)` returns a constant; neither is an instruction.
+`addCase` mutates the existing switch's case list, so the block still has one
+terminator. A builder for an empty new block starts at its end; a builder for
+an existing block must be positioned before its terminator. The verifier
+checks structural validity, and inspecting the cases confirms the intended
+state mapping.
+
+1.7.1 C++ concepts
 ================
 
 Reference cards for the C++ the Volume 1 lessons rely on: references versus
@@ -2742,7 +3034,7 @@ for (const llvm::BasicBlock *s : llvm::successors(&BB))  // successors() yields 
 
 See the C++ reference for [references](https://en.cppreference.com/w/cpp/language/reference.html), the [address-of operator](https://en.cppreference.com/w/cpp/language/operator_other.html), [auto](https://en.cppreference.com/w/cpp/language/auto.html), and the [range-based for loop](https://en.cppreference.com/w/cpp/language/expressions.html).
 
-19. LLVM concepts
+1.7.2 LLVM concepts
 =================
 
 Reference cards for the LLVM IR constructs the eligibility decision mentions:
@@ -2820,7 +3112,7 @@ The guard conservatively rejects coroutine intrinsics: after
 `llvm::dyn_cast<llvm::IntrinsicInst>(&I)`, a callee name starting with
 `llvm.coro.` is rejected. See [LLVM's exception-handling docs](https://llvm.org/docs/ExceptionHandling.html), the [intrinsic reference](https://llvm.org/docs/LangRef.html#intrinsic-functions), and [coroutines](https://llvm.org/docs/Coroutines.html).
 
-Glossary. Terms used in the README and Volume 1
+1.7.3 Glossary. Terms used in the README and Volume 1
 ============================================
 
 Alphabetical, one-to-three-sentence definitions of the terms that appear in

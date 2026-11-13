@@ -103,7 +103,7 @@
     {
       "id": 27,
       "day": 2,
-      "number": 0,
+      "number": 1,
       "title": "Before changing the IR",
       "originalTitle": "Before changing the IR",
       "summary": "Recall SSA and dominance, learn the memory operations we will introduce, and locate the exact boundary between inspection and transformation.",
@@ -1697,7 +1697,7 @@
     {
       "id": 31,
       "day": 2,
-      "number": 4,
+      "number": 1,
       "title": "Find values that cross block boundaries",
       "originalTitle": "Find values that cross block boundaries",
       "summary": "Ordinary values can cross blocks without any PHI. Understand why new edges threaten those definitions before collecting the remaining dependencies.",
@@ -2111,7 +2111,7 @@
     {
       "id": 32,
       "day": 2,
-      "number": 5,
+      "number": 2,
       "title": "Ask whether an instruction produces a value",
       "originalTitle": "Ask whether an instruction produces a value",
       "summary": "Distinguish an instruction’s result type from its operands and from the function’s return type.",
@@ -2514,7 +2514,7 @@
     {
       "id": 33,
       "day": 2,
-      "number": 6,
+      "number": 3,
       "title": "Recognize the stack allocation itself",
       "originalTitle": "Recognize the stack allocation itself",
       "summary": "Use isa when you only need a yes/no answer. Understand why alloca survives the void filter.",
@@ -2882,7 +2882,7 @@
     {
       "id": 34,
       "day": 2,
-      "number": 7,
+      "number": 4,
       "title": "Finish collection without a premature return",
       "originalTitle": "Finish collection without a premature return",
       "summary": "Review the two missing pieces found in the draft: appending candidates and reaching this stage when the PHI list is empty.",
@@ -3190,7 +3190,7 @@
     {
       "id": 35,
       "day": 2,
-      "number": 8,
+      "number": 5,
       "title": "Read the demotion helper signatures",
       "originalTitle": "Read the demotion helper signatures",
       "summary": "Compare pointer and reference parameters before calling the next utility. Understand the return value, default arguments, and what the worklist does not own.",
@@ -3554,7 +3554,7 @@
     {
       "id": 36,
       "day": 2,
-      "number": 9,
+      "number": 6,
       "title": "Demote the escaping values",
       "originalTitle": "Demote the escaping values",
       "summary": "Keep each original calculation while changing how its result reaches another block. Understand what memory transport solves and what the state machine must still guarantee.",
@@ -3918,7 +3918,7 @@
     {
       "id": 37,
       "day": 2,
-      "number": 10,
+      "number": 1,
       "title": "Trace ordinary-value demotion",
       "originalTitle": "Trace ordinary-value demotion",
       "summary": "Follow the same result from an add through a store and load. Separate the C++ worklist from the LLVM stack slot it helps create.",
@@ -4309,7 +4309,7 @@
     {
       "id": 38,
       "day": 2,
-      "number": 11,
+      "number": 2,
       "title": "Trace PHI demotion by predecessor",
       "originalTitle": "Trace PHI demotion by predecessor",
       "summary": "See how stores on incoming paths replace predecessor-based selection. Compare it directly with ordinary instruction demotion.",
@@ -4716,7 +4716,7 @@
     {
       "id": 39,
       "day": 2,
-      "number": 12,
+      "number": 1,
       "title": "Assign states before changing edges",
       "originalTitle": "Assign states before changing edges",
       "summary": "Encode the original next-block decision as a state number, and understand why one-time entry setup is excluded from recurring states.",
@@ -5098,7 +5098,7 @@
     {
       "id": 40,
       "day": 2,
-      "number": 13,
+      "number": 2,
       "title": "Fix pointer keys and pair insertion",
       "originalTitle": "Fix pointer keys and pair insertion",
       "summary": "Translate the state-map compiler errors into exact C++ types, and distinguish copying a pointer from copying a block.",
@@ -5473,7 +5473,7 @@
     {
       "id": 41,
       "day": 2,
-      "number": 14,
+      "number": 3,
       "title": "Construct a complete dispatcher block",
       "originalTitle": "Construct a complete dispatcher block",
       "summary": "Build the shared block that decodes next-state choices, and distinguish valid disconnected machinery from a live transformed program.",
@@ -5911,7 +5911,7 @@
     {
       "id": 42,
       "day": 2,
-      "number": 15,
+      "number": 4,
       "title": "Separate block names from C++ variables",
       "originalTitle": "Separate block names from C++ variables",
       "summary": "Fix the creation errors from the first dispatcher draft and explain exactly why a block pointer is the right return type.",
@@ -6263,7 +6263,7 @@
     {
       "id": 43,
       "day": 2,
-      "number": 16,
+      "number": 5,
       "title": "Connect an unconditional entry branch",
       "originalTitle": "Connect an unconditional entry branch",
       "summary": "Translate the original entry branch’s intention into a stored state, making the first dispatcher hop live without changing its destination.",
@@ -6676,7 +6676,7 @@
     },
     {
       "id": 45,
-      "number": 17,
+      "number": 1,
       "day": 2,
       "title": "Define the supported input before mutation",
       "originalTitle": "Define the supported input before mutation",
@@ -7757,7 +7757,7 @@
     },
     {
       "id": 46,
-      "number": 18,
+      "number": 2,
       "day": 2,
       "title": "Give state-machine construction its own class",
       "originalTitle": "Give state-machine construction its own class",
@@ -8186,7 +8186,7 @@
     },
     {
       "id": 47,
-      "number": 19,
+      "number": 3,
       "day": 2,
       "title": "Choose states for conditional branches",
       "originalTitle": "Choose states for conditional branches",
@@ -8543,7 +8543,7 @@
     },
     {
       "id": 48,
-      "number": 20,
+      "number": 4,
       "day": 2,
       "title": "Lower original switches to state selection",
       "originalTitle": "Lower original switches to state selection",
@@ -8900,7 +8900,7 @@
     },
     {
       "id": 49,
-      "number": 21,
+      "number": 5,
       "day": 2,
       "title": "Rewrite every original terminator",
       "originalTitle": "Rewrite every original terminator",
@@ -9253,7 +9253,7 @@
     },
     {
       "id": 50,
-      "number": 22,
+      "number": 6,
       "day": 2,
       "title": "Orchestrate policy, preparation, and construction",
       "originalTitle": "Orchestrate policy, preparation, and construction",
@@ -9608,7 +9608,7 @@
     },
     {
       "id": 51,
-      "number": 23,
+      "number": 1,
       "day": 2,
       "title": "Inspect the final shape with LLVM tools",
       "originalTitle": "Inspect the final shape with LLVM tools",
@@ -9927,7 +9927,7 @@
     },
     {
       "id": 52,
-      "number": 24,
+      "number": 2,
       "day": 2,
       "title": "Compare observable behavior on a defined domain",
       "originalTitle": "Compare observable behavior on a defined domain",
@@ -10331,7 +10331,7 @@
     },
     {
       "id": 53,
-      "number": 25,
+      "number": 3,
       "day": 2,
       "title": "Add difficult CFG fixtures deliberately",
       "originalTitle": "Add difficult CFG fixtures deliberately",
@@ -10690,7 +10690,7 @@
     },
     {
       "id": 54,
-      "number": 26,
+      "number": 4,
       "day": 2,
       "title": "Account for optimizers, debug data, and limitations",
       "originalTitle": "Account for optimizers, debug data, and limitations",
@@ -11021,7 +11021,7 @@
     },
     {
       "id": 55,
-      "number": 27,
+      "number": 5,
       "day": 2,
       "title": "Close Volume 2 with an evidence checklist",
       "originalTitle": "Close Volume 2 with an evidence checklist",
@@ -11330,7 +11330,7 @@
     {
       "id": 44,
       "day": 2,
-      "number": 28,
+      "number": 1,
       "title": "Terms used in Volume 2",
       "originalTitle": "Terms used in Volume 2",
       "summary": "A compact reference for the general compiler and project vocabulary used in Volume 2; LLVM-specific and C++-specific terms each have their own document.",
@@ -11746,7 +11746,7 @@
     {
       "id": 71,
       "day": 2,
-      "number": 29,
+      "number": 2,
       "title": "LLVM terms used in Volume 2",
       "originalTitle": "LLVM terms used in Volume 2",
       "summary": "The LLVM-specific terms of Volume 2: the IR constructs the pass reads and writes, the call and function properties the guard checks, and the C++ API surface the pass uses.",
@@ -11804,7 +11804,7 @@
             ],
             [
               "The C++ API side",
-              "isa / cast / dyn_cast, LLVMContext, IRBuilder and insertion point, getInt32Ty / getInt32, DenseMap, PreservedAnalyses, eraseFromParent, isUsedOutsideOfBlock, DemotePHIToStack / DemoteRegToStack"
+              "isa / cast / dyn_cast, LLVMContext, DenseMap, PreservedAnalyses, eraseFromParent, isUsedOutsideOfBlock, DemotePHIToStack / DemoteRegToStack"
             ]
           ]
         },
@@ -12538,52 +12538,6 @@
         },
         {
           "type": "heading",
-          "text": "IRBuilder and insertion point"
-        },
-        {
-          "type": "paragraph",
-          "text": "IRBuilder inserts instructions at a chosen position: the insertion point is where the next instruction goes, and a pointer-based constructor can insert before an existing instruction or at the end of a block. Lesson 14 builds new blocks and terminates them with the builder."
-        },
-        {
-          "type": "paragraph",
-          "text": "Mechanically, each `Create*` method constructs the instruction, links it into the block at the builder’s insertion point, and advances the point past it. Successive calls therefore write the instruction stream in order, and each call returns the new value as a `Value *` that a later call can use as an operand — in lesson 14, `CreateLoad` produces `ms.current` and the following `CreateSwitch` takes it as its condition. Operations with no SSA result (`CreateStore`, `CreateUnreachable`) return nothing, matching the void-result entry above."
-        },
-        {
-          "type": "paragraph",
-          "text": "The constructors choose the point in two ways. The pointer form `IRBuilder<>(invalidBlock)` targets the end of the block, which is the only legal position on a freshly created empty block — the `invalidBuilder` and `dispatchBuilder` of lesson 14. The iterator form `IRBuilder<>(&*entry->getFirstInsertionPt())` targets an existing block instead: `getFirstInsertionPt()` is an iterator to the first legal insertion position, `*` obtains that instruction, `&` hands it to the constructor, and every `Create*` on that builder (`setup`) inserts before it. `SetInsertionPoint` moves an existing builder to a new position. Each builder object holds its own point, so the three builders in the dispatcher step — `setup`, `dispatchBuilder`, `invalidBuilder` — write into three different blocks without stepping on each other."
-        },
-        {
-          "type": "paragraph",
-          "text": "Two behaviors the book leans on. First, a `Create*` call does not always create: when its operands are constants the method may fold the result and return a `Constant` without inserting any instruction at all — that is the constant-input `CreateSelect` lesson 14’s checkpoint names, and it is why “every Create... call adds exactly one instruction” is an unsafe assumption. Second, `IRBuilder<>` is the default instantiation of the template `IRBuilder<Derived>`: the empty angle brackets give the plain builder that constructs the ordinary instruction classes. Operand types and constants come from the builder’s context through `getInt32Ty()` / `getInt32(n)` (the next entry), not from raw constructor calls."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/IRBuilder.h\"\n\n// Lesson 14's dispatcher step, compressed: the two insertion-point forms.\nvoid begin_dispatch(llvm::Function &F,\n                    std::vector<llvm::BasicBlock *> stateBlocks) {\n    llvm::BasicBlock *entry = &F.front();\n    llvm::BasicBlock *dispatcher =\n        llvm::BasicBlock::Create(F.getContext(), \"ms.dispatch\", &F);\n    llvm::BasicBlock *invalidBlock =\n        llvm::BasicBlock::Create(F.getContext(), \"ms.invalid\", &F);\n\n    // Iterator form: insert before entry's first existing instruction.\n    llvm::IRBuilder<> setup(&*entry->getFirstInsertionPt());\n    llvm::AllocaInst *stateSlot =\n        setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\");\n\n    // Pointer form: both fresh blocks are empty, so the end of the block is\n    // the only legal position. Each builder keeps its own insertion point.\n    llvm::IRBuilder<> invalidBuilder(invalidBlock);\n    invalidBuilder.CreateUnreachable();\n\n    llvm::IRBuilder<> dispatch(dispatcher);\n    llvm::Value *current =\n        dispatch.CreateLoad(dispatch.getInt32Ty(), stateSlot, \"ms.current\");\n    llvm::SwitchInst *sw = dispatch.CreateSwitch(\n        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));\n    // addCase(int constant, BB) calls would attach one edge per state block.\n}"
-        },
-        {
-          "type": "paragraph",
-          "text": "See the [IRBuilder doxygen](https://llvm.org/doxygen/classllvm_1_1IRBuilder.html)."
-        },
-        {
-          "type": "heading",
-          "text": "getInt32Ty / getInt32"
-        },
-        {
-          "type": "paragraph",
-          "text": "getInt32Ty() returns the i32 Type*; getInt32(2) returns the ConstantInt holding a particular value. A builder step often needs both — a type to declare storage, a value to store — and confusing the two is a common type error."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/Constants.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include <utility>\n\nstd::pair<llvm::Type *, llvm::ConstantInt *>\ntype_and_value(llvm::IRBuilder<> &B) {\n    return {B.getInt32Ty(), B.getInt32(2)};\n}"
-        },
-        {
-          "type": "paragraph",
-          "text": "See the [IRBuilder doxygen](https://llvm.org/doxygen/classllvm_1_1IRBuilder.html), where both methods live."
-        },
-        {
-          "type": "heading",
           "text": "DenseMap"
         },
         {
@@ -12689,7 +12643,7 @@
           ]
         }
       ],
-      "words": 4583,
+      "words": 4042,
       "quiz": {
         "q": "Which pair denotes a type and a value, respectively?",
         "choices": [
@@ -12704,7 +12658,7 @@
     {
       "id": 72,
       "day": 2,
-      "number": 30,
+      "number": 3,
       "title": "C++ terms used in Volume 2",
       "originalTitle": "C++ terms used in Volume 2",
       "summary": "The C++ language concepts the Volume 2 lessons rely on: pointers and references, casts, classes, and translation units.",

@@ -48,3 +48,4 @@
 .day-switch a { min-width: 0; padding-inline: 4px; }
 .day-switch small { font-size: 9px; }
 .concept-lens { display: inline-block; margin-right: .65em; padding: .15em .5em; border: 1px solid var(--line); border-radius: 3px; font: 10px var(--mono); letter-spacing: .04em; vertical-align: middle; }
+.chapter-number{min-width:42px;white-space:nowrap}

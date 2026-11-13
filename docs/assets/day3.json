@@ -70,7 +70,7 @@
   "lessons": [
     {
       "id": 56,
-      "number": 0,
+      "number": 1,
       "day": 3,
       "title": "What evidence will make the pass trustworthy?",
       "originalTitle": "What evidence will make the pass trustworthy?",
@@ -390,7 +390,7 @@
     },
     {
       "id": 57,
-      "number": 1,
+      "number": 2,
       "day": 3,
       "title": "Build one core that the plugin and tests can use",
       "originalTitle": "Build one core that the plugin and tests can use",
@@ -538,7 +538,7 @@
     },
     {
       "id": 58,
-      "number": 2,
+      "number": 1,
       "day": 3,
       "title": "Parse tiny IR in a C++ unit test",
       "originalTitle": "Parse tiny IR in a C++ unit test",
@@ -793,7 +793,7 @@
     },
     {
       "id": 59,
-      "number": 3,
+      "number": 2,
       "day": 3,
       "title": "Test the graph and the analysis manager",
       "originalTitle": "Test the graph and the analysis manager",
@@ -1038,7 +1038,7 @@
     },
     {
       "id": 60,
-      "number": 4,
+      "number": 3,
       "day": 3,
       "title": "Assert that the dispatcher really controls the function",
       "originalTitle": "Assert that the dispatcher really controls the function",
@@ -1349,7 +1349,7 @@
     },
     {
       "id": 61,
-      "number": 5,
+      "number": 4,
       "day": 3,
       "title": "Make rejection tests prove that nothing changed",
       "originalTitle": "Make rejection tests prove that nothing changed",
@@ -1599,7 +1599,7 @@
     },
     {
       "id": 62,
-      "number": 6,
+      "number": 1,
       "day": 3,
       "title": "Run differential cases with a reproducible seed",
       "originalTitle": "Run differential cases with a reproducible seed",
@@ -1982,7 +1982,7 @@
     },
     {
       "id": 63,
-      "number": 7,
+      "number": 2,
       "day": 3,
       "title": "Run the whole suite through CTest",
       "originalTitle": "Run the whole suite through CTest",
@@ -2300,7 +2300,7 @@
     },
     {
       "id": 64,
-      "number": 8,
+      "number": 3,
       "day": 3,
       "title": "Prove the tests can fail, then minimize a failure",
       "originalTitle": "Prove the tests can fail, then minimize a failure",
@@ -2631,7 +2631,7 @@
     },
     {
       "id": 65,
-      "number": 9,
+      "number": 1,
       "day": 3,
       "title": "Design measurements before writing a timing loop",
       "originalTitle": "Design measurements before writing a timing loop",
@@ -2992,7 +2992,7 @@
     },
     {
       "id": 66,
-      "number": 10,
+      "number": 2,
       "day": 3,
       "title": "Time useful work, not process startup",
       "originalTitle": "Time useful work, not process startup",
@@ -3340,7 +3340,7 @@
     },
     {
       "id": 67,
-      "number": 11,
+      "number": 1,
       "day": 3,
       "title": "Write a report whose claims match the evidence",
       "originalTitle": "Write a report whose claims match the evidence",
@@ -3697,7 +3697,7 @@
     },
     {
       "id": 68,
-      "number": 12,
+      "number": 2,
       "day": 3,
       "title": "Build a reproducible demo from a fresh directory",
       "originalTitle": "Build a reproducible demo from a fresh directory",
@@ -4075,7 +4075,7 @@
     },
     {
       "id": 69,
-      "number": 13,
+      "number": 3,
       "day": 3,
       "title": "Handle the simulated O2 bug and close Volume 3",
       "originalTitle": "Handle the simulated O2 bug and close Volume 3",
@@ -4399,7 +4399,7 @@
     },
     {
       "id": 70,
-      "number": 14,
+      "number": 1,
       "day": 3,
       "title": "Terms used in Volume 3",
       "originalTitle": "Terms used in Volume 3",

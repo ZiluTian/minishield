@@ -11,7 +11,7 @@ and checkpoints support that work. Reference snippets are teaching content;
 they do not change the learner's source files. Future files mentioned in an
 exercise must be written before running commands that depend on them.
 
-0. Before changing the IR
+2.1.1 Before changing the IR
 =========================
 
 ### Why changing a branch can break a value
@@ -241,7 +241,7 @@ C. PHIs are forbidden in all LLVM programs
 
 Answer: A. PHIs are valid LLVM IR. It is our planned CFG restructuring that can invalidate existing SSA relationships.
 
-1. Collect PHIs without changing them
+2.2.1 Collect PHIs without changing them
 =====================================
 
 ### Why a compiler needs a PHI at a join
@@ -470,7 +470,7 @@ C. The dispatcher can infer the old predecessor from the order of cases
 
 Answer: A. A PHI associates incoming values with predecessor edges. Preserve that association before replacing those edges.
 
-2. Keep the typed pointer from dyn_cast
+2.2.2 Keep the typed pointer from dyn_cast
 =======================================
 
 ### Why the worklist needs a more specific kind of instruction
@@ -659,7 +659,7 @@ C. Yes, but only inside the if body
 
 Answer: B. I keeps its declared type. The returned pointer is the value with the more specific type.
 
-3. Demote PHIs after collection
+2.2.3 Demote PHIs after collection
 ===============================
 
 ### What demotion changes, and why we want it
@@ -920,7 +920,7 @@ C. The name of the original PHI remains unchanged
 
 Answer: A. Path-specific writes and later reads replace the predecessor-based choice. Removing an instruction alone is not the goal.
 
-4. Find values that cross block boundaries
+2.3.1 Find values that cross block boundaries
 ==========================================
 
 ### Why removing PHIs is only half of preparation
@@ -1153,7 +1153,7 @@ C. A PHI-free function cannot contain loads
 
 Answer: A. SSA dependencies are not limited to PHIs. A load or add defined in one block can be consumed in another.
 
-5. Ask whether an instruction produces a value
+2.3.2 Ask whether an instruction produces a value
 ==============================================
 
 ### An operation can have an effect without producing a value
@@ -1341,7 +1341,7 @@ C. ptr, because it transfers control
 
 Answer: B. The returned operand has type i32. The ret instruction itself has no result.
 
-6. Recognize the stack allocation itself
+2.3.3 Recognize the stack allocation itself
 ========================================
 
 ### Why the storage itself is a different kind of result
@@ -1514,7 +1514,7 @@ C. Every allocation can safely be moved to entry
 
 Answer: A. The slot pointer crosses blocks intentionally and must dominate its uses. This is separate from rejecting unsafe allocation forms.
 
-7. Finish collection without a premature return
+2.3.4 Finish collection without a premature return
 ===============================================
 
 ### Why each preparation stage must get a chance to run
@@ -1702,7 +1702,7 @@ C. Yes, but only for named instructions
 
 Answer: B. The worklist is C++ bookkeeping. Update changed when a transformation runs, not merely because a candidate was found.
 
-8. Read the demotion helper signatures
+2.3.5 Read the demotion helper signatures
 ======================================
 
 ### The helper interface connects our worklist to the edit
@@ -1890,7 +1890,7 @@ C. A copy of the whole Function
 
 Answer: A. Dereferencing the stored pointer supplies the existing instruction as a reference, matching the signature.
 
-9. Demote the escaping values
+2.3.6 Demote the escaping values
 =============================
 
 ### What ordinary-value demotion preserves
@@ -2129,7 +2129,7 @@ C. Every stack slot must survive machine-code optimization
 
 Answer: A. Memory transport removes selected direct SSA dependencies; it does not make arbitrary schedules semantically equivalent.
 
-10. Trace ordinary-value demotion
+2.4.1 Trace ordinary-value demotion
 =================================
 
 ### Use a small trace to see what the helper is responsible for
@@ -2351,7 +2351,7 @@ C. Only when it is stored in escapingValues
 
 Answer: A. The integer is written into the allocated memory. The SSA result of alloca is the address of that memory.
 
-11. Trace PHI demotion by predecessor
+2.4.2 Trace PHI demotion by predecessor
 =====================================
 
 ### A PHI carries a choice, not just one calculation
@@ -2588,7 +2588,7 @@ C. The condition is deleted and every path returns zero
 
 Answer: B. Control flow selects which store executes. The load reads the value written on that path.
 
-12. Assign states before changing edges
+2.5.1 Assign states before changing edges
 =======================================
 
 ### Why blocks become states
@@ -2804,7 +2804,7 @@ C. To give it the highest state ID
 
 Answer: A. Setup executes once. The dispatcher routes between the other blocks; entry is not one of its repeated states.
 
-13. Fix pointer keys and pair insertion
+2.5.2 Fix pointer keys and pair insertion
 =======================================
 
 ### The map must identify the exact destination object
@@ -3014,7 +3014,7 @@ C. The block’s printed name string
 
 Answer: A. The map declaration requires a pointer. Take &BB when iterating block references, and use the pointer directly when iterating stateBlocks.
 
-14. Construct a complete dispatcher block
+2.5.3 Construct a complete dispatcher block
 =========================================
 
 ### What the dispatcher adds to the program
@@ -3323,7 +3323,7 @@ C. LLVM forbids all unreachable blocks
 
 Answer: A. First construct valid machinery, then make the intended execution paths use it with initialized state.
 
-15. Separate block names from C++ variables
+2.5.4 Separate block names from C++ variables
 ===========================================
 
 ### A block has an identity, a label, and an ending
@@ -3533,7 +3533,7 @@ C. A pointer to the current dispatcher
 
 Answer: B. The return value is the block pointer. The string argument supplies the IR name.
 
-16. Connect an unconditional entry branch
+2.5.5 Connect an unconditional entry branch
 =========================================
 
 ### Why the first state must come from the old entry edge
@@ -3931,7 +3931,7 @@ C. Only return instructions
 
 Answer: B. This connects the first hop. Full flattening needs later successor-selection and state-transition rewriting.
 
-17. Define the supported input before mutation
+2.6.1 Define the supported input before mutation
 ==============================================
 
 ### Why a transformation needs a support contract
@@ -4543,7 +4543,7 @@ C. Yes, if verify passes
 
 Answer: A. Hoisting can change program semantics. The prototype rejects these allocations until a sound handling strategy is designed.
 
-18. Give state-machine construction its own class
+2.6.2 Give state-machine construction its own class
 =================================================
 
 ### Why separate the builder from the pass
@@ -4814,7 +4814,7 @@ C. To make the entry unreachable
 
 Answer: A. Rewriting the dispatcher’s own switch as though it were an original switch would break the machine.
 
-19. Choose states for conditional branches
+2.6.3 Choose states for conditional branches
 ==========================================
 
 ### A conditional transition chooses a number instead of an edge
@@ -5044,7 +5044,7 @@ C. A new executable BasicBlock
 
 Answer: A. The builder constructs IR. The target program evaluates the condition later.
 
-20. Lower original switches to state selection
+2.6.4 Lower original switches to state selection
 ==============================================
 
 ### A switch still needs its complete decision rule
@@ -5276,7 +5276,7 @@ C. Only if the condition is i32
 
 Answer: A. Case values must be unique. Destinations may be shared, and the transformation must preserve that mapping.
 
-21. Rewrite every original terminator
+2.6.5 Rewrite every original terminator
 =====================================
 
 ### Full flattening is a repeated protocol, not just a new switch
@@ -5559,7 +5559,7 @@ C. No switch can remain in a flattener
 
 Answer: A. Original switches become state selection. The dispatcher switch implements the state machine itself.
 
-22. Orchestrate policy, preparation, and construction
+2.6.6 Orchestrate policy, preparation, and construction
 =====================================================
 
 ### Why the order of phases is part of correctness
@@ -5819,7 +5819,7 @@ C. It turns a bool into an LLVM i1
 
 Answer: A. C++ || short-circuits. Use a separate result or an accumulation form that still evaluates the builder.
 
-23. Inspect the final shape with LLVM tools
+2.7.1 Inspect the final shape with LLVM tools
 ===========================================
 
 ### What inspecting the final graph can establish
@@ -6000,7 +6000,7 @@ C. Only when the name appears twice
 
 Answer: A. A block name is a display aid. Reachability and transition behavior establish whether it is actually part of execution.
 
-24. Compare observable behavior on a defined domain
+2.7.2 Compare observable behavior on a defined domain
 ===================================================
 
 ### Why valid IR is not enough
@@ -6359,7 +6359,7 @@ C. To prove all inputs correct mathematically
 
 Answer: A. A fair comparison holds unrelated pipeline choices constant. It still needs defined inputs and does not become a proof.
 
-25. Add difficult CFG fixtures deliberately
+2.7.3 Add difficult CFG fixtures deliberately
 ===========================================
 
 ### Why a simple diamond is not a sufficient test corpus
@@ -6577,7 +6577,7 @@ C. That the verifier executes both loop paths
 
 Answer: A. Back-edge count and natural-loop count are different metrics.
 
-26. Account for optimizers, debug data, and limitations
+2.7.4 Account for optimizers, debug data, and limitations
 =======================================================
 
 ### The pass is one stage in a larger compiler
@@ -6754,7 +6754,7 @@ C. Yes; it automatically throws a C++ exception
 
 Answer: A. unreachable states an invariant to the optimizer. It is not a recovery routine or a runtime bounds check.
 
-27. Close Volume 2 with an evidence checklist
+2.7.5 Close Volume 2 with an evidence checklist
 ==========================================
 
 ### What finishing Volume 2 should mean
@@ -6944,7 +6944,7 @@ C. When its expected output looks plausible
 
 Answer: A. Reading and planning are not execution evidence. Keep those states distinct.
 
-28. Terms used in Volume 2
+2.8.1 Terms used in Volume 2
 ========================
 
 Use terms to recover the reason for an operation
@@ -7287,7 +7287,7 @@ B. Zero, because LLVM zero-initializes every stack slot
 C. A verifier error, because every load requires a store
 
 Answer: A. A load is just a memory read: it returns whatever bytes the slot currently holds. The verifier checks types and dominance, not that the slot was written first.
-29. LLVM terms used in Volume 2
+2.8.2 LLVM terms used in Volume 2
 =============================
 
 Read the term, then find the construct
@@ -7306,7 +7306,7 @@ Task: Use this document when an LLVM term interrupts your progress. General comp
 | Control flow | Terminator, br / conditional br, switch, ret, unreachable |
 | Calls and attributes | call, CallBase / CallInst, tail / musttail, returns_twice, convergent, operand bundle, inline asm, naked, Function attribute vs call flag, Function declaration |
 | Function and block properties | Intrinsic, Coroutine intrinsic, Presplit coroutine, Personality function, EH pad, Address-taken basic block, Static entry alloca, Terminator whitelist |
-| The C++ API side | isa / cast / dyn_cast, LLVMContext, IRBuilder and insertion point, getInt32Ty / getInt32, DenseMap, PreservedAnalyses, eraseFromParent, isUsedOutsideOfBlock, DemotePHIToStack / DemoteRegToStack |
+| The C++ API side | isa / cast / dyn_cast, LLVMContext, DenseMap, PreservedAnalyses, eraseFromParent, isUsedOutsideOfBlock, DemotePHIToStack / DemoteRegToStack |
 
 ### Printed-IR vocabulary
 
@@ -7902,66 +7902,6 @@ llvm::BasicBlock *make_block(llvm::Function &F) {
 
 See the [LLVMContext doxygen](https://llvm.org/doxygen/classllvm_1_1LLVMContext.html).
 
-### IRBuilder and insertion point
-
-IRBuilder inserts instructions at a chosen position: the insertion point is where the next instruction goes, and a pointer-based constructor can insert before an existing instruction or at the end of a block. Lesson 14 builds new blocks and terminates them with the builder.
-
-Mechanically, each `Create*` method constructs the instruction, links it into the block at the builder’s insertion point, and advances the point past it. Successive calls therefore write the instruction stream in order, and each call returns the new value as a `Value *` that a later call can use as an operand — in lesson 14, `CreateLoad` produces `ms.current` and the following `CreateSwitch` takes it as its condition. Operations with no SSA result (`CreateStore`, `CreateUnreachable`) return nothing, matching the void-result entry above.
-
-The constructors choose the point in two ways. The pointer form `IRBuilder<>(invalidBlock)` targets the end of the block, which is the only legal position on a freshly created empty block — the `invalidBuilder` and `dispatchBuilder` of lesson 14. The iterator form `IRBuilder<>(&*entry->getFirstInsertionPt())` targets an existing block instead: `getFirstInsertionPt()` is an iterator to the first legal insertion position, `*` obtains that instruction, `&` hands it to the constructor, and every `Create*` on that builder (`setup`) inserts before it. `SetInsertionPoint` moves an existing builder to a new position. Each builder object holds its own point, so the three builders in the dispatcher step — `setup`, `dispatchBuilder`, `invalidBuilder` — write into three different blocks without stepping on each other.
-
-Two behaviors the book leans on. First, a `Create*` call does not always create: when its operands are constants the method may fold the result and return a `Constant` without inserting any instruction at all — that is the constant-input `CreateSelect` lesson 14’s checkpoint names, and it is why “every Create... call adds exactly one instruction” is an unsafe assumption. Second, `IRBuilder<>` is the default instantiation of the template `IRBuilder<Derived>`: the empty angle brackets give the plain builder that constructs the ordinary instruction classes. Operand types and constants come from the builder’s context through `getInt32Ty()` / `getInt32(n)` (the next entry), not from raw constructor calls.
-
-```cpp
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/IRBuilder.h"
-
-// Lesson 14's dispatcher step, compressed: the two insertion-point forms.
-void begin_dispatch(llvm::Function &F,
-                    std::vector<llvm::BasicBlock *> stateBlocks) {
-    llvm::BasicBlock *entry = &F.front();
-    llvm::BasicBlock *dispatcher =
-        llvm::BasicBlock::Create(F.getContext(), "ms.dispatch", &F);
-    llvm::BasicBlock *invalidBlock =
-        llvm::BasicBlock::Create(F.getContext(), "ms.invalid", &F);
-
-    // Iterator form: insert before entry's first existing instruction.
-    llvm::IRBuilder<> setup(&*entry->getFirstInsertionPt());
-    llvm::AllocaInst *stateSlot =
-        setup.CreateAlloca(setup.getInt32Ty(), nullptr, "ms.state");
-
-    // Pointer form: both fresh blocks are empty, so the end of the block is
-    // the only legal position. Each builder keeps its own insertion point.
-    llvm::IRBuilder<> invalidBuilder(invalidBlock);
-    invalidBuilder.CreateUnreachable();
-
-    llvm::IRBuilder<> dispatch(dispatcher);
-    llvm::Value *current =
-        dispatch.CreateLoad(dispatch.getInt32Ty(), stateSlot, "ms.current");
-    llvm::SwitchInst *sw = dispatch.CreateSwitch(
-        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));
-    // addCase(int constant, BB) calls would attach one edge per state block.
-}
-```
-
-See the [IRBuilder doxygen](https://llvm.org/doxygen/classllvm_1_1IRBuilder.html).
-### getInt32Ty / getInt32
-
-getInt32Ty() returns the i32 Type*; getInt32(2) returns the ConstantInt holding a particular value. A builder step often needs both — a type to declare storage, a value to store — and confusing the two is a common type error.
-
-```cpp
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/IRBuilder.h"
-#include <utility>
-
-std::pair<llvm::Type *, llvm::ConstantInt *>
-type_and_value(llvm::IRBuilder<> &B) {
-    return {B.getInt32Ty(), B.getInt32(2)};
-}
-```
-
-See the [IRBuilder doxygen](https://llvm.org/doxygen/classllvm_1_1IRBuilder.html), where both methods live.
-
 ### DenseMap
 
 LLVM’s open-addressing key/value container, used here to map BasicBlock* to an unsigned state ID. It is faster than unordered_map in hot pass loops, but its iteration order is not a display order: the vector preserves order, and the map only supports lookup.
@@ -8054,7 +7994,7 @@ B. getInt32(2) and getInt32Ty()
 C. eraseFromParent() and continue
 
 Answer: A. An instruction builder often needs both an LLVM Type* and particular constant values. They are different API inputs.
-30. C++ terms used in Volume 2
+2.8.3 C++ terms used in Volume 2
 ============================
 
 Check the ownership before you write the expression
