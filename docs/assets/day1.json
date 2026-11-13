@@ -5093,6 +5093,28 @@
           "text": "Each range supplies a reference to an existing object: the Module yields Functions, a Function yields BasicBlocks, and a BasicBlock yields Instructions. The loops do not copy the IR objects. The nested traversal mirrors the parent structure, which is why a Function pass naturally starts at F and visits its blocks and instructions."
         },
         {
+          "type": "heading",
+          "text": "Print what the pass sees"
+        },
+        {
+          "type": "paragraph",
+          "text": "A pass rarely inspects objects silently. The fastest way to check a traversal is to print the module the way `opt` does: `M.print(outs(), nullptr)` renders the in-memory graph as the text IR you already read, so the objects you just walked in C++ show up on the screen."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/Module.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\nvoid printModule(llvm::Module &M) {\n    M.print(llvm::outs(), nullptr);\n}"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "ModuleID = 'add_one.ll'\nsource_filename = \"add_one.ll\"\n\ndefine i32 @add_one(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  ret i32 %sum\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "The printed form is the same module you traced in C++. `@add_one` is the Function object, `entry:` is the BasicBlock, `%sum` is the Instruction's result, `1` is a Constant, and `i32` is the Type. The text and the object graph are two views of one structure: the pass edits the graph, and `opt` prints the result. When a transformation looks wrong, printing the module before and after the change is the first diagnostic."
+        },
+        {
           "type": "deep",
           "title": "Read one LLVM function as C++ objects",
           "blocks": [
@@ -5161,6 +5183,44 @@
           "text": "This distinction matters during transformations. A vector<BasicBlock*> can store addresses of existing blocks, but it does not own them. A vector<Instruction*> can be a worklist, but after an instruction is erased its pointer is invalid. The pass must understand the parent object and the lifetime of each child it records."
         },
         {
+          "type": "heading",
+          "text": "Pitfalls in this model"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Pitfall",
+              "What goes wrong",
+              "Safe habit"
+            ],
+            [
+              "Erasing an instruction while iterating its block",
+              "`eraseFromParent()` invalidates the erased instruction's iterator and pointer",
+              "Take the next instruction before erasing, or collect instructions first and erase in a separate pass"
+            ],
+            [
+              "Reusing a collected `Instruction*` after erasure",
+              "The pointer dangles; touching it is undefined behavior",
+              "Collect, act, then discard; never cache pointers across erasures"
+            ],
+            [
+              "Keying state on a printed label",
+              "A label is a display string; renaming a block silently changes your key",
+              "Key the state map on `BasicBlock*` object identity"
+            ],
+            [
+              "Assuming a Use owns its operand",
+              "Erasing the Use removes only the link, not the value",
+              "Ownership follows the parent container; a Use is a link"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The standard crash-course walkthroughs meet these same traps early: the Kaleidoscope tutorial builds modules by hand with this exact traversal, and Andrzej Warzynski's \"Writing an LLVM Pass: 101\" (LLVM Developers' Meeting 2019) keeps a printed before-and-after module next to every step for the same reason."
+        },
+        {
           "type": "task",
           "text": "Task: For the function in the deep dive, name the Function, BasicBlock, Argument, Instruction, Constant, Type, and Value objects. Then trace which C++ range supplies each loop variable in inspectModule."
         },
@@ -5178,9 +5238,21 @@
               ]
             }
           ]
+        },
+        {
+          "type": "heading",
+          "text": "Before and after this checkpoint"
+        },
+        {
+          "type": "paragraph",
+          "text": "Inspection changes nothing. The `add_one` module is identical before and after this lesson; only the pass code gains new functions that print and traverse. The module's text form is the same string you printed above."
+        },
+        {
+          "type": "reference",
+          "text": "Reference: https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/"
         }
       ],
-      "words": 952
+      "words": 1311
     },
     {
       "id": 76,
@@ -5247,6 +5319,14 @@
           "text": "LLVM integer types are not signed or unsigned by themselves. i32 is 32 bits; signedness comes from an operation or predicate such as icmp slt versus icmp ult. The same bit pattern can be interpreted according to the operation using it."
         },
         {
+          "type": "heading",
+          "text": "One spelling for every pointer"
+        },
+        {
+          "type": "paragraph",
+          "text": "Every address in this IR is spelled `ptr`, with no element type after it. Since LLVM 14, pointers are opaque: the type system has a single pointer type, and the element type appears only on the instructions that access it. `load i32, ptr %slot` says \"read an i32 from that address\"; `store i32 %v, ptr %slot` says \"write an i32 to it\". Before opaque pointers, the same slot could have been spelled `i32*` or `i8*`, and a mismatch between two pointer types was a bitcast you had to manage yourself. Now the mismatch is a verifier error. This is why the table above has one `ptr` row, and why an address, a loaded value, and an argument can sit in one statement with three different types."
+        },
+        {
           "type": "diagram",
           "kind": "llvmTypes"
         },
@@ -5266,6 +5346,59 @@
         {
           "type": "paragraph",
           "text": "getInt32Ty() supplies a type. getInt32(7) supplies a constant value of that type. CreateAlloca inserts an instruction whose result is an LLVM value of pointer type: it names an address in the program. CreateStore inserts a side-effecting instruction but returns void in C++; there is no stored result to feed into a later instruction."
+        },
+        {
+          "type": "heading",
+          "text": "Which instructions give you which types"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Instruction",
+              "Result type",
+              "Why"
+            ],
+            [
+              "`alloca i32`",
+              "`ptr`",
+              "It names a piece of storage; the element type is a size argument, not the result"
+            ],
+            [
+              "`load i32, ptr %slot`",
+              "`i32`",
+              "The result is the data read; the pointer is an operand"
+            ],
+            [
+              "`store i32 %v, ptr %slot`",
+              "`void`",
+              "A side effect; there is no value to name"
+            ],
+            [
+              "`add i32 %x, 1`",
+              "`i32`",
+              "The result takes the operand shape"
+            ],
+            [
+              "`icmp slt i32 %x, 0`",
+              "`i1`",
+              "A predicate always yields a one-bit result"
+            ],
+            [
+              "`select i1 %c, i32 %a, i32 %b`",
+              "`i32`",
+              "The result matches both candidates"
+            ],
+            [
+              "`ret i32 %v`",
+              "`void`",
+              "It ends the function; the returned value is not an SSA value"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "When you write a pass, \"what type does this instruction produce?\" is a question about the IR, not about C++. In C++ every instruction is an `llvm::Instruction *` (or a subclass); the IR type is the property the pass reasons about. The eligibility guard accepts only scalar result types, and the flattener's state slot is `i32` storage precisely because this table says so."
         },
         {
           "type": "heading",
@@ -5320,6 +5453,47 @@
           ]
         },
         {
+          "type": "heading",
+          "text": "Pitfalls in this model"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Pitfall",
+              "Fix"
+            ],
+            [
+              "Confusing `llvm::Type *` with an IR `ptr`",
+              "A `Type*` is a C++ pointer to a type object; an IR `ptr` is a program value holding an address"
+            ],
+            [
+              "Reading a `load` result as a pointer",
+              "`load i32, ptr %slot` produces an `i32`; the pointer is an operand, not a result"
+            ],
+            [
+              "Treating a `void` instruction as missing",
+              "A `void` instruction is still an `Instruction` object with operands; it just has no SSA result"
+            ],
+            [
+              "Reading the literal `0` as a global",
+              "Small integer literals are `ConstantInt` operands, printed inline, not named values"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Before and after this checkpoint"
+        },
+        {
+          "type": "paragraph",
+          "text": "Reading types changes nothing. The `choose_value` module is identical before and after; the pass gains the ability to say, for each line, what type the instruction produces and what each operand is. The canonical spelling of every type and instruction is in the LLVM Language Reference Manual."
+        },
+        {
+          "type": "reference",
+          "text": "Reference: https://llvm.org/docs/LangRef.html"
+        },
+        {
           "type": "task",
           "text": "Task: For each line in the module, name the instruction's result type if it has a result. For the alloca, load, and store, separately identify the address and the value read or written."
         },
@@ -5338,7 +5512,7 @@
           ]
         }
       ],
-      "words": 760
+      "words": 1224
     },
     {
       "id": 77,
@@ -5466,6 +5640,31 @@
         },
         {
           "type": "heading",
+          "text": "Walk one concrete execution"
+        },
+        {
+          "type": "paragraph",
+          "text": "With condition = true, entry jumps to left, left jumps to join, and the PHI takes the incoming constant paired with the edge just taken: `[10, %left]`, so join returns 10. With condition = false the path is entry → right → join and the PHI returns 20. One execution takes exactly one edge per branch; the CFG records all of them at once, and the PHI's job is to pick the value that matches the edge actually taken."
+        },
+        {
+          "type": "heading",
+          "text": "A loop is the same idea"
+        },
+        {
+          "type": "paragraph",
+          "text": "LLVM has no `for` keyword. A loop is a CFG with a back edge, and a PHI re-binds the loop variable at each entry to the header block:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define i32 @sum_to(i32 %n) {\nentry:\n  br label %loop\n\nloop:\n  %i = phi i32 [ 0, %entry ], [ %next, %loop ]\n  %acc = phi i32 [ 0, %entry ], [ %s, %loop ]\n  %next = add i32 %i, 1\n  %s = add i32 %acc, %i\n  %cont = icmp slt i32 %next, %n\n  br i1 %cont, label %loop, label %exit\n\nexit:\n  %r = phi i32 [ %s, %loop ]\n  ret i32 %r\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Read it the same way as the diamond: the back edge `loop → loop` is just another edge, and the loop variables exist only because the PHIs re-bind them from 0 on the entry edge and from the updated values on the back edge. The flattener must preserve both the back edge's destination and the PHI's incoming pairings, or replace them with a state store and a dispatcher case that say the same thing."
+        },
+        {
+          "type": "heading",
           "text": "From ordinary CFG to dispatcher CFG"
         },
         {
@@ -5481,6 +5680,47 @@
             "Original unconditional branch: store its sole successor's ID.",
             "Original return: keep the return terminator; it has no next state."
           ]
+        },
+        {
+          "type": "heading",
+          "text": "Pitfalls in this model"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Pitfall",
+              "What the verifier enforces"
+            ],
+            [
+              "A PHI not at the top of the block",
+              "PHI nodes must appear at the start of a basic block"
+            ],
+            [
+              "An instruction after a terminator",
+              "A terminator ends the block; nothing may follow it"
+            ],
+            [
+              "A block with two terminators, or none",
+              "Every block ends with exactly one terminator"
+            ],
+            [
+              "A PHI incoming value from a block with no edge to the PHI's block",
+              "Each incoming block must actually branch to the PHI's block"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Before and after this checkpoint"
+        },
+        {
+          "type": "paragraph",
+          "text": "Observing the graph changes nothing. The `merge` module is identical before and after; what changes is that you can name every edge, and the state transition each original edge must become. The terminator instructions and their spellings are documented in the LLVM Language Reference, and the Kaleidoscope tutorial's control-flow chapter builds a diamond exactly like this one."
+        },
+        {
+          "type": "reference",
+          "text": "Reference: https://llvm.org/docs/LangRef.html#terminators"
         },
         {
           "type": "task",
@@ -5501,7 +5741,7 @@
           ]
         }
       ],
-      "words": 819
+      "words": 1239
     },
     {
       "id": 73,
@@ -5606,6 +5846,30 @@
           ]
         },
         {
+          "type": "heading",
+          "text": "The calls that do not insert"
+        },
+        {
+          "type": "paragraph",
+          "text": "Two kinds of builder calls return a value without inserting anything: type getters and constant constructors. `B.getInt32Ty()` asks the context for the i32 type; `B.getInt32(1)` asks it for the i32 constant 1. Both are uniqued in the LLVMContext, so they are shared objects rather than instructions, and neither appears in the printed block. Only the `Create...` methods that build an instruction actually insert, and only at the builder's insertion point."
+        },
+        {
+          "type": "heading",
+          "text": "Verify after each change"
+        },
+        {
+          "type": "paragraph",
+          "text": "The crash-course habit: after every edit, run the verifier and print the module. `opt -verify` stops at the first structural error and names the offending instruction; `M.print(outs(), nullptr)` shows whether the new instruction landed where you intended. A pass that edits many blocks is easier to debug as a series of small verified steps than as one big change that fails at the end."
+        },
+        {
+          "type": "paragraph",
+          "text": "The Kaleidoscope tutorial's third chapter, \"Code generation to LLVM IR\", is the standard first walkthrough of this API: it creates a function, a block, and an `add` with exactly this position-create-use pattern, and the IRBuilder API page documents every `Create...` method and its insertion rules."
+        },
+        {
+          "type": "reference",
+          "text": "Reference: https://llvm.org/doxygen/classllvm_1_1IRBuilder.html"
+        },
+        {
           "type": "task",
           "text": "Task: Read the helper in order. Mark the insertion point, the instruction-creating calls, the returned Value*, and the operation that removes the old terminator."
         },
@@ -5624,7 +5888,7 @@
           ]
         }
       ],
-      "words": 605
+      "words": 811
     },
     {
       "id": 74,
@@ -5786,6 +6050,43 @@
         },
         {
           "type": "heading",
+          "text": "Walk one execution through the dispatcher"
+        },
+        {
+          "type": "paragraph",
+          "text": "Suppose entry stored the state ID 1 into the slot and then branched to `ms.dispatch`. The load reads 1, the switch compares it with the typed cases, and `i32 1` selects the `%right` case, so control transfers to right. A state that matches no case takes the default edge to `ms.invalid`, which holds `unreachable` and reports the invariant violation. Reading the switch top to bottom, each case is one edge of the dispatcher's CFG."
+        },
+        {
+          "type": "heading",
+          "text": "Pitfalls in this model"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Pitfall",
+              "What goes wrong"
+            ],
+            [
+              "A case constant of a different type than the selector",
+              "The case type must match the switch value's type, or the verifier rejects the block"
+            ],
+            [
+              "A second terminator after the switch",
+              "The switch ends the block; nothing may follow it"
+            ],
+            [
+              "A state ID with no matching case and no default",
+              "Every switch needs a default destination; unmatched values go there"
+            ],
+            [
+              "Wiring entry to the dispatcher before the switch is complete",
+              "The intermediate module is still well-formed, but the switch is not finished; complete it before the entry edge moves"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
           "text": "Where the builder writes matters"
         },
         {
@@ -5842,9 +6143,17 @@
         {
           "type": "paragraph",
           "text": "Answer: It is a constant operand, not a computation to execute. The switch uses the constant as a case label; LLVM prints the value inline in the switch."
+        },
+        {
+          "type": "paragraph",
+          "text": "The Kaleidoscope tutorial's sixth chapter builds an if statement the same way: create a block, position an IRBuilder, build the condition, and connect the terminator. The dispatcher is that construction with a switch instead of a branch."
+        },
+        {
+          "type": "reference",
+          "text": "Reference: https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/"
         }
       ],
-      "words": 1359
+      "words": 1580
     },
     {
       "id": 18,
