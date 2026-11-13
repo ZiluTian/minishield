@@ -6746,7 +6746,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check below is the next assigned exercise; it has not yet been established by a plugin rejection test in this note.",
+          "text": "The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check was assigned next; its completed result is recorded below.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6809,7 +6809,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The next returns_twice guard still has an expected, rather than observed, plugin outcome.",
+          "text": "Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The returns_twice check’s subsequent completion is recorded below; the new naked-function guard remains the next writing exercise.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6821,7 +6821,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The next assigned guard covers a call whose execution can resume at the same continuation more than once. The input below has verified LLVM syntax, but implementing the guard and observing its plugin rejection are still learner work at this checkpoint. Keep that future result separate from the completed operand-bundle check.",
+          "text": "The learner then implemented the returns_twice guard. In the resumed session, the build was current; tests/ir/returns_twice.ll was rejected with “returns_twice calls are unsupported,” and canonical before/after IR was unchanged. This supersedes the earlier pending note. The function-level naked check below is the next, final planned preflight exercise; its plugin rejection has not yet been observed here.",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
@@ -6878,22 +6878,91 @@
         },
         {
           "type": "task",
-          "text": "Task: Add the explicit Attributes.h include and the ReturnsTwice predicate inside the CallBase block. Write the focused tests/ir/returns-twice.ll input yourself, retaining the earlier supported-call and rejection checks.",
+          "text": "Task: To replay this completed checkpoint, add the explicit Attributes.h include and ReturnsTwice predicate inside CallBase, and write the focused tests/ir/returns_twice.ll input yourself. Retain the earlier supported-call and rejection checks.",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
         {
           "type": "code",
           "language": "bash",
-          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/returns-twice.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/returns-twice.ll -o build/returns-twice-checked.ll",
+          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/returns_twice.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/returns_twice.ll -o build/returns_twice-checked.ll",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: After writing the guard, expect “returns_twice calls are unsupported” and identical canonical output for this focused module. That plugin result remains expected here, not observed. Explain why one static SSA call/result can require special control-flow handling without giving the instruction two simultaneous result values.",
+          "text": "Checkpoint: The observed returns_twice rejection was “returns_twice calls are unsupported,” with identical canonical output. Explain why one static SSA call/result can require special control-flow handling without producing two simultaneous result values. Keep this completed result separate from the next naked-function exercise.",
           "eligibilityWalkthrough": true,
           "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — naked changes the function’s low-level entry/exit contract",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The next assignment is the final planned function-level preflight guard. The focused input below parses and verifies, but the learner still needs to write this predicate and establish its plugin rejection. Do not mark the support-contract exercise complete merely because its full reference is already printed later in the chapter.",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "For an ordinary function, the backend manages entry/exit machine-code work such as stack-frame setup and restoration when needed. Those sequences are the prologue and epilogue; they are not LLVM blocks automatically named prologue or epilogue. naked disables the usual prologue/epilogue emission and places the function under a special low-level contract. Our dispatcher and demotion add stack storage under ordinary assumptions, so we reject this case conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// In FunctionEligibility::check, after the function checks\n// and before the block/instruction traversal:\nif (F.hasFnAttribute(llvm::Attribute::Naked))\n    return {false, \"naked functions are unsupported\"};",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "F is the function being inspected. hasFnAttribute asks whether this function carries the Naked attribute; it is not a question about one instruction or a call’s result. This is why the predicate belongs outside the instruction loop, unlike the preceding CallBase checks. Reuse the explicit llvm/IR/Attributes.h include from the previous step for the attribute identifier.",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define void @naked_example() naked {\nentry:\n  unreachable\n}",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Read the complete structural input: define starts a function body, void says there is no returned value, @naked_example names the function, and () means no arguments. The naked suffix is a function attribute, not a block label or an instruction. entry names the first block. unreachable is its terminator and asserts that defined execution never reaches that point; actually executing it is undefined behavior, not a normal void return or recovery action.",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This fixture exists only to test attribute rejection. It is not an executable demonstration of a functioning naked routine or target-specific prologue behavior. There is no inline-assembly call, so a different call guard cannot substitute for the missing naked rule and accidentally make the negative test appear successful. Parser/verifier validity and the existence of a defined runtime behavior are different questions.",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Add the function-level Naked predicate yourself before traversing blocks/instructions. Write the focused tests/ir/naked.ll input. Keep every existing preflight check before the first transformation edit.",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/naked.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/naked.ll -o build/naked-checked.ll",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: After implementing the guard, expect “naked functions are unsupported” and identical canonical IR. That plugin result is still an expectation here, not an observed success. Explain why the check is on F rather than a CallBase pointer, and why this deliberately non-executable fixture is useful for a focused preflight test.",
+          "eligibilityWalkthrough": true,
+          "nakedWalkthrough": true
         },
         {
           "type": "heading",
@@ -7150,7 +7219,7 @@
           "irComparison": true
         }
       ],
-      "words": 5051,
+      "words": 5487,
       "quiz": {
         "q": "Can you safely hoist every non-entry alloca into entry?",
         "choices": [

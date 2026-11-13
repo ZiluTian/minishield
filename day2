@@ -4135,7 +4135,7 @@ Checkpoint: The observed diagnostic for the focused convergent fixture was “co
 
 ### Study-session walkthrough — an operand bundle is part of call semantics
 
-The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check below is the next assigned exercise; it has not yet been established by a plugin rejection test in this note.
+The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check was assigned next; its completed result is recorded below.
 
 ```cpp
 // Inside the existing CallBase block:
@@ -4173,11 +4173,11 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -S tests/ir/operand_bundle.ll -o build/operand_bundle-checked.ll
 ```
 
-Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The next returns_twice guard still has an expected, rather than observed, plugin outcome.
+Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The returns_twice check’s subsequent completion is recorded below; the new naked-function guard remains the next writing exercise.
 
 ### Study-session walkthrough — returns_twice can resume one continuation again
 
-The next assigned guard covers a call whose execution can resume at the same continuation more than once. The input below has verified LLVM syntax, but implementing the guard and observing its plugin rejection are still learner work at this checkpoint. Keep that future result separate from the completed operand-bundle check.
+The learner then implemented the returns_twice guard. In the resumed session, the build was current; tests/ir/returns_twice.ll was rejected with “returns_twice calls are unsupported,” and canonical before/after IR was unchanged. This supersedes the earlier pending note. The function-level naked check below is the next, final planned preflight exercise; its plugin rejection has not yet been observed here.
 
 The C setjmp/longjmp mechanism is a useful conceptual example: setjmp first returns normally while recording context; a later nonlocal transfer can make execution continue as though that same call had returned again. This is not two result operands produced at once, and not merely an ordinary loop calling a function twice. A transformation relying only on a single forward return path has not established correct handling of this reentry, so our prototype rejects it conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).
 
@@ -4208,17 +4208,55 @@ Read the complete module: declare describes resume_point as taking no arguments 
 
 resume_point is an ordinary external placeholder, not an intrinsic or an implementation of setjmp. The attribute itself does not manufacture a second return. This module isolates the guard’s recognition of the marker; with no main or callee implementation it is not a standalone executable demonstration of a nonlocal return.
 
-Task: Add the explicit Attributes.h include and the ReturnsTwice predicate inside the CallBase block. Write the focused tests/ir/returns-twice.ll input yourself, retaining the earlier supported-call and rejection checks.
+Task: To replay this completed checkpoint, add the explicit Attributes.h include and ReturnsTwice predicate inside CallBase, and write the focused tests/ir/returns_twice.ll input yourself. Retain the earlier supported-call and rejection checks.
 
 ```bash
 cmake --build build
-opt -passes=verify -disable-output tests/ir/returns-twice.ll
+opt -passes=verify -disable-output tests/ir/returns_twice.ll
 opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -passes='function(minishield-flatten),verify' \
-  -S tests/ir/returns-twice.ll -o build/returns-twice-checked.ll
+  -S tests/ir/returns_twice.ll -o build/returns_twice-checked.ll
 ```
 
-Checkpoint: After writing the guard, expect “returns_twice calls are unsupported” and identical canonical output for this focused module. That plugin result remains expected here, not observed. Explain why one static SSA call/result can require special control-flow handling without giving the instruction two simultaneous result values.
+Checkpoint: The observed returns_twice rejection was “returns_twice calls are unsupported,” with identical canonical output. Explain why one static SSA call/result can require special control-flow handling without producing two simultaneous result values. Keep this completed result separate from the next naked-function exercise.
+
+### Study-session walkthrough — naked changes the function’s low-level entry/exit contract
+
+The next assignment is the final planned function-level preflight guard. The focused input below parses and verifies, but the learner still needs to write this predicate and establish its plugin rejection. Do not mark the support-contract exercise complete merely because its full reference is already printed later in the chapter.
+
+For an ordinary function, the backend manages entry/exit machine-code work such as stack-frame setup and restoration when needed. Those sequences are the prologue and epilogue; they are not LLVM blocks automatically named prologue or epilogue. naked disables the usual prologue/epilogue emission and places the function under a special low-level contract. Our dispatcher and demotion add stack storage under ordinary assumptions, so we reject this case conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).
+
+```cpp
+// In FunctionEligibility::check, after the function checks
+// and before the block/instruction traversal:
+if (F.hasFnAttribute(llvm::Attribute::Naked))
+    return {false, "naked functions are unsupported"};
+```
+
+F is the function being inspected. hasFnAttribute asks whether this function carries the Naked attribute; it is not a question about one instruction or a call’s result. This is why the predicate belongs outside the instruction loop, unlike the preceding CallBase checks. Reuse the explicit llvm/IR/Attributes.h include from the previous step for the attribute identifier.
+
+```llvm
+define void @naked_example() naked {
+entry:
+  unreachable
+}
+```
+
+Read the complete structural input: define starts a function body, void says there is no returned value, @naked_example names the function, and () means no arguments. The naked suffix is a function attribute, not a block label or an instruction. entry names the first block. unreachable is its terminator and asserts that defined execution never reaches that point; actually executing it is undefined behavior, not a normal void return or recovery action.
+
+This fixture exists only to test attribute rejection. It is not an executable demonstration of a functioning naked routine or target-specific prologue behavior. There is no inline-assembly call, so a different call guard cannot substitute for the missing naked rule and accidentally make the negative test appear successful. Parser/verifier validity and the existence of a defined runtime behavior are different questions.
+
+Task: Add the function-level Naked predicate yourself before traversing blocks/instructions. Write the focused tests/ir/naked.ll input. Keep every existing preflight check before the first transformation edit.
+
+```bash
+cmake --build build
+opt -passes=verify -disable-output tests/ir/naked.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/naked.ll -o build/naked-checked.ll
+```
+
+Checkpoint: After implementing the guard, expect “naked functions are unsupported” and identical canonical IR. That plugin result is still an expectation here, not an observed success. Explain why the check is on F rather than a CallBase pointer, and why this deliberately non-executable fixture is useful for a focused preflight test.
 
 ### Verify these guards independently
 
