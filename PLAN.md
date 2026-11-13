@@ -11,13 +11,15 @@ pitfalls, and a verifiable *exit criteria* for every task.
 | Environment and CMake | Plugin builds against LLVM 23.1.5 |
 | Volume 1 foundations | Statistics, CFG/loop analysis, and eligibility implemented during study |
 | Volume 2 flattening | Learner implementation in progress; complete book draft available |
-| Volume 3 tests, benchmarks, demo | Complete book draft; learner exercises and measurements pending |
+| Volume 3 hardening crash course | Complete book draft; learner exercises and measurements pending |
 
 **Current priority:** finish the books before resuming hands-on lessons.
 [Volume 2](https://zilutian.github.io/minishield/#day2) documents preparation,
-dispatcher construction, complete branch rewriting, and correctness checks.
-[Volume 3](https://zilutian.github.io/minishield/#day3) supplies test/build/harness
-references and a measurement plan. Reading a chapter does not complete its
+dispatcher construction, complete branch rewriting, correctness checks, and the
+testing, measurement, and delivery chapters that close the project.
+[Volume 3](https://zilutian.github.io/minishield/#day3) is a crash course on the
+hardening techniques flattening leaves out — CFI, stack canaries, OLLVM-style
+obfuscation, and position independence. Reading a chapter does not complete its
 implementation or establish its expected results.
 
 Target layout (create as you go):
@@ -174,8 +176,8 @@ time: you linked against the wrong (or missing) libLLVM — check
 `ldd build/libMiniShield.so | grep LLVM` resolves to the env's `libLLVM-23.so`.*
 
 ### 1.2 IR traversal pass → function-level statistics — ~2 h
-Goal: the "IR inspection pass" of Phase 1, doubled as your stats tool for
-Volume 3 benchmarks.
+Goal: the "IR inspection pass" of Phase 1, doubled as your stats tool for the
+Volume 2 measurement chapters.
 
 - Traverse `Module → Function → BasicBlock → Instruction`. The function pass
   manager visits functions; `StatsPass::run()` loops over blocks/instructions.
@@ -269,7 +271,7 @@ Goal: reject-unsafe-inputs-loudly. For each function, decide eligible/rejected
 **Exit criteria:** each rejection case has a fixture `.ll`; running the pass
 prints the diagnostic, IR is byte-identical (or at least `opt -verify` passes
 and the function's blocks/terminators are unchanged), and the *success rate*
-(metric you'll report on Volume 3) can be computed.
+(metric you'll report in the Volume 2 measurement chapters) can be computed.
 
 **Volume 1 exit:** plugin builds; `minishield-stats` + CFG report + eligibility
 diagnostics all work via `opt`.
@@ -361,77 +363,47 @@ rewritten terminators look like the table above in the dumped IR.
 **Volume 2 exit:** `minishield-flatten` produces valid, behavior-preserving IR for
 the full fixture set; CFG is visibly a dispatcher state machine.
 
+The test suite, benchmark, and demo plans that used to close the project now live in
+Volume 2 as the testing chapters (DESIGN → DELIVER): the GoogleTest unit tests,
+the CTest integration wiring, the differential runner, the measurement design,
+and the reproducible demo.
+
 ---
 
-## Volume 3 — Tests, benchmarks, report, demo
-(~8–9 h)
+## Volume 3 — Code hardening beyond flattening
+(crash course)
 
-### 3.1 Test suite — ~3 h
-- `tests/unit` (GoogleTest, link `GTest::gtest` + `GTest::gtest_main`,
-  LLVM headers/libs):
-  - eligibility: accept/reject on functions parsed from `.ll` text
-    (`parseAssemblyString` from `llvm/AsmParser/Parser.h`);
-  - CFG analysis: known edges/loops on synthetic functions;
-  - flattening invariants on transformed IR: (a) `verifyModule` ok;
-    (b) builder adds two blocks relative to the prepared CFG; (c) entry’s
-    live edge reaches a switch covering each prepared non-entry state once;
-    (d) original non-terminal transitions store correct state values and
-    branch to dispatch, while return/unreachable remain terminal; (e) state
-    storage dominates all uses. Do not assert temporary names or assume
-    preparation never splits edges.
-- `tests/ir/`: the fixture `.ll`/`.c` files (the ones from Volumes 1–2, plus
-  negatives: EH, indirectbr, coroutine).
-- `tests/integration`: **differential executable test** (the one that
-  distinguishes you): for each C fixture, build orig and protected at the same
-  `-O2`, run both over N seeded-random inputs (write a tiny harness: the
-  fixtures read inputs from argv/stdin, print results; a shell or C++ driver
-  compares outputs over, e.g., 1000 random cases). Wire into CTest.
+MiniShield has implemented one hardening technique — control-flow flattening,
+a member of the obfuscation family. Volume 1's capstone lesson established
+that the plugin's seams are technique-agnostic and host other techniques as
+named passes. This volume is a crash course on the techniques flattening
+leaves out, taught through concrete LLVM 23.1.5 examples:
 
-**Exit criteria:** build first, then `ctest --test-dir build --output-on-failure`
-all green; negatives prove rejection
-(diagnostic + unchanged IR); a *mutated* test (break one invariant) fails
-loudly — sanity-check that your tests actually test.
+- Threat model: what each family answers (reverse engineering vs
+  control-flow hijack vs control-data corruption vs predictable memory
+  layout) and what "hardening quality" means — what survives, at what
+  cost, in the final artifact.
+- Control-flow integrity: `llvm.cfi_icheck`, forward and backward CFI —
+  read the IR clang generates, verify the check at runtime.
+- Stack canaries: `llvm.stackprotector`, canary placement, what it
+  catches and what it misses.
+- OLLVM family — the learner implements each as a new MiniShield pass and
+  proves it with the Volume 2 differential method:
+  - bogus control flow: dead branches under a secret condition;
+  - string encryption: plaintext out of the binary, decrypt at use;
+  - subroutine splitting: jump-table split of a function.
+- Position independence, ASLR, RELRO: the hardening that lives in the
+  linker/loader, not the IR.
+- Persistence: what -O2 keeps and what it removes — the obfuscation
+  failure mode Volume 2's exit evidence already showed.
+- Final lesson: fuzz one of the learner's own passes (behavior must stay
+  identical).
 
-### 3.2 Benchmarks — ~2.5 h
-- 4–6 benchmark programs (start: discount, factorial/fibonacci, string search,
-  matrix multiply, insertion sort, a small stateful loop).
-- Metrics per program: binary size (`size` or `wc -c`), wall-clock runtime
-  (harness: call the hot function ~10⁶×, time both binaries, take median of
-  3), #blocks and #branches (your `minishield-stats`), compile time
-  (time the C→IR→flatten→binary pipeline vs plain), success rate
-  (from 1.4, over a small corpus of extra functions).
-- Write `benchmarks/results/report.md` in the spec's table format
-  (Original / Protected columns). A one-paragraph *analysis*: flattening
-  adds structural complexity; overhead is the dispatcher hop per block;
-  **state clearly that flattening is a speed bump, not a guarantee**.
-
-**Exit criteria:** table filled with real numbers (never illustrative ones);
-reproducible via one command (document it).
-
-### 3.3 README + technical report + 5-minute demo — ~2.5 h
-- `README.md`: what it is, architecture (ASCII diagram matching the spec),
-  build (conda env + the CMake line), running the pass, running tests,
-  running benchmarks, **limitations** (no EH, no indirectbr, no coroutines,
-  labels; debug-info untouched — note the state variable adds one register/
-  stack slot; in-place style choice).
-- Technical report section (in README or `REPORT.md`): design decisions
-  (why in-place, why PHI demotion, eligibility philosophy = *reject loudly,
-  never transform incorrectly*), the benchmark table, and the trade-off
-  discussion.
-- `scripts/demo.sh` — the 5-minute demo, in this order:
-  1. show `calculate_discount.c`;
-  2. show original IR (`clang -S -emit-llvm -O2 | less`/`cat`);
-  3. run MiniShield, show transformed IR (highlight the dispatcher + switch);
-  4. run both binaries on the same inputs, diff the outputs (empty diff);
-  5. print the benchmark table.
-- **Stretch (only if all of the above is done):** the simulated customer bug
-  report ("protected app crashes only at -O2") — build a minimal reproducer,
-  compare IR at -O0 vs -O2, find the transformation/optimizer interaction, add
-  a regression test, document root cause. This mirrors the actual support
-  workflow from the job description.
-
-**Volume 3 exit:** `ninja test` green, benchmark report real, `demo.sh` runs
-start-to-finish unattended, README explains everything a stranger needs.
+**Volume 3 exit:** the three OLLVM passes build into the plugin and pass
+differential tests on the shared fixtures; the CFI, canary, and PIE
+lessons are verified against the toolchain's real output; one technique's
+overhead is measured with the Volume 2 method; the fuzzer reports no
+behavioral regression.
 
 ---
 

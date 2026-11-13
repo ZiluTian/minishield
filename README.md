@@ -16,12 +16,15 @@ control-flow-flattening pass may touch. You build a read-only stats pass and a
 CFG analysis first, because you can't safely flatten what you haven't inspected.
 The flattening rewrite itself is Volume 2.
 [Volume 2: transformations](https://zilutian.github.io/minishield/#day2) adds
-PHI and cross-block value demotion, then dispatcher construction. Its teaching
-notes are in [day2](day2).
-[Volume 3: tests and measurement](https://zilutian.github.io/minishield/#day3)
-covers GoogleTest, CTest, differential checks, benchmarks, and a reproducible
-demo; its teaching source is [day3](day3). Both books are complete drafts,
-with implementation exercises and measurements still to be done.
+PHI and cross-block value demotion, then dispatcher construction, then the
+testing, measurement, and demo chapters that prove it. Its teaching notes are
+in [day2](day2).
+[Volume 3: hardening techniques](https://zilutian.github.io/minishield/#day3)
+is a crash course on the techniques flattening leaves out — control-flow
+integrity, stack canaries, OLLVM-style obfuscation, position independence, and
+the fuzzing that proves each one still behaves; its teaching source is
+[day3](day3). Both books are complete drafts, with implementation exercises
+and measurements still to be done.
 
 ## Beyond flattening: a framework for hardening
 
