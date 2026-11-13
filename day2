@@ -6837,6 +6837,7 @@ SSA result → store into an entry-allocated slot → load at a use
 - Cross-block candidates, void, alloca, and helper signatures: lessons 04–09.
 - Before/after memory examples: lessons 10–11.
 - State IDs, block creation, and first-hop connection: lessons 12–16.
+- Guard-rejected LLVM constructs and their predicates: lesson 17.
 
 Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition.
 
@@ -6854,6 +6855,31 @@ Checkpoint: Choose one unfamiliar term, find its example, and explain it using t
 | Differential test | Run two implementations on the same defined input and compare observable results. |
 | Undefined behavior | Execution outside the language/IR contract; it invalidates naive equivalence arguments. |
 | Prototype scope | A deliberate limited support domain, not a claim to handle every valid LLVM program. |
+
+### LLVM concepts from the guard lessons
+
+The eligibility lessons reject one LLVM construct at a time because each would break the value-prepared, single-dispatch rewrite that the later lessons build. This section collects those constructs with the predicate the guard uses, so a word in a diagnostic names the whole concept. Every entry is valid LLVM; the pass simply does not handle it yet, which is a prototype-scope limit, not a defect in the IR.
+
+| Concept | Meaning | How the guard meets it |
+| --- | --- | --- |
+| Function declaration | A `declare` signature with no body: the callee exists in the module but has no blocks to inspect or rewrite. | `Function::isDeclaration` rejects before any other check. |
+| Function attribute vs call flag | An attribute (naked, convergent, returns_twice) belongs to the function and is read with `hasFnAttribute`; a flag (musttail, tail) belongs to one particular call and is read through `CallInst` predicates. | Each is checked where it lives, so a function-level check never sees a call-level marker and vice versa. |
+| Naked function | The `naked` attribute suppresses the compiler’s prologue and epilogue; the body is responsible for the whole calling convention. | `hasFnAttribute(Attribute::Naked)`; inserting a state slot or dispatcher would silently change what the caller sees. |
+| Presplit coroutine | A coroutine already lowered into an ordinary function plus an explicit state machine; its CFG is not the shape this pass assumes. | `Function::isPresplitCoroutine`. |
+| Personality function | The `personality` attribute naming a language’s exception-handling entry routine; control can flow through EH, not just branches. | `Function::hasPersonalityFn`. |
+| EH pad | A `landingpad` or `cleanuppad` instruction that catches or unwinds an exception, paired with `invoke`/`callbr` terminators. | `BasicBlock::isEHPad`, plus a terminator whitelist that excludes the EH terminators. |
+| Address-taken basic block | A block whose address can be used as a value, so the CFG is no longer the complete description of control flow. | `BasicBlock::hasAddressTaken`. |
+| Terminator whitelist | The only block endings the pass rewrites: `br`, conditional `br`, `switch`, `ret`, `unreachable`. | A `switch` over `getTerminator()->getOpcode()` rejects every other opcode. |
+| Static entry alloca | An `alloca` with a compile-time constant count in the entry block; the only allocation the pass preserves. | `AllocaInst::isStaticAlloca`; non-static or non-entry allocas would change frequency or lifetime under hoisting. |
+| Inline assembly | A call whose “callee” is embedded assembly text rather than a symbol; register and clobber behavior is tied to that exact code. | `CallBase::isInlineAsm`. |
+| Convergent call | The `convergent` attribute promises that threads reaching the call all converge there; the rewrite must not add non-convergent entries. | `CallBase::isConvergent`. |
+| Operand bundle | Extra call metadata in `[bundle ...]` form, such as alignment or aliasing hints; call-level semantics, not argument data. | `CallBase::getNumOperandBundles` nonzero. |
+| returns_twice | A callee that may return to its caller more than once (the `setjmp`/`longjmp` family); a one-terminator-per-block model breaks. | `hasFnAttribute(Attribute::ReturnsTwice)` on the called function. |
+| musttail | A flag requiring tail-call transfer: LLVM constrains the instructions allowed between the call and the following return. | `CallInst::isMustTailCall`. |
+| CallBase / CallInst | `CallBase` is the shared interface of the call-family instructions; `CallInst` is the ordinary call, and call-specific markers live on the derived class. | The guard uses `CallBase` for the shared call checks and `CallInst` for the musttail marker. |
+| Aggregate (struct) result | A composite value type such as `{ i32, i32 }`, built with `insertvalue` and read with `extractvalue`; `zeroinitializer` is its all-zero value. | Result types outside void/integer/float/pointer are rejected, so a struct result fails even when every field is an integer. |
+| Intrinsic | An operation whose semantics LLVM itself defines, written as a call to a `llvm.*` name with no user body; `llvm.ctpop.i32` counts set bits. | The `IntrinsicInst` check rejects explicit intrinsic calls conservatively. |
+| Coroutine intrinsic | The `llvm.coro.begin/end/suspend/resume` family that builds coroutine state machines. | Checked before the general intrinsic rule so the diagnostic names the real cause. |
 
 ### Check your understanding
 
