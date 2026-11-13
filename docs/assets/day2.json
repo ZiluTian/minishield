@@ -6677,7 +6677,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The learner then implemented the isConvergent() guard on the existing CallBase pointer. In the resumed session, the current build was up to date; tests/ir/convergent.ll was rejected with the exact diagnostic “convergent calls are not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The operand-bundle guard below is the next assigned exercise.",
+          "text": "The learner then implemented the isConvergent() guard on the existing CallBase pointer. In the resumed session, the current build was up to date; tests/ir/convergent.ll was rejected with the exact diagnostic “convergent calls are not supported,” and canonical before/after output was identical. This supersedes the earlier pending note. The operand-bundle guard was assigned next; its completed check is recorded below.",
           "eligibilityWalkthrough": true,
           "convergenceWalkthrough": true
         },
@@ -6734,7 +6734,7 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: The observed diagnostic for the focused convergent fixture was “convergent calls are not supported,” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. The next operand-bundle check is still an exercise, not a recorded plugin success.",
+          "text": "Checkpoint: The observed diagnostic for the focused convergent fixture was “convergent calls are not supported,” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. The operand-bundle check’s subsequent completion is recorded below; do not confuse it with the next returns_twice exercise.",
           "eligibilityWalkthrough": true,
           "convergenceWalkthrough": true
         },
@@ -6746,7 +6746,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The next assigned rule rejects calls with operand bundles. The complete fixture below has valid parser/verifier syntax, but implementation and plugin rejection are still learner work at this checkpoint. Test it separately from the intrinsic, inline-assembly, and convergent inputs so those earlier guards do not mask this rule.",
+          "text": "The operand-bundle guard was then implemented by the learner. In the resumed session, the build was up to date; tests/ir/operand_bundle.ll was rejected with “operand bundles are unsupported,” and canonical before/after IR was identical. This supersedes the earlier pending note. The returns_twice check below is the next assigned exercise; it has not yet been established by a plugin rejection test in this note.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6796,7 +6796,7 @@
         },
         {
           "type": "task",
-          "text": "Task: Add the operand-bundle predicate inside the existing CallBase block and write tests/ir/operand_bundle.ll from this complete module. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.",
+          "text": "Task: To replay this completed guard, write the operand-bundle predicate inside the CallBase block and the focused tests/ir/operand_bundle.ll input yourself. Preserve the earlier call checks and reject before any PHI or ordinary-value demotion.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
         },
@@ -6809,9 +6809,91 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Once the guard is implemented, expect “operand bundles are unsupported” and unchanged canonical output for this focused module. That plugin outcome remains expected here, not observed. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test.",
+          "text": "Checkpoint: The observed operand-bundle rejection was “operand bundles are unsupported,” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would be the wrong test. The next returns_twice guard still has an expected, rather than observed, plugin outcome.",
           "eligibilityWalkthrough": true,
           "operandBundleWalkthrough": true
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — returns_twice can resume one continuation again",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The next assigned guard covers a call whose execution can resume at the same continuation more than once. The input below has verified LLVM syntax, but implementing the guard and observing its plugin rejection are still learner work at this checkpoint. Keep that future result separate from the completed operand-bundle check.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The C setjmp/longjmp mechanism is a useful conceptual example: setjmp first returns normally while recording context; a later nonlocal transfer can make execution continue as though that same call had returned again. This is not two result operands produced at once, and not merely an ordinary loop calling a function twice. A transformation relying only on a single forward return path has not established correct handling of this reentry, so our prototype rejects it conservatively. See LLVM’s [function attributes](https://llvm.org/docs/LangRef.html#function-attributes).",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include \"llvm/IR/Attributes.h\"",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Add the include explicitly at the top of FunctionEligibility.cpp; it declares the LLVM attribute identifiers used by the guard. This is a C++ compilation dependency, not an instruction inserted into the input program. Then use the following predicate inside the existing successful CallBase cast.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (call->hasFnAttr(llvm::Attribute::ReturnsTwice))\n    return {false, \"returns_twice calls are unsupported\"};",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "hasFnAttr asks about the call’s function attribute contract and returns a C++ bool. llvm::Attribute::ReturnsTwice is the C++ identifier; returns_twice is the spelling printed in LLVM IR. This does not count result values, count dynamic calls, or run the target function. Use your existing CallBase pointer name and reject before any demotion or graph change.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "declare i32 @resume_point() returns_twice\n\ndefine i32 @use_resume_point() {\nentry:\n  %result = call i32 @resume_point() returns_twice\n  ret i32 %result\n}",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Read the complete module: declare describes resume_point as taking no arguments and returning i32, without providing its body. Its suffix marks the declared contract. define creates the ordinary wrapper use_resume_point. The call’s empty () passes no arguments; its own explicit returns_twice marker states the call-site contract. %result is the local name for the integer returned by that call, and ret returns that integer to the wrapper’s caller. @ identifies functions; % identifies the local SSA result.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "resume_point is an ordinary external placeholder, not an intrinsic or an implementation of setjmp. The attribute itself does not manufacture a second return. This module isolates the guard’s recognition of the marker; with no main or callee implementation it is not a standalone executable demonstration of a nonlocal return.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Add the explicit Attributes.h include and the ReturnsTwice predicate inside the CallBase block. Write the focused tests/ir/returns-twice.ll input yourself, retaining the earlier supported-call and rejection checks.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/returns-twice.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/returns-twice.ll -o build/returns-twice-checked.ll",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: After writing the guard, expect “returns_twice calls are unsupported” and identical canonical output for this focused module. That plugin result remains expected here, not observed. Explain why one static SSA call/result can require special control-flow handling without giving the instruction two simultaneous result values.",
+          "eligibilityWalkthrough": true,
+          "returnsTwiceWalkthrough": true
         },
         {
           "type": "heading",
@@ -7068,7 +7150,7 @@
           "irComparison": true
         }
       ],
-      "words": 4548,
+      "words": 5051,
       "quiz": {
         "q": "Can you safely hoist every non-entry alloca into entry?",
         "choices": [
