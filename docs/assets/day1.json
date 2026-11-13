@@ -62,7 +62,8 @@
         15,
         16,
         17,
-        23
+        23,
+        78
       ],
       "description": "Map blocks and edges into a reusable analysis, then make the eligibility decision that decides which functions a future pass may transform."
     },
@@ -4806,6 +4807,203 @@
         ],
         "answer": 0,
         "why": "Call FunctionEligibility::check(F) after the declaration check; if ineligible, print the reason and return PreservedAnalyses::all() (no change). Only after every check passes does the pass proceed."
+      }
+    },
+    {
+      "id": 78,
+      "day": 1,
+      "number": 5,
+      "title": "Zoom out: a framework for hardening",
+      "originalTitle": "Zoom out: a framework for hardening",
+      "summary": "Treat the registry, eligibility guard, CFG analysis, and differential harness as reusable seams; each hardening technique becomes one more named pass that plugs into them.",
+      "takeaway": "A hardening toolkit is a registry of named passes plus a per-technique support contract and a shared measurement harness — flattening is just the first entry.",
+      "source": "lib/Plugin.cpp",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "From one pass to a family of passes"
+        },
+        {
+          "type": "paragraph",
+          "text": "By the end of this chapter you have built four pieces that say nothing about flattening: a named-pass registry, a read-only statistics pass, a reusable CFG analysis, and an eligibility guard. Flattening is the first entry in a larger structure. Zoom out and the pattern is a framework: the registry hosts any number of named passes, and each code-hardening technique becomes one more pass that plugs into the same seams. This lesson names those seams, gives the recipe for adding a technique, and marks where the framework has to bend."
+        },
+        {
+          "type": "paragraph",
+          "text": "The move that turns a single pass into a toolkit is to separate the pieces that are technique-agnostic (reuse them verbatim for every new transform) from the pieces that are specific to flattening (write a new one per technique). Five seams are reusable as-is."
+        },
+        {
+          "type": "heading",
+          "text": "The five reusable seams"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Seam",
+              "Where it lives",
+              "What a new technique gets from it"
+            ],
+            [
+              "Named-pass registry",
+              "`lib/Plugin.cpp`",
+              "One place to map `minishield-<name>` to a pass; adding a technique is one branch"
+            ],
+            [
+              "Orchestrator pipeline",
+              "`lib/FlatteningPass.cpp`",
+              "The guard → prepare → build → invalidate order to copy"
+            ],
+            [
+              "Per-technique eligibility guard",
+              "`lib/FunctionEligibility.cpp`",
+              "The `reject loudly, never transform incorrectly` contract"
+            ],
+            [
+              "Shared cacheable CFG analysis",
+              "`lib/CFGAnalyzer.cpp`",
+              "Blocks, successors, back-edges, and loops, computed once and reused"
+            ],
+            [
+              "Differential + stats harness",
+              "`test_all.sh`, `StatsPass`, `tests/ir/*.ll`",
+              "Technique-agnostic correctness (original vs. hardened) and before/after measurement"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The registry is the keystone. Every code-hardening technique can be expressed as an `opt` pass, so one shared object hosts all of them: `registerPipelineParsingCallback` turns a pipeline string into a pass, and a new technique is a new string plus a new branch. The excerpt below is the relevant part of `lib/Plugin.cpp`; today only `minishield-flatten` and `minishield-stats` are registered, and the commented `minishield-opaque` line marks where a second technique would go."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// lib/Plugin.cpp — the registry (excerpt; a fragment, not a whole program)\nPB.registerPipelineParsingCallback(\n    [](llvm::StringRef Name,\n       llvm::FunctionPassManager &FPM,\n       llvm::ArrayRef<llvm::PassBuilder::PipelineElement> InnerPipeline) {\n        if (!InnerPipeline.empty())\n            return false;\n        if (Name == \"minishield-flatten\")\n            FPM.addPass(minishield::FlatteningPass());\n        else if (Name == \"minishield-stats\")\n            FPM.addPass(minishield::StatsPass());\n        else if (Name == \"minishield-opaque\")        // one branch = one new technique\n            FPM.addPass(minishield::OpaquePredicatePass());\n        else\n            return false;\n        return true;\n    });"
+        },
+        {
+          "type": "heading",
+          "text": "The recipe: add one more technique"
+        },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "Register a pass name in `lib/Plugin.cpp` → `minishield-<name>`.",
+            "Write an eligibility guard `XxxEligibility::check(F)` that encodes this technique's support contract: a named `llvm::errs()` diagnostic and an unchanged function on rejection.",
+            "Write the builder (`XxxBuilder::build(F)` or a pass `run()`), reusing `IRBuilder`, `DemotePHIToStack`/`DemoteRegToStack`, and `CFGAnalyzer`.",
+            "Wrap it in an orchestrator following `FlatteningPass`'s order, and return `PreservedAnalyses::none()` on change, `all()` when nothing changed.",
+            "Add positive and negative fixtures to `tests/ir/`, then wire the differential test into the harness."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Other techniques and how each fits"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Technique",
+              "What it does",
+              "Reuses from MiniShield",
+              "What is new"
+            ],
+            [
+              "Opaque predicates",
+              "Insert always-true `if` branches to plant bogus paths",
+              "`CFGAnalyzer` (chooses insertion points at joins and loops), `IRBuilder`, value demotion",
+              "The predicate expression plus a dead branch"
+            ],
+            [
+              "Function splitting / cloning",
+              "Divide one function into several, or clone it with wrapper entries",
+              "Per-sub-function eligibility, `CFGAnalyzer`, `CloneFunction`/`SplitFunction` utilities",
+              "Slicing logic — the inverse of flattening"
+            ],
+            [
+              "Instruction / data substitution",
+              "Rewrite `a+b` as `a+1+(b-1)`, or encrypt a string and decode it at run time",
+              "`IRBuilder`",
+              "Rewrite rules; the guard must loosen its scalar-only restriction"
+            ],
+            [
+              "Bogus control flow / junk code",
+              "Add dead blocks reachable only through an opaque predicate",
+              "`StateMachineBuilder` (already synthesizes the dispatcher and invalid blocks), `CFGAnalyzer`",
+              "Block synthesis under a provably-dead condition"
+            ],
+            [
+              "Forward CFI",
+              "Restrict `indirectbr` and indirect calls to a valid target set",
+              "`CFGAnalyzer` (successor sets are the CFI target sets)",
+              "Target-set checks; conflicts with flattening's guard"
+            ],
+            [
+              "Symbol / name obfuscation",
+              "Rename functions, globals, and labels to opaque names",
+              "A `ModulePass` / `FunctionPass` walking the symbol tables",
+              "A different pass-manager level"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "The glue you add to make it a framework"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "**Pipeline composition** — a `minishield` driver, or an `opt` pipeline string, that applies several passes in order, e.g. `function(minishield-flatten),function(minishield-opaque)`.",
+            "**A support-contract model** — a table mapping each technique to the constructs it handles, so `reject loudly` becomes a shared concept instead of one guard.",
+            "**An interaction and ordering policy** — which techniques compose, in which order, and how a conflict is detected.",
+            "**A generalized measurement harness** — `StatsPass` before and after, the differential test, binary size, and run-time overhead: the reusable Original/Protected table.",
+            "**A shared negative-fixture library** — the `tests/ir/` cases (EH, `indirectbr`, coroutine, inline assembly, `musttail`, `returns_twice`, convergent, operand bundle, address-taken, non-entry `alloca`, intrinsics) are technique-agnostic and inherited by every new pass."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "Where the framework has to bend"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "**Eligibility contracts differ per technique**, so there is no single global guard: flattening rejects `indirectbr`, while forward CFI targets it. The framework holds per-technique guards, not one `check()`.",
+            "**Techniques interact, and order matters** — opaque predicates change the CFG before flattening runs, so the differential test must run on the composed pipeline, not on each pass in isolation.",
+            "**Not every technique is an IR rewrite** — CFI needs a runtime library, pointer authentication is ARM-only, and integrity checks need run-time support. The framework is strongest for IR-level structural transforms.",
+            "**`PreservedAnalyses` must be correct per pass**, or the composed pipeline mis-caches."
+          ]
+        },
+        {
+          "type": "task",
+          "text": "Task: Trace the five seams. For each seam, name the file and function that own it today, and say which one you would copy versus extend when adding opaque predicates as a second pass."
+        },
+        {
+          "type": "checkpoint",
+          "text": "You are adding opaque predicates as a second pass. Which existing pieces do you reuse, which do you write, and why can you not call `FunctionEligibility::check()` unchanged for it?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Reuse the named-pass registry by adding a `minishield-opaque` branch in `lib/Plugin.cpp`, `CFGAnalyzer` to choose insertion points at joins and loops, `IRBuilder` plus value demotion to plant the predicate and its dead branch, and the differential plus stats harness to prove the hardened program still matches the original.",
+                "Write a new eligibility guard, a new builder (the opaque-predicate insertion), and a new orchestrator that follows the guard → prepare → build → invalidate order.",
+                "You cannot reuse `FunctionEligibility::check()` unchanged because each technique has its own support contract. The flattening guard rejects constructs — for example `indirectbr`, EH pads, and coroutine intrinsics — that opaque predicates might handle without trouble, and opaque predicates may accept or require different result types and call forms. The `reject loudly, never transform incorrectly` rule becomes a per-technique contract, so the new pass gets its own `check()` even though it shares the same convention."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1050,
+      "quiz": {
+        "q": "A new hardening technique is being added to MiniShield. Which existing piece is the keystone that lets one plugin host many techniques?",
+        "choices": [
+          "The named-pass registry in `lib/Plugin.cpp`",
+          "The flattening pass's `PreservedAnalyses` logic",
+          "The CMake `MODULE` target"
+        ],
+        "answer": 0,
+        "why": "Every hardening technique is expressible as an `opt` pass, and `registerPipelineParsingCallback` maps a pipeline string to a pass, so one plugin hosts all of them. The orchestrator and guard are per-technique, and the CMake target only controls the build artifact."
       }
     },
     {

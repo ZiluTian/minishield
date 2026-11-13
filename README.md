@@ -23,6 +23,16 @@ covers GoogleTest, CTest, differential checks, benchmarks, and a reproducible
 demo; its teaching source is [day3](day3). Both books are complete drafts,
 with implementation exercises and measurements still to be done.
 
+## Beyond flattening: a framework for hardening
+
+Flattening is the first entry in a larger design. The plugin is built from
+technique-agnostic seams — a named-pass registry, a per-technique eligibility
+guard, a shared CFG analysis, and a differential/stats harness — so other
+code-hardening techniques (opaque predicates, function splitting, instruction
+substitution, forward CFI, name obfuscation) each become one more named pass
+plugged into the same skeleton. Volume 1 closes on this as a capstone lesson:
+[Zoom out: a framework for hardening](https://zilutian.github.io/minishield/#lesson-78).
+
 ## Set up the environment
 
 Requires Conda/Miniforge on Linux x86-64. Create the named environment once:
