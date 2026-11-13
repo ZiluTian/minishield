@@ -1481,6 +1481,16 @@ execute many times, but its static call count is still one. Count Call and
 Invoke separately. Branch instructions are not the same as successor edges.
 Loop counting is deferred to task 1.3 rather than reporting a false zero.
 
+### Deep dive: the `Call` counter also counts intrinsic calls
+
+An intrinsic such as `llvm.sqrt.f64` is invoked with a `call` instruction, so
+its opcode is still `Call`. The `Call` counter therefore counts intrinsic
+calls alongside ordinary function calls — it means **all** call instructions,
+not just calls to user-defined functions. What an intrinsic is, and why the
+class chain `Instruction` to `CallBase` to `CallInst` to `IntrinsicInst`
+still leaves the opcode as `Call`, is in the LLVM concepts reference
+(section 19).
+
 ### Study-session walkthrough — switch classification still needs the installed opcode names
 
 A C++ switch is a suitable way to classify instruction opcodes, but use names from the installed LLVM version. LLVM 23 here has CondBr and UncondBr rather than Instruction::Br. Also check case fallthrough and ensure every counted field appears in the report.
@@ -2438,6 +2448,20 @@ Recursion cycles between function calls, not blocks within a function. Print loo
 
 Checkpoint: explain why an analysis result is requested by reference, why dominance argument order matters, and why back-edge count is not automatically a loop count.
 
+### Deep dive: why `info.block = &BB` but `push_back(successor)` needs no `&`
+
+In the basic analysis you do two different things with blocks: you **walk**
+them and you **store** their addresses. The walk uses a reference
+(`const llvm::BasicBlock &BB`), while the stored member `info.block` is a
+pointer (`const llvm::BasicBlock *`). Assigning the block to a pointer is a
+type mismatch, so store the block's address: `info.block = &BB;` — here `&`
+is the address-of operator, not a reference declaration. The successor loop is
+the mirror image: `llvm::successors(&BB)` already yields block pointers, so
+`successor` is a pointer and you store it as-is with `push_back(successor)`;
+writing `push_back(&successor)` would store a `BasicBlock **`, one level too
+deep. The full reference-versus-pointer treatment is in the C++ concepts
+reference (section 18).
+
 ### Study-session walkthrough — fill one record completely, then append it
 
 Build one BlockInfo per visited block, fill its fields, and append it to the returned result. Start with blocks and edges, then extend the same analysis with terminators, dominator back edges, and loop information.
@@ -2538,554 +2562,210 @@ Both listings are complete LLVM modules defining the example function, not fragm
 
 Follow the values and edges: Compare actual branch operands rather than the order of a diagnostic list.
 
-17. Understand references, pointers, and addresses while implementing the CFG
-=============================================================================
+17. The eligibility decision
+============================
 
-Before the LLVM calls keep demanding these details, make the C++ ideas under them click: an `&` in a type declares a reference, an `&` in an expression is address-of, a pointer is a variable holding an address, and a plain loop variable copies by value. Every CFG function you have written so far uses all of these, and the eligibility checks that follow build directly on them.
+MiniShield's product is a control-flow-flattening pass: it rewrites a
+function's branching into a single dispatcher. It can only run on functions it
+fully understands, so the first job is a guard — an eligibility policy that
+accepts a function only if every block, terminator, and call is supported, and
+rejects everything else without changing it. This is the one decision Day 1
+ends on; the flattening rewrite itself is Day 2.
 
-In CFGAnalyzer you do two different things with blocks: you walk them, and
-you store their addresses in the Result. Those two jobs need two different
-C++ handles - a reference and a pointer. This section separates the two,
-using the code from this project so the distinction is concrete rather than
-abstract.
+### The guard returns a decision, not an edit
 
-CFGAnalyzer::run() visits the function by iterating it, then records each
-block in a BlockInfo. The walk uses a reference; the storage uses a pointer.
-The draft assigned the block itself to the pointer member:
-
-  for (const llvm::BasicBlock &BB : F) {      // reference: walking
-      BlockInfo info{};
-      info.block = BB;                        // error: block is a pointer, BB is a reference
-  }
-
-The member info.block is declared as a pointer, const llvm::BasicBlock
-*block, but BB is a reference. Assigning a block to a pointer is a type
-mismatch. The fix is to store the block's address, not the block:
-info.block = &BB;. To see why, keep the two ideas below separate.
-
-A reference is another name for the block. const llvm::BasicBlock &BB does
-not create anything; it makes BB an alias for the existing block the loop is
-currently on. You use the alias exactly like the block itself, with the dot
-operator:
-
-  for (const llvm::BasicBlock &BB : F) {
-      llvm::errs() << BB.getName();   // member access with a dot
-  }
-
-A reference is not a copy and not an address: it is the block, reached
-through a second name. Three properties make it the right tool for walking.
-It must always name a real object, so it can never be null or reseated. It
-reads the block in place, so there is no copy. And because
-llvm::BasicBlock is noncopyable, a plain for (BasicBlock BB : F) would not
-compile at all. A reference is how you look at a live block without
-duplicating it.
-
-A pointer is a different kind of handle. const llvm::BasicBlock *block
-declares a variable whose value is the address of a block. To read the block
-through it you follow the pointer, with the arrow operator, or by
-dereferencing and then using a dot:
-
-  const llvm::BasicBlock *block = &BB;   // block now holds the block's address
-  llvm::errs() << block->getName();      // arrow: a member through a pointer
-  llvm::errs() << (*block).getName();    // or: dereference (*block), then dot
-
-BlockInfo stores pointers rather than references because the Result is plain
-data: it holds the addresses of blocks the function owns, without copying or
-owning them itself. A reference would not fit a std::vector or a
-default-initialized member - a reference must be bound at construction and is
-never reseated - while a pointer can start empty and be assigned. That is
-exactly what std::vector<BasicBlock *> needs for the successors and
-predecessors lists.
-
-The & appears in both declarations above, but its job depends on where it
-sits. In a type, & declares a reference; in an expression, & is the
-address-of operator:
-
-  const llvm::BasicBlock &BB     in a TYPE:       & declares a reference
-  &BB                            in an EXPRESSION: & is address-of, yields BasicBlock *
-
-In const llvm::BasicBlock &BB, the & is part of the type: it says BB is a
-reference. In info.block = &BB;, the & is part of the expression: it asks for
-the address of the block that BB names, producing a BasicBlock *. Same
-glyph, different meaning - the position decides which.
-
-Because info.block is a pointer and BB is a reference to the current block,
-store that block's address in the pointer: take the address, &BB. That yields
-a BasicBlock *, which is what the member holds. Writing info.block = BB;
-would assign a block where a pointer is expected - the very error you started
-from.
-
-  info.block = &BB;   // &BB is the block's address; info.block is a pointer
-
-Now the successor loop. llvm::successors(&BB) yields block pointers: each
-element of that range is already a BasicBlock *. So successor is a pointer,
-and you store it straight into the std::vector<BasicBlock *>:
-
-  for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
-      info.successors.push_back(successor);   // successor is already a pointer
-  }
-
-Writing push_back(&successor) would store the address of your local pointer
-variable - a BasicBlock **, one level too deep. The range already hands you
-the address of each destination block; the loop copies that address, it does
-not take the address of the copy. The predecessor loop is the same shape.
-
-Read each form according to its context:
-
-  const llvm::BasicBlock &BB    Declare a reference to a block.
-  &BB                          Obtain the referenced block's address.
-  const llvm::BasicBlock *ptr   Declare a pointer to a block.
-  *ptr                         Access the object that ptr points to.
-  BB.getName()                 Access a member through a reference.
-  ptr->getName()               Access a member through a pointer.
-
-The pointers BlockInfo stores do not own the blocks; the function owns them.
-They are valid only while the function and its blocks live, and only while
-the analysis result is not invalidated. That is why a consumer must respect
-analysis invalidation rather than reuse a stale Result.
-
-The implementation review also supplied three related corrections:
-
-  Use Result result{}; rather than Result result = new Result();.
-  new returns a pointer, while run() returns a Result value.
-
-  Use llvm::BasicBlock with two colons for namespace qualification.
-
-  Use llvm::successors() and llvm::predecessors(), both plural.
-
-Checkpoint: explain why info.block needs &BB, while push_back(successor)
-needs no additional &. Then fix the implementation yourself, add its source
-to CMake, and build before registering the analysis with LLVM.
-
-The full implementation at the end of this section:
-
-  for (const llvm::BasicBlock &BB : F) {
-      BlockInfo info{};
-      info.block = &BB;                       // reference -> store its address
-      for (const llvm::BasicBlock *successor : llvm::successors(&BB))
-          info.successors.push_back(successor);      // pointer -> store as-is
-      for (const llvm::BasicBlock *predecessor : llvm::predecessors(&BB))
-          info.predecessors.push_back(predecessor);
-      result.blocks.push_back(info);
-  }
-
-### Deep dive: references and addresses
-
-In this loop, `BB` is a **reference** to an existing block, not a pointer:
+`FunctionEligibility::check(F)` is a plain helper: it inspects the function and
+returns a small result — an `eligible` flag and a `reason` string. It does not
+modify the function and does not need analysis-manager registration. Rejecting
+before any transformation is essential: a negative decision must leave the
+function intact, and a positive one only permits the later stages to proceed;
+it does not itself transform the graph.
 
 ```cpp
-for (const llvm::BasicBlock &BB : F) {
-    // BB is another name for the block; access members with BB.getName().
+struct Eligibility { bool eligible; std::string reason; };
+Eligibility check(const llvm::Function &F);
+```
+
+### Wire the decision into the flattening stub
+
+In `lib/FlatteningPass.cpp`, include `minishield/FunctionEligibility.h`. After
+the existing declaration check, request the decision and act on it:
+
+```cpp
+const auto eligibility = FunctionEligibility::check(F);
+if (!eligibility.eligible) {
+    llvm::errs() << F.getName().str() << ": " << eligibility.reason << "\n";
+    return llvm::PreservedAnalyses::all();
+}
+llvm::errs() << F.getName().str() << " is eligible\n";
+```
+
+On rejection, print the function name and reason, then immediately return
+`PreservedAnalyses::all()` (no edits occurred, so the cache promise holds); on
+acceptance, print an eligible diagnostic. The stub still changes nothing.
+
+### What the policy rejects
+
+The guard conservatively rejects, in order: declarations (no body to flatten),
+presplit coroutine functions, personality routines, coroutine intrinsic calls,
+address-taken blocks, EH pads, and unsupported terminators. The supported
+terminators in this LLVM 23 API are `CondBr`, `UncondBr`, `Switch`, `Ret`, and
+`Unreachable`. What an EH pad, a personality routine, and a coroutine intrinsic
+actually are is in the LLVM concepts reference (section 19).
+
+### One unsupported feature per negative fixture
+
+A function rejected for the wrong reason can hide a broken later check. So each
+negative fixture isolates exactly one unsupported feature:
+`tests/ir/coroutine.ll` targets the coroutine-intrinsic rule, and
+`tests/ir/address_taken.ll` targets the address-taken-block rule. An earlier
+unrelated rejection must not be the only reason a fixture passes.
+
+### The rejection contract: unchanged, not just valid
+
+A rejected function must stay byte-for-byte identical in canonical form, with
+no partial edits. Validity alone (`verify`) is not the contract: a module can
+be valid yet changed. The check is a canonical before/after comparison: print
+the rejected function's IR with and without the pass and require the two to
+match.
+
+```bash
+opt -load-pass-plugin=build/libMiniShield.so \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/coroutine.ll -o build/after.ll
+
+diff -u build/before.ll build/after.ll   # must be empty
+```
+
+Checkpoint: explain why the guard runs before any transformation, why
+`PreservedAnalyses::all()` is correct on the rejected path, and why an empty
+canonical diff, not a successful `verify`, is what proves a rejected function
+was left untouched.
+
+18. C++ concepts
+================
+
+Reference cards for the C++ the Day 1 lessons rely on: references versus
+pointers, the two jobs of `&`, and how a range-based loop variable is typed.
+Look these up when a construct matters; each entry states the idea, shows it in
+this project's code, and links the language reference.
+
+### Reference versus pointer
+
+A **reference** is another name for an existing object; a **pointer** is a
+variable whose value is an object's address. A reference must always name a
+real object, so it can never be null or reseated; a pointer can start empty and
+be assigned. In the CFG analysis you walk a function's blocks by reference and
+store their addresses as pointers.
+
+```cpp
+for (const llvm::BasicBlock &BB : F) {      // reference: another name for the block
+    const llvm::BasicBlock *block = &BB;    // pointer: a variable holding the block's address
+    llvm::errs() << BB.getName() << block->getName();
 }
 ```
 
-A reference acts as another name for an object. A pointer holds an object's
-address. Since `BlockInfo::block` is declared as
-`const llvm::BasicBlock *block`, assign it the referenced block's address:
+Use `BB.getName()` through the reference and `block->getName()` through the
+pointer. `BlockInfo` stores pointers, not references, because a result is
+plain data that can start empty and be assigned; a reference would not fit a
+`std::vector` or a default-initialized member.
 
-```cpp
-info.block = &BB;
+### `&` in a type versus `&` in an expression
+
+The same glyph does two different jobs depending on where it sits. In a type,
+`&` declares a reference; in an expression, `&` is the address-of operator.
+
+```text
+const llvm::BasicBlock &BB     in a TYPE:       & declares a reference
+&BB                            in an EXPRESSION: & is address-of, yields BasicBlock *
 ```
 
-`&BB` obtains the address of the existing block; it does not copy the block
-or create a separate object representing the reference. The `&` symbol has
-different meanings in a declaration and an expression:
+In `info.block = &BB;`, the `&` asks for the address of the block that `BB`
+names, producing a `BasicBlock *`, which is exactly what the pointer member
+holds. Storing a reference where a pointer is expected (`info.block = BB;`) is
+a type mismatch.
 
-| Syntax | Meaning |
-|---|---|
-| `const llvm::BasicBlock &BB` | Declare a reference to a block |
-| `&BB` | Obtain the address of the block that `BB` refers to |
-| `const llvm::BasicBlock *ptr` | Declare a pointer to a block |
-| `*ptr` | Access the object pointed to by `ptr` |
-| `BB.getName()` | Access a member through an object or reference |
-| `ptr->getName()` | Access a member through a pointer |
+### Storing an address, versus storing a pointer as-is
 
-The successor loop already declares its variable as a pointer, so append it
-directly, without taking its address again:
+Take the address to fill a pointer member, but do not re-take the address of a
+value that is already a pointer.
 
 ```cpp
-for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
-    info.successors.push_back(successor);
+info.block = &BB;                        // BB is a reference; &BB obtains its address
+info.successors.push_back(successor);    // successor is already a BasicBlock *; store as-is
+info.successors.push_back(&successor);   // wrong: a BasicBlock **, one level too deep
+```
+
+### `auto` and loop-variable copying
+
+`auto` deduces a type but does not preserve the reference the iterator
+supplies. A plain `auto` variable copies the element; when the element is
+noncopyable, that copy fails to compile.
+
+```cpp
+for (auto bb : F) {            // tries to copy each BasicBlock; noncopyable, so it will not compile
+}
+for (const auto &bb : F) {     // bind to the existing block; equivalent to const BasicBlock &bb
+    // inspect the block without copying it
 }
 ```
 
-### Study-session walkthrough — a reference is another name, not an already stored pointer
+This is why `for (auto bb : F)` fails: `llvm::BasicBlock` is noncopyable. But
+`auto` is not always wrong. For a range whose elements are already pointers, a
+plain `auto` copies only the pointer value, not the pointed-to block.
 
-A reference alias and a pointer can both refer to the same object without being interchangeable C++ expressions. If info.block is a pointer while BB is a reference, determine the address expression needed to connect their types.
+### Follow the range's element type
 
-Before writing, answer: Does BB name the block object, or does it hold a BasicBlock* value?
+There is no rule that every traversal uses `&` or every traversal uses `*`.
+The loop variable's type follows what the range supplies: references for
+existing objects you inspect without copying, and pointer variables when the
+elements already hold addresses.
 
-```cpp
-const llvm::BasicBlock &BB = F.getEntryBlock();
-info.block = &BB;
-// BB.getName() accesses the object.
-// info.block->getName() follows the stored pointer.
+```text
+for (const llvm::BasicBlock &BB : F)                     // F yields block references
+for (const llvm::BasicBlock *s : llvm::successors(&BB))  // successors() yields block pointers
 ```
 
-The & in the declaration forms a reference type. BB is an alias for the existing block; no block copy is created. The & in the expression &BB is address-of and produces a pointer to that block, not an address of a separate reference object. A pointer value can be copied into the record; a reference binding cannot be treated as an interchangeable pointer expression.
+See the C++ reference for [references](https://en.cppreference.com/w/cpp/language/reference.html), the [address-of operator](https://en.cppreference.com/w/cpp/language/operator_other.html), [auto](https://en.cppreference.com/w/cpp/language/auto.html), and the [range-based for loop](https://en.cppreference.com/w/cpp/language/expressions.html).
 
-Task: Small writing step: Read each & aloud according to its position: reference declaration or address-of expression. Write the assignment to info.block using its declared pointer type.
+19. LLVM concepts
+=================
 
-Checkpoint: Use . when you have the object/reference and -> when you have a pointer. Neither field access transfers ownership. Be able to trace the pointer back to the block still owned by F, rather than imagining a second block stored in the record.
+Reference cards for the LLVM IR constructs the eligibility decision mentions:
+exception-handling pads, personality routines, and intrinsics. Each entry
+states what the construct is, how it appears in IR, and the guard rule that
+involves it.
 
-18. Read pointer and reference syntax in traversal loops
-========================================================
+### Exception-handling pad (EH pad)
 
-The learner asked why some traversals use * and others use &. Start with
-the type of each range's elements, rather than memorizing one loop pattern.
-
-  for (const llvm::BasicBlock &BB : F)
-
-Iterating a function gives access to its basic block objects by reference.
-BB is a reference to each existing block. It does not copy the block. Use
-BB.getName() to access members. The instruction loop follows the same rule:
-
-  for (const llvm::Instruction &I : BB)
-
-Compare the successor traversal:
-
-  for (const llvm::BasicBlock *successor : llvm::successors(&BB))
-
-The successors range yields block pointers, so successor is a pointer. The
-loop copies an address, not a BasicBlock. Use successor->getName(). The &BB
-inside the function call obtains the block's address because this overload
-of successors() takes a pointer. That expression is distinct from the & in
-the declaration of the outer loop's reference variable.
-
-Now examine the analysis result, whose types you defined yourself:
-
-  for (const auto &info : cfg.blocks)
-
-cfg.blocks is a vector of BlockInfo records. const auto &info refers to
-each stored record. Without &, auto info would copy the record and its
-successor/predecessor vectors on every iteration. Avoid those unnecessary
-copies when only inspecting the records.
-
-  for (const auto *successor : info.successors)
-
-info.successors is a vector of pointers to const blocks. Each element is
-already a pointer, so copying it is appropriate. The block itself is not
-copied. The predecessor loops work the same way.
-
-Likewise, in:
-
-  const auto &cfg = AM.getResult<CFGAnalyzer>(F);
-
-the reference lets StatsPass inspect the cached result without copying its
-records and vectors. The analysis manager owns that cached result.
-
-Checkpoint: annotate these four operations in your own words:
-
-  BB.getName()          Access through an object/reference.
-  &BB                   Obtain that object's address.
-  successor->getName()  Access through a pointer.
-  *successor            Access the object identified by the pointer.
-
-The rule is to follow the element type: references for existing records or
-objects when avoiding copies, pointer variables when the elements already
-hold addresses. There is no rule that every traversal needs * or every
-traversal needs &. Keep const when the traversal is read-only.
-
-### Deep dive: Why different traversal loops use `&` or `*`
-
-The loop variable's type follows what the range supplies. A range-based
-`for` loop does not require one particular pointer or reference syntax.
-
-```cpp
-for (const llvm::BasicBlock &BB : F) {
-    for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
-        // BB refers to a block; successor points to a destination block.
-    }
-}
-
-for (const auto &info : cfg.blocks) {
-    for (const auto *successor : info.successors) {
-        // info refers to a stored record; successor is a copied pointer.
-    }
-}
-```
-
-Read the loops one at a time:
-
-| Range | What it supplies | Loop variable | Why |
-|---|---|---|---|
-| `F` | Basic block objects by reference | `const BasicBlock &BB` | Inspect each existing block without copying it |
-| `BB` | Instruction objects by reference | `const Instruction &I` | Inspect each existing instruction without copying it |
-| `llvm::successors(&BB)` | Pointers to successor blocks | `const BasicBlock *successor` | Each element already identifies a destination by address |
-| `cfg.blocks` | `BlockInfo` records | `const auto &info` | Inspect a stored record without copying its vectors |
-| `info.successors` | Stored block pointers | `const auto *successor` | Copy each pointer value, not the pointed-to block |
-
-`llvm::predecessors(&BB)` and `info.predecessors` follow the same pointer
-pattern as successors. `const auto &cfg = AM.getResult<CFGAnalyzer>(F)` also
-uses a reference to avoid copying the analysis manager's cached result.
-
-In `llvm::successors(&BB)`, `&BB` is an expression that obtains the block's
-address because this API accepts a block pointer. It is separate from the
-reference declaration `BasicBlock &BB` in the outer loop.
-
-For an ordinary `std::vector<BlockInfo>`, writing `auto info` would copy
-each record, including its vectors. Writing `const auto &info` avoids that
-copy. For a `std::vector<const BasicBlock *>`, copying an element copies
-only a pointer; it does not copy the block. Using `&` everywhere is therefore
-unnecessary, and using `*` everywhere would not match the ranges' types.
-
-Pointers and references also determine member access: use `BB.getName()`
-and `info.successors`, but `successor->getName()` and
-`info.block->getName()`. To pass a pointed-to block to an API that expects a
-block reference, dereference the pointer with `*successor`.
-
-### Study-session walkthrough — look at what the range yields before choosing star or ampersand
-
-Choose * or & from the range’s actual element type. A Function traversal yields block references; LLVM successor/predecessor ranges yield block pointers. Similar-looking loops can therefore need different declarations.
-
-Before writing, answer: Why is &BB needed for one range, but successor already usable as a pointer in the inner range?
-
-```cpp
-for (const llvm::BasicBlock &BB : F) {
-    for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
-        // successor->getName();
-    }
-}
-```
-
-This traversal fragment uses & in BB’s declaration to avoid copying the block. &BB in the call obtains its address. The inner declaration’s * says successor is a pointer, because that is what the range supplies. Following that pointer uses -> or *successor as an object expression. A declaration symbol and an expression operator can look alike while doing different jobs.
-
-Task: Small writing step: Annotate the static type of BB, &BB, successor, and *successor before changing syntax. Do not add an extra & just because the outer loop used one.
-
-Checkpoint: successors(&BB) reports outgoing edges from the current block. Copying one pointer from that range does not copy its destination. This is why a uniform rule such as “all loops use references” would miss the range’s actual element type.
-
-19. Understand why auto alone tries to copy a basic block
-=========================================================
-
-During the function eligibility exercise, the learner asked why this loop
-cannot replace the explicit reference declaration:
-
-  for (auto bb : F)
-
-Teach the difference between type deduction and reference binding. auto
-deduces the type, but a plain auto variable does not automatically preserve
-the reference returned by the iterator. It tries to create a new local
-BasicBlock value by copying the existing element. LLVM BasicBlock is
-noncopyable, so that loop does not compile.
-
-The appropriate read-only traversal is:
-
-  for (const auto &bb : F) {
-      // Inspect the existing block without copying it.
-  }
-
-Here const auto &bb is equivalent to const llvm::BasicBlock &bb. The & asks
-for reference binding, while const makes access through that reference
-read-only.
-
-Compare the declarations:
-
-  auto bb          Try to copy the element into a local value.
-  auto &bb         Bind to the existing element, preserving its constness.
-  const auto &bb   Bind to the existing element through a const reference.
-
-There is a useful detail in FunctionEligibility::check: F is declared as
-const llvm::Function &. Iterating it gives const block references. Thus
-auto &bb also deduces a const reference here; it cannot remove constness
-from the block. Writing const auto &bb states the read-only intention
-explicitly and remains clear when reading the loop on its own.
-
-Connect this lesson to the earlier pointer traversal. For a vector whose
-elements are block pointers, auto successor copies only a pointer value.
-It does not copy the pointed-to BasicBlock. Plain auto is therefore not
-always wrong: its suitability depends on the element type and whether a
-copy is intended.
-
-Checkpoint: explain why auto bb fails for F, why const auto &bb succeeds,
-and why auto successor can succeed for info.successors. Keep the eligibility
-checker read-only and write the code yourself.
-
-### Deep dive: Why not `for (auto bb : F)`?
-
-`auto` deduces a type; it does not automatically preserve the reference
-provided by the iterator. This loop tries to copy each block into a new
-local variable:
-
-```cpp
-for (auto bb : F) {
-    // Tries to copy a BasicBlock; LLVM BasicBlock is noncopyable.
-}
-```
-
-Use a reference to bind to the existing block instead:
-
-```cpp
-for (const auto &bb : F) {
-    // Read the existing block without copying it.
-}
-```
-
-For this traversal, that is equivalent to declaring the loop variable as
-`const llvm::BasicBlock &bb`.
-
-| Loop variable | Effect |
-|---|---|
-| `auto bb` | Tries to create a value by copying the element |
-| `auto &bb` | Refers to the existing element; whether it is mutable follows the range's element type |
-| `const auto &bb` | Refers to the existing element through a read-only reference |
-
-`FunctionEligibility::check` takes `const llvm::Function &F`, so the blocks
-obtained from that function are already const. Even `auto &bb` therefore
-deduces a const reference in this context. Writing `const auto &bb` makes
-the read-only intent explicit.
-
-This also explains why `auto successor` can be valid when iterating a vector
-of block pointers: it copies a pointer value, not a block. Choose the loop
-variable based on the range's element type and whether copying is intended.
-
-Taking `&successor` would obtain the address of the local pointer variable,
-not the block's address. The stored block pointers refer to blocks owned by
-the function and must only be used while those blocks remain valid.
-
-### Study-session walkthrough — auto by value can request a forbidden BasicBlock copy
-
-Compare for (auto bb : F) with for (const llvm::BasicBlock &BB : F). The first tries to initialize a new local block value, while the second binds a reference to the existing block. This difference matters because BasicBlock is not copyable.
-
-Before writing, answer: Why is auto valid in one loop but wrong when it silently removes the reference?
-
-```cpp
-for (const auto &BB : F) {
-    // Read the existing block.
-}
-// Use auto &BB instead when the exercise needs mutable block access.
-```
-
-BasicBlock objects are not ordinary copyable value records. Plain auto deduces a value type here and attempts a copy; const auto& borrows a read-only view, while auto& borrows mutable access. The choice follows what the loop needs to do. This does not mean plain auto is always bad: if a different range yields a pointer, copying that pointer can be correct and inexpensive.
-
-Task: Small writing step: Choose const references for inspection and mutable references where later helpers modify IR. Identify the element type before applying the same change elsewhere.
-
-Checkpoint: Explain which expression would copy an object, which would bind an alias, and which would copy only an address. A copied BlockInfo is allowed even though copying the BasicBlock it points to is not.
-
-20. Explain exception-handling pads and personality checks
-==========================================================
-
-MiniShield's product is a control-flow-flattening pass: it rewrites a function's branching into a single dispatcher. It can only run on functions it fully understands, so the first job is a guard — an eligibility policy that accepts a function only if every block, terminator, and call is supported, and rejects everything else without changing it. Lessons 21–22 are two of those rejection rules (exception-handling pads, coroutine intrinsics); lessons 23–25 wire the decision into the pass and prove a rejected function stays byte-for-byte identical.
-
-During function eligibility work, the learner asked why both
-F.hasPersonalityFn() and BB.isEHPad() check exception handling, then asked
-what the word pad means.
-
-Start with the control-flow picture. Pad comes from landing pad: a
-designated place where execution arrives when an exception interrupts
-normal control flow. An invoke instruction names two destinations:
-
-  %result = invoke i32 @callee()
-      to label %normal
-      unwind label %exception
-
-Normal completion continues at normal. An exceptional unwind transfers
-control to exception. In the landing-pad model, exception begins with a
-landingpad instruction after any PHIs:
-
-  exception:
-    %ex = landingpad { ptr, i32 } cleanup
-    resume { ptr, i32 } %ex
-
-This is a fragment inside a function with a suitable personality routine,
-not a complete standalone IR module. landingpad receives exception
-information. cleanup marks participation in cleanup handling; it does not
-execute destructors or other cleanup work automatically. Such operations
-would be separate instructions. resume continues unwinding.
-
-Teach the broader term next: an EH pad is an exception-handling entry
-instruction. LLVM recognizes landingpad, catchpad, cleanuppad, and
-catchswitch as EH-pad instructions.
-
-Distinguish the two queries by scope:
-
-  F.hasPersonalityFn()
-    Function-level: does this function specify a personality routine?
-    That routine defines language-specific exception-handling behavior.
-
-  BB.isEHPad()
-    Block-level: is the block's first non-PHI instruction an EH pad?
-
-Use tests/ir/instruction-kinds.ll as the concrete example. with_invoke has
-a personality routine, but only its exception block is an EH pad:
-
-  entry      invoke instruction       isEHPad() is false
-  normal     return instruction       isEHPad() is false
-  exception  landingpad instruction   isEHPad() is true
-
-An invoke initiates a call with an exceptional destination; it is not
-itself an EH pad. A pad marks where exception-handling control arrives.
-
-Clarify the overlap in the eligibility checker instead of claiming both
-checks are independently necessary. A function may retain a personality
-routine without having any pad blocks. Conversely, valid EH-pad
-instructions require a personality routine. Rejecting all personality
-functions at the start already rejects functions with valid EH pads.
-The later block-level rejection is therefore redundant for those inputs,
-though it states the unsupported block kind explicitly.
-
-Checkpoint: identify which block receives the unwind edge, explain why
-the block containing invoke is not the pad, and explain why early
-personality rejection prevents reaching the pad check in this fixture.
-
-Reference: https://llvm.org/docs/ExceptionHandling.html
-
-### Deep dive: Exception-handling pads and personality routines
-
-In exception handling, **pad** comes from **landing pad**: a designated
-place where control arrives when an exception interrupts normal execution.
-An LLVM `invoke` has separate normal and exceptional destinations:
+The word **pad** comes from **landing pad**: a place where control arrives when
+an exception interrupts normal flow. An `invoke` names two destinations,
+`to label %normal` and `unwind label %exception`. The unwind destination
+begins with a landing pad, after any PHIs.
 
 ```llvm
 %result = invoke i32 @callee()
     to label %normal
     unwind label %exception
-```
 
-If the call succeeds, control continues at `%normal`. If it unwinds with an
-exception, control transfers to `%exception`. In the landing-pad model, that
-destination begins with a `landingpad` instruction, after any PHIs:
-
-```llvm
 exception:
   %ex = landingpad { ptr, i32 } cleanup
   resume { ptr, i32 } %ex
 ```
 
-This fragment belongs inside a function with a suitable personality routine.
-`landingpad` receives exception information, `cleanup` marks participation
-in cleanup handling, and `resume` continues unwinding. The marker does not
-perform cleanup work by itself; actual cleanup operations would be separate
-instructions before `resume`.
-
-An **EH pad** is the broader term for exception-handling entry instructions.
 LLVM recognizes `landingpad`, `catchpad`, `cleanuppad`, and `catchswitch` as
-EH-pad instructions. See [LLVM's exception-handling documentation](https://llvm.org/docs/ExceptionHandling.html).
+EH-pad instructions. `cleanup` marks participation in cleanup handling; it does
+not run destructors by itself. `resume` continues unwinding. The guard rejects
+any function that contains an EH pad, because rewriting EH edges as ordinary
+dispatcher edges would require semantics the prototype does not implement.
 
-The two eligibility checks inspect different levels:
+### Personality routine
 
-| Query | Meaning |
-|---|---|
-| `F.hasPersonalityFn()` | Does the function specify a personality routine defining its exception-handling behavior? |
-| `BB.isEHPad()` | Is the block's first non-PHI instruction an EH-pad instruction? |
-
-For `with_invoke` in `tests/ir/instruction-kinds.ll`, the function has a
-personality routine. Its `entry` block contains `invoke` but is not an EH
-pad; `normal` contains a return and is not an EH pad; `exception` starts with
-`landingpad` and is an EH pad. Containing `invoke` therefore does not itself
-make a block an EH pad.
-
-A function can have a personality routine without any EH-pad blocks. For
-valid IR, EH-pad instructions require an associated personality routine.
-Consequently, if MiniShield rejects every function with a personality
-routine before inspecting blocks, the later `isEHPad()` rejection is
-redundant for those valid inputs. It states the block-level restriction
-explicitly rather than providing an independent necessary rejection.
-
-### Study-session walkthrough — function-wide EH information and a block’s pad are different checks
-
-Separate function-wide exception-handling information from a particular handler entry block. F.hasPersonalityFn() and BB.isEHPad() inspect different objects and protect different assumptions in a CFG rewrite.
-
-Before writing, answer: If the function has a personality routine, does that mean every one of its blocks is an EH pad?
+A personality routine defines a function's language-specific exception-handling
+behavior. Two queries inspect different levels: `F.hasPersonalityFn()` asks
+whether the function specifies one (function-level), while `BB.isEHPad()` asks
+whether a block's first non-PHI instruction is an EH pad (block-level). A block
+containing `invoke` is not itself a pad; the pad is the unwind destination.
 
 ```cpp
 if (F.hasPersonalityFn())
@@ -3095,726 +2775,36 @@ for (const auto &BB : F)
         return {false, "EH pad is unsupported"};
 ```
 
-This is an eligibility fragment. A personality routine supplies function-level exception-handling behavior. An EH pad is a special entry point into a handler region, represented by particular instructions such as landingpad or funclet pads under LLVM’s rules. Ordinary blocks in that same function are not automatically pads. Rewriting EH edges as ordinary dispatcher edges would require semantics this prototype does not implement.
+Valid EH-pad instructions require a personality routine, so rejecting every
+personality function up front already rejects functions with valid pads. The
+later block-level check is therefore redundant for those inputs; it states the
+unsupported block kind explicitly.
 
-Task: Small writing step: Keep the function-level question separate from the per-block question, and explain what each rejection protects. Do not turn the pad test into an assumption that every block contains a landingpad instruction.
+### Intrinsic
 
-Checkpoint: An earlier personality rejection can mask whether a later pad-specific condition was reached. Use deliberately focused valid fixtures when testing particular rules; arbitrary malformed EH text is not evidence that the intended guard worked.
-
-21. Relate intrinsics to instructions during coroutine checks
-=============================================================
-
-The learner asked how an intrinsic relates to an instruction after adding
-coroutine detection to the eligibility checker.
-
-Start with three IR instruction fragments:
-
-  %a = add i32 %x, 1
-  %b = call i32 @my_function(i32 %a)
-  %c = call double @llvm.sqrt.f64(double %value)
-
-All three lines are instructions. The first is an add operation. The second
-calls an ordinary function. The third calls an intrinsic: a special function
-with semantics defined by LLVM itself.
-
-An intrinsic is commonly expressed as a function call rather than a new
-instruction opcode. Its name has the reserved llvm. prefix. For example,
-declare the square-root intrinsic without supplying a function body:
-
-  declare double @llvm.sqrt.f64(double)
-
-LLVM knows the intrinsic's behavior and lowers it to appropriate target
-code. It need not remain a machine-level function call. Distinguish the
-function declaration from the call instruction: the declaration is a
-Function, while the call inside a basic block is an Instruction.
-
-Next connect the concepts to the C++ class hierarchy:
-
-  Instruction
-    CallBase
-      CallInst
-        IntrinsicInst
-
-Each line is derived from the class above it. Every IntrinsicInst is both
-a CallInst and an Instruction. Not every Instruction is a call, and not
-every call invokes an intrinsic. LLVM permits certain intrinsic uses through
-invoke as well; IntrinsicInst specifically represents intrinsic calls with
-the call opcode.
-
-Now explain the eligibility check:
-
-  llvm::dyn_cast<llvm::IntrinsicInst>(&I)
-
-This checks whether I is an intrinsic call instruction. Success yields a
-pointer that exposes intrinsic-specific information; failure yields nullptr.
-For a successful cast, inspect getCalledFunction()->getName(). A name
-starting with llvm.coro. identifies the coroutine family.
-
-Use both checks in the initial coroutine policy: reject a function marked
-isPresplitCoroutine(), and inspect instructions for coroutine intrinsic
-calls. The latter policy is conservative: it also rejects ordinary functions
-that manipulate coroutine handles through these intrinsics. Only accept a
-function after all function, block, terminator, and instruction checks pass.
-
-Connect this back to the statistics exercise. An intrinsic call still has
-opcode Call, so the existing Call case counts it. The counter currently
-means all call instructions, including intrinsic calls, rather than only
-calls to user-defined functions.
-
-Checkpoint: classify add, an ordinary function call, and an intrinsic call.
-Explain why the coroutine name check is needed after dyn_cast succeeds:
-recognizing an intrinsic alone does not establish that it is a coroutine
-operation; llvm.sqrt.f64 is an intrinsic too.
-
-Reference: https://llvm.org/docs/LangRef.html#intrinsic-functions
-
-### Deep dive: Intrinsics and instructions
-
-An **instruction** is one operation in LLVM IR. An **intrinsic** is a special
-function whose meaning LLVM already knows, commonly invoked through a `call`
-instruction. Compare these instruction fragments:
-
-```llvm
-%a = add i32 %x, 1
-%b = call i32 @my_function(i32 %a)
-%c = call double @llvm.sqrt.f64(double %value)
-```
-
-| Result | Instruction opcode | Meaning |
-|---|---|---|
-| `%a` | `add` | Built-in arithmetic operation |
-| `%b` | `call` | Call to an ordinary function |
-| `%c` | `call` | Call to an LLVM intrinsic |
-
-`llvm.sqrt.f64` has LLVM-defined semantics. Declare it without providing a
-function body:
+An **intrinsic** is a special function whose meaning LLVM itself defines. Its
+name has the reserved `llvm.` prefix and it is declared without a body. It is
+commonly written as a `call` rather than a new opcode.
 
 ```llvm
 declare double @llvm.sqrt.f64(double)
-```
 
-Intrinsic names use the reserved `llvm.` prefix. LLVM lowers intrinsic
-operations to appropriate target code; an intrinsic call does not necessarily
-remain a function call in machine code. See [LLVM's intrinsic documentation](https://llvm.org/docs/LangRef.html#intrinsic-functions).
-
-In the C++ API, the relevant inheritance relationship is:
-
-```text
-Instruction
-  └── CallBase
-       └── CallInst
-            └── IntrinsicInst
-```
-
-Every `IntrinsicInst` is an instruction and a call, but most instructions
-and many calls are not `IntrinsicInst`s. The intrinsic function declaration
-itself is a `Function`; the instruction inside the caller is the operation
-that invokes it. LLVM also permits certain intrinsics in `invoke`
-instructions; `IntrinsicInst` specifically represents intrinsic `call`
-instructions.
-
-For coroutine checking, this expression asks whether `I` is an intrinsic
-call instruction:
-
-```cpp
-llvm::dyn_cast<llvm::IntrinsicInst>(&I)
-```
-
-On success, inspect `getCalledFunction()->getName()` to identify the family.
-The `llvm.coro.` prefix identifies coroutine intrinsics, which the initial
-eligibility policy rejects conservatively. A failed cast returns `nullptr`.
-
-The statistics pass's `Call` opcode counter also counts intrinsic calls:
-they still have opcode `Call`. Being recognized as an intrinsic does not
-change the instruction's opcode into a separate intrinsic opcode.
-
-### Study-session walkthrough — an intrinsic and its call are related, not identical categories
-
-Relate an intrinsic to the instruction that invokes it. Many LLVM intrinsics are represented by call instructions, but ordinary arithmetic is also an instruction and most calls are not intrinsic operations. This distinction matters when filtering coroutine operations.
-
-Before writing, answer: What am I checking with IntrinsicInst: the class of an IR operation, or the name of an ordinary source function?
-
-```cpp
-if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(&I)) {
-    const auto *callee = intrinsic->getCalledFunction();
-    if (callee->getName().starts_with("llvm.coro."))
-        return {false, "coroutine intrinsic is unsupported"};
-}
-```
-
-The cast recognizes LLVM’s intrinsic-call representation and returns a borrowed typed pointer. The callee identifies the built-in operation, whose semantics LLVM defines. The starts_with prefix selects the coroutine family for this Day 1 rule. It does not insert a call or execute one in the target program. The later Day 2 policy conservatively rejects other explicit intrinsic calls too.
-
-Task: Small writing step: Write the coroutine-specific inspection first and retain the ordinary supported-call behavior. Read a complete declare/call example in the comparison below.
-
-Checkpoint: A scalar intrinsic result can look like ordinary i32 data while its operation has special semantics. Conversely normal arithmetic such as add is an instruction without being a call. Keep operation identity, result type, and support policy separate.
-
-### LLVM program before and after this checkpoint
-
-Recognizing a coroutine intrinsic is a type/name inspection. The complete fixture makes the declaration and call context visible.
-
-The program is unchanged at this checkpoint. The check neither lowers the intrinsic nor erases its call. That unsupported function must be rejected before transformation.
-
-### Reading this LLVM program from zero
-
-Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
-
-| Spelling in these listings | How to read it here |
-| --- | --- |
-| `define ptr @coroutine_handle() {` | `define` starts a function body. `@coroutine_handle` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
-| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
-| `%handle = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
-| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
-| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
-| `declare ptr @llvm.coro.noop() #0` | A function declaration gives a return type, name, and argument list without a body. Here `()` means no arguments. `llvm.coro.noop` is an LLVM-recognized coroutine intrinsic, not a function body that this snippet defines or ordinary arithmetic to spill. |
-
-### Every instruction used in this pair
-
-| Instruction and an actual line | Meaning and operand order in these listings |
-| --- | --- |
-| `call`: `%handle = call ptr @llvm.coro.noop()` | Invoke the named callee with the shown arguments and capture its returned value on the left. Here the return type ptr means the result is a coroutine handle pointer; the later ret returns that handle to the caller. LLVM recognizes `@llvm.coro.noop` as an intrinsic. The eligibility example detects that unsupported operation and leaves the call intact. |
-| `ret`: `ret ptr %handle` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
-
-### The other syntax printed around this function
-
-| Module or function syntax | Meaning here |
-| --- | --- |
-| `#0` / function attributes | The numbered group attaches facts to a function declaration/definition rather than executing them. `nounwind`: The function does not unwind the stack. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract. |
-
-### Walk one concrete execution
-
-When coroutine_handle is called, its call obtains the special no-op coroutine handle from the LLVM intrinsic, and ret ptr returns that same handle. No integer load/store or coroutine resumption is present here. The intrinsic is deliberately unsupported by this prototype, so checking/rejecting it leaves both its declaration and its call unchanged.
-
-<details>
-<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
-
-### Before — coroutine original
-
-```llvm
-; Function Attrs: nounwind memory(none)
-declare ptr @llvm.coro.noop() #0
-
-define ptr @coroutine_handle() {
+define double @use_sqrt(double %value) {
 entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
-}
-
-attributes #0 = { nounwind memory(none) }
-```
-
-### After — coroutine inspect
-
-```llvm
-; Function Attrs: nounwind memory(none)
-declare ptr @llvm.coro.noop() #0
-
-define ptr @coroutine_handle() {
-entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
-}
-
-attributes #0 = { nounwind memory(none) }
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
-
-</details>
-
-Follow the values and edges: The intrinsic declaration and the call are both still present.
-
-22. Integrate eligibility decisions into the flattening stub
-============================================================
-
-After implementing the helper, first replace its temporary final rejection
-with return {true, ""};. Keep that success return after all checks and outside
-both traversal loops. Correct diagnostic spelling so rejection messages are
-clear and stable.
-
-In lib/FlatteningPass.cpp, include minishield/FunctionEligibility.h. After
-the existing declaration check, request a decision:
-
-  const auto eligibility = FunctionEligibility::check(F);
-
-This is a plain helper call returning a small result value. It does not
-require analysis-manager registration. If eligible is false, print the
-function name and rejection reason, then immediately return
-PreservedAnalyses::all(). If eligible is true, print an eligible diagnostic.
-Keep the final PreservedAnalyses::all(): the stub still changes nothing.
-
-Checkpoint: explain why rejecting before transformation is essential, and
-why eligible means passing the current feature checks rather than already
-being transformed or proven safe under every possible future algorithm.
-
-Rebuild and run minishield-flatten on tests/ir/phi.ll. merge should be
-eligible. Then run tests/ir/instruction-kinds.ll:
-
-  with_invoke             Rejected for its exception-handling personality.
-  with_indirectbr         Rejected for the unsupported indirectbr terminator.
-  without_optimization    Skipped because FlatteningPass is optional and the
-                          function has optnone.
-
-The first two decisions were observed in the built plugin, as was merge's
-eligible diagnostic. The optional pass differs from RequiredPassInfoMixin
-on StatsPass, which permits inspection of optnone functions. A skipped
-function has not received an eligibility decision from FlatteningPass.
-
-### Deep dive: integrate the decision
-
-The eligibility helper returns a decision and reason without modifying the
-function. In `FlatteningPass.cpp`, include `minishield/FunctionEligibility.h`
-and, after skipping declarations, call:
-
-```cpp
-const auto eligibility = FunctionEligibility::check(F);
-```
-
-For rejection, print the function name and `eligibility.reason`, then return
-`PreservedAnalyses::all()` immediately. For acceptance, print an eligible
-diagnostic. The pass remains a diagnostic stub; passing eligibility checks
-does not mean flattening has occurred.
-
-Keep the success return `{true, ""}` at the end of the eligibility checker,
-after every block and instruction has been checked. Its current policy rejects
-declarations, presplit coroutine functions, personality routines, coroutine
-intrinsic calls, address-taken blocks, EH pads, and unsupported terminators.
-The supported terminators are `CondBr`, `UncondBr`, `Switch`, `Ret`, and
-`Unreachable` in the installed LLVM 23 API.
-
-The existing fixtures demonstrate:
-
-| Fixture / function | Expected decision |
-|---|---|
-| `phi.ll` / `merge` | Eligible |
-| `instruction-kinds.ll` / `with_invoke` | Rejected: exception-handling personality |
-| `instruction-kinds.ll` / `with_indirectbr` | Rejected: unsupported terminator `indirectbr` |
-| `instruction-kinds.ll` / `without_optimization` | Skipped by the optional flattening pass because of `optnone` |
-
-Rejection reports the first failing check. The required statistics pass still
-inspects `optnone` functions; the optional flattening pass may not run on them.
-
-### Study-session walkthrough — a positive eligibility decision is permission to continue, not a completed transform
-
-Put the eligibility decision before all mutation. A negative decision must leave the function intact; a positive decision permits the following stages to proceed but does not itself transform the graph or prove their correctness.
-
-Before writing, answer: What should happen immediately after the checker says false, and what does true actually establish?
-
-```cpp
-const auto decision = FunctionEligibility::check(F);
-if (!decision.eligible) {
-    llvm::errs() << decision.reason << "
-";
-    return llvm::PreservedAnalyses::all();
-}
-// Only accepted input may proceed to future edits.
-```
-
-The result separates a C++ bool from an explanatory reason string. Returning all() is appropriate on this rejected path because no edits occurred; it is not what makes the function unchanged. A true decision means the configured guard found no unsupported construct. It does not prove a future builder correct, and it does not itself add a dispatcher.
-
-Task: Small writing step: Place the guard after the declaration check and before all transformation helpers. Keep diagnostic text on stderr and LLVM module output separate.
-
-Checkpoint: Check one accepted case and one intentionally unsupported case. In this Day 1 stub both may still emit unchanged IR; the decision/report differs. Later accepted transformations need structural and behavioral checks while rejected input must remain untouched.
-
-### LLVM program before and after this checkpoint
-
-Eligibility makes a decision before any rewrite. Here the coroutine call is valid IR but outside the supported input contract.
-
-The program is unchanged at this checkpoint. Rejection means leaving the function and its declaration untouched, rather than partially demoting or reconnecting it.
-
-### Reading this LLVM program from zero
-
-Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
-
-| Spelling in these listings | How to read it here |
-| --- | --- |
-| `define ptr @coroutine_handle() {` | `define` starts a function body. `@coroutine_handle` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
-| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
-| `%handle = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
-| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
-| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
-| `declare ptr @llvm.coro.noop() #0` | A function declaration gives a return type, name, and argument list without a body. Here `()` means no arguments. `llvm.coro.noop` is an LLVM-recognized coroutine intrinsic, not a function body that this snippet defines or ordinary arithmetic to spill. |
-
-### Every instruction used in this pair
-
-| Instruction and an actual line | Meaning and operand order in these listings |
-| --- | --- |
-| `call`: `%handle = call ptr @llvm.coro.noop()` | Invoke the named callee with the shown arguments and capture its returned value on the left. Here the return type ptr means the result is a coroutine handle pointer; the later ret returns that handle to the caller. LLVM recognizes `@llvm.coro.noop` as an intrinsic. The eligibility example detects that unsupported operation and leaves the call intact. |
-| `ret`: `ret ptr %handle` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
-
-### The other syntax printed around this function
-
-| Module or function syntax | Meaning here |
-| --- | --- |
-| `#0` / function attributes | The numbered group attaches facts to a function declaration/definition rather than executing them. `nounwind`: The function does not unwind the stack. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract. |
-
-### Walk one concrete execution
-
-When coroutine_handle is called, its call obtains the special no-op coroutine handle from the LLVM intrinsic, and ret ptr returns that same handle. No integer load/store or coroutine resumption is present here. The intrinsic is deliberately unsupported by this prototype, so checking/rejecting it leaves both its declaration and its call unchanged.
-
-<details>
-<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
-
-### Before — coroutine original
-
-```llvm
-; Function Attrs: nounwind memory(none)
-declare ptr @llvm.coro.noop() #0
-
-define ptr @coroutine_handle() {
-entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
-}
-
-attributes #0 = { nounwind memory(none) }
-```
-
-### After — coroutine full
-
-```llvm
-; Function Attrs: nounwind memory(none)
-declare ptr @llvm.coro.noop() #0
-
-define ptr @coroutine_handle() {
-entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
-}
-
-attributes #0 = { nounwind memory(none) }
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
-
-</details>
-
-Follow the values and edges: Find the same intrinsic call before and after; a printed rejection is not an LLVM replacement instruction.
-
-23. Isolate rejection checks with new fixtures
-==============================================
-
-Next teaching task: write fixtures yourself for coroutine intrinsics and
-address-taken blocks. Do not rely only on the existing EH and indirectbr
-examples: an earlier rejection can mask the check being tested.
-
-Create tests/ir/coroutine.ll:
-
-  declare ptr @llvm.coro.noop()
-
-  define ptr @coroutine_handle() {
-  entry:
-    %handle = call ptr @llvm.coro.noop()
-    ret ptr %handle
-  }
-
-Its return is supported, and it has no personality routine. The expected
-rejection is specifically the coroutine-intrinsic check. This is a test of
-the conservative rule rejecting coroutine operations, including handle
-manipulation; it does not claim this function is itself a presplit coroutine.
-
-Create tests/ir/address_taken.ll:
-
-  define ptr @address_taken() {
-  entry:
-    br label %target
-  target:
-    ret ptr blockaddress(@address_taken, %target)
-  }
-
-Both terminators are supported, but target has its address used as a value.
-Expect rejection for the address-taken block. This tests the block property
-independently of the unsupported indirectbr terminator in the other fixture.
-
-After building, run each file through:
-
-  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
-    -passes='function(minishield-flatten),verify' \
-    -disable-output tests/ir/coroutine.ll
-
-Repeat using tests/ir/address_taken.ll. Confirm the function name and the
-intended rejection reason, rather than treating any rejection as sufficient.
-
-### Deep dive: isolated rejection fixtures
-
-write the following files yourself. These isolate checks
-that the existing exception and indirect-branch fixture does not exercise
-independently.
-
-Create `tests/ir/coroutine.ll`:
-
-```llvm
-declare ptr @llvm.coro.noop()
-
-define ptr @coroutine_handle() {
-entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
+  %result = call double @llvm.sqrt.f64(double %value)
+  ret double %result
 }
 ```
 
-This tests the conservative coroutine-intrinsic policy, including functions
-that manipulate coroutine handles. No personality routine or unsupported
-terminator should mask this check.
-
-Create `tests/ir/address_taken.ll`:
-
-```llvm
-define ptr @address_taken() {
-entry:
-  br label %target
-target:
-  ret ptr blockaddress(@address_taken, %target)
-}
-```
-
-The branch and return are supported terminators, but `%target` has its address
-used as a value. This isolates `hasAddressTaken()`.
-
-After building, run each fixture from the project root with the environment
-activated:
-
-```bash
-cmake --build build
-opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
-  -passes='function(minishield-flatten),verify' \
-  -disable-output tests/ir/coroutine.ll
-
-opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
-  -passes='function(minishield-flatten),verify' \
-  -disable-output tests/ir/address_taken.ll
-```
-
-Expect a coroutine-intrinsic rejection for `coroutine_handle`, and an
-address-taken-block rejection for `address_taken`.
-
-### Study-session walkthrough — one unsupported feature per negative fixture
-
-Isolate each rejection rule with a focused valid fixture. A coroutine test and an address-taken-block test exercise different conditions; combining unsupported features can let an earlier return hide the rule you meant to test.
-
-Before writing, answer: How could a rejection test pass even after the rule I intended to test was accidentally removed?
-
-```text
-coroutine.ll    → exercise the coroutine-intrinsic restriction
-address_taken.ll → exercise exposed block identity
-EH fixture      → exercise the documented EH rejection
-```
-
-This is a test plan, not output from commands just run. A checker returns at the first failed condition. If an input also has an unsupported terminator or personality function, that earlier rejection may hide a missing later rule. A valid focused module lets the expected reason identify the branch actually exercised. The before/after examples are complete modules, not declarations to paste indiscriminately into another test.
-
-Task: Small writing step: Choose one feature, write a valid minimal fixture, and state the exact intended rejection before running it. Keep a supported fixture as a positive control.
-
-Checkpoint: First verify the input itself. Then inspect the plugin’s reason and unchanged canonical output. A parser/verifier failure in the original input is not a successful eligibility test, and a generic nonzero process exit is not a named rejection.
-
-### LLVM program before and after this checkpoint
-
-This complete fixture isolates an address-taken block as a rejection reason.
-
-The program is unchanged at this checkpoint. The global blockaddress and function are preserved. An unrelated earlier rejection should not be the only reason this test passes.
-
-### Reading this LLVM program from zero
-
-Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
-
-| Spelling in these listings | How to read it here |
-| --- | --- |
-| `define ptr @address_taken() {` | `define` starts a function body. `@address_taken` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
-| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
-| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
-| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
-| `blockaddress(@address_taken, %target)` | A constant pointer identifying target’s code block within the named function, not a call to that block or a load of data from it. Returning that pointer exposes block identity, which is why this prototype rejects the function before rewiring it. |
-
-### Every instruction used in this pair
-
-| Instruction and an actual line | Meaning and operand order in these listings |
-| --- | --- |
-| `br`: `br label %target` | `br label %B` always transfers control to block B. A branch is the block’s final instruction and produces no result. It does not execute both destinations. |
-| `ret`: `ret ptr blockaddress(@address_taken, %target)` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
-
-### Walk one concrete execution
-
-Execution starts at entry, br transfers to target, and ret ptr returns the constant blockaddress identifying that target block. It does not return an integer stored at the block or call the block as a new function. Because block identity is exposed as a pointer value, the guard leaves this program unchanged.
-
-<details>
-<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
-
-### Before — address original
-
-```llvm
-define ptr @address_taken() {
-entry:
-  br label %target
-
-target:                                           ; preds = %entry
-  ret ptr blockaddress(@address_taken, %target)
-}
-```
-
-### After — address full
-
-```llvm
-define ptr @address_taken() {
-entry:
-  br label %target
-
-target:                                           ; preds = %entry
-  ret ptr blockaddress(@address_taken, %target)
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
-
-</details>
-
-Follow the values and edges: The branch destination whose address is exposed cannot simply be renamed into an arbitrary dispatcher state without handling that contract.
-
-24. Check that rejected functions remain unchanged
-==================================================
-
-The rejection contract requires leaving the function untouched. Verification
-alone only checks IR validity; valid IR can still be different from input.
-
-For the coroutine fixture, generate comparable canonical IR on both paths:
-
-  opt -passes=verify \
-    -S tests/ir/coroutine.ll -o build/before.ll
-
-  opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
-    -passes='function(minishield-flatten),verify' \
-    -S tests/ir/coroutine.ll -o build/after.ll
-
-  diff -u build/before.ll build/after.ll
-
-Expect a rejection diagnostic and an empty diff. Repeat for address_taken.ll
-and the existing negative cases. LLVM prints both outputs, so differences
-between handwritten input formatting and LLVM's formatting do not interfere.
-
-The learner wrote both fixtures. The follow-up review ran both through the
-plugin: coroutine_handle was rejected for its coroutine intrinsic, and
-address_taken was rejected for its address-taken block. Both canonical IR
-comparisons were unchanged. The steps above remain the repeatable exercises
-for reviewing this rejection contract.
-
-The next negative test should isolate isPresplitCoroutine() separately from
-intrinsic detection. After completing the remaining Day 1 checks, review
-the roadmap before starting any flattening transformations.
-
-### Deep dive: preserve rejected IR
-
-```bash
-opt -passes=verify \
-  -S tests/ir/coroutine.ll -o build/before.ll
-
-opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
-  -passes='function(minishield-flatten),verify' \
-  -S tests/ir/coroutine.ll -o build/after.ll
-
-diff -u build/before.ll build/after.ll
-```
-
-Expect a rejection diagnostic and an empty diff. Repeat with
-`tests/ir/address_taken.ll`, and apply the same unchanged-IR check to the
-existing rejection cases. Both paths use LLVM's printer, avoiding differences
-between handwritten formatting and canonical IR. A successful `verify` alone
-does not prove the function was left unchanged.
-
-The presplit coroutine marker is a separate rejection path to test next.
-These exercises do not yet establish complete eligibility coverage or prove
-that a future transformation preserves behavior.
-
-### Study-session walkthrough — unchanged output is part of the rejection contract
-
-Check unchanged output as well as a rejection diagnostic. An unsupported function can remain structurally valid even if the pass has already inserted spills or changed edges, so verifier success alone does not establish rejection before mutation.
-
-Before writing, answer: What should I compare to prove that the rejected function did not receive partial edits?
-
-```bash
-opt -S tests/ir/coroutine.ll -o build/rejected-baseline.ll
-opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
-  -passes='function(minishield-flatten),verify' \
-  -S tests/ir/coroutine.ll -o build/rejected-checked.ll
-diff -u build/rejected-baseline.ll build/rejected-checked.ll
-```
-
-Both sides start from the same valid input and use LLVM’s printer. The expected empty diff checks representation equality for this rejected case. A verifier-only success is weaker: a partially edited function can still be structurally valid. Confirm the specific reason as well, because another earlier condition may mask the intended guard.
-
-Task: Small writing step: Write/check rejection assertions before moving into transformation work. Keep generated comparison modules under build/, and retain intentional test source fixtures separately.
-
-Checkpoint: State why the pass can return all() on rejection and why that return value cannot undo an edit. Day 2’s rule follows directly: preflight must run before the first demotion or state-machine change, not merely before the last branch rewrite.
-
-### LLVM program before and after this checkpoint
-
-A negative test must prove both the intended rejection and unchanged canonical output.
-
-The program is unchanged at this checkpoint. The reference check rejects this input before mutation. Compare normalized IR rather than the original file’s whitespace.
-
-### Reading this LLVM program from zero
-
-Do not read every displayed block as one straight-line script. A call supplies the function inputs and starts its first block. Within the selected block, follow the written instructions until a terminator chooses another block or returns to the caller. A label names a block; it does not execute an operation by itself.
-
-| Spelling in these listings | How to read it here |
-| --- | --- |
-| `define ptr @coroutine_handle() {` | `define` starts a function body. `@coroutine_handle` is the module-level function name; `ptr` immediately before it is the return type. Parentheses contain typed inputs supplied by the caller; braces contain its blocks. |
-| `ptr` | An opaque pointer value: it can represent an address or the special handle returned in the coroutine example. It does not contain an i32 integer or encode a pointee type. A load/store spells out the type of value accessed separately from the pointer. |
-| `%handle = ...` | The left side names the result of this instruction. Each SSA result has one static defining instruction; input arguments are values supplied at function entry. A name is a handle for a value, not a mutable source variable or a guaranteed CPU register. |
-| `entry:` and `label %entry` | The colon defines a block label; the label operand names a jump destination. `%` is also used for local result/argument names, so use the type/context to distinguish a value from a block target. `@` instead identifies a module-level symbol. |
-| `; preds = ...` / other `;` text | Everything after a semicolon on that line is a comment for the reader. The printer lists incoming blocks after preds; it is not an instruction, an execution order, or a separate edge definition. Branch/switch operands actually define the edges. |
-| `declare ptr @llvm.coro.noop() #0` | A function declaration gives a return type, name, and argument list without a body. Here `()` means no arguments. `llvm.coro.noop` is an LLVM-recognized coroutine intrinsic, not a function body that this snippet defines or ordinary arithmetic to spill. |
-
-### Every instruction used in this pair
-
-| Instruction and an actual line | Meaning and operand order in these listings |
-| --- | --- |
-| `call`: `%handle = call ptr @llvm.coro.noop()` | Invoke the named callee with the shown arguments and capture its returned value on the left. Here the return type ptr means the result is a coroutine handle pointer; the later ret returns that handle to the caller. LLVM recognizes `@llvm.coro.noop` as an intrinsic. The eligibility example detects that unsupported operation and leaves the call intact. |
-| `ret`: `ret ptr %handle` | End this function invocation and return the typed operand to its caller. `ret i32 %v` returns the integer value, while `ret ptr ...` returns a pointer. A return does not proceed to the next printed block or automatically go back to dispatch. |
-
-### The other syntax printed around this function
-
-| Module or function syntax | Meaning here |
-| --- | --- |
-| `#0` / function attributes | The numbered group attaches facts to a function declaration/definition rather than executing them. `nounwind`: The function does not unwind the stack. `memory(none)`: The function has no externally observable memory read/write effects under this attribute’s contract. |
-
-### Walk one concrete execution
-
-When coroutine_handle is called, its call obtains the special no-op coroutine handle from the LLVM intrinsic, and ret ptr returns that same handle. No integer load/store or coroutine resumption is present here. The intrinsic is deliberately unsupported by this prototype, so checking/rejecting it leaves both its declaration and its call unchanged.
-
-<details>
-<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
-
-### Before — coroutine original
-
-```llvm
-; Function Attrs: nounwind memory(none)
-declare ptr @llvm.coro.noop() #0
-
-define ptr @coroutine_handle() {
-entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
-}
-
-attributes #0 = { nounwind memory(none) }
-```
-
-### After — coroutine full
-
-```llvm
-; Function Attrs: nounwind memory(none)
-declare ptr @llvm.coro.noop() #0
-
-define ptr @coroutine_handle() {
-entry:
-  %handle = call ptr @llvm.coro.noop()
-  ret ptr %handle
-}
-
-attributes #0 = { nounwind memory(none) }
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
-
-</details>
-
-Follow the values and edges: No state slot, dispatcher switch, or demotion loads/stores should appear in the rejected function.
+In the C++ API the class chain is `Instruction` to `CallBase` to `CallInst` to
+`IntrinsicInst`: every intrinsic call is a call and an instruction, but most
+instructions and calls are not intrinsic. The statistics pass's `Call` counter
+still counts intrinsic calls, because the invoking instruction's opcode is
+`Call`; recognizing an intrinsic does not change that opcode.
+
+The guard conservatively rejects coroutine intrinsics: after
+`llvm::dyn_cast<llvm::IntrinsicInst>(&I)`, a callee name starting with
+`llvm.coro.` is rejected. See [LLVM's exception-handling docs](https://llvm.org/docs/ExceptionHandling.html), the [intrinsic reference](https://llvm.org/docs/LangRef.html#intrinsic-functions), and [coroutines](https://llvm.org/docs/Coroutines.html).
 
 Glossary. Terms used in the README and Day 1
 ============================================
