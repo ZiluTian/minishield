@@ -51,6 +51,15 @@
         86
       ],
       "description": "Three OLLVM-family obfuscations added to the MiniShield plugin with the Volume 1 capstone recipe — bogus control flow, string encryption, subroutine splitting — each with its -O0 differential proof and its -O2 dissolution, closing with the deployment rule that makes obfuscation survive: run it last."
+    },
+    {
+      "name": "Position independence",
+      "label": "PIE",
+      "key": "pie",
+      "ids": [
+        87
+      ],
+      "description": "The hardening that lives in the linker and the loader, not the IR: where -pie/-no-pie leave zero trace in the module, what the ELF records instead (EXEC vs DYN, FLAGS_1 PIE, absolute vs load-base-relative relocations), the ASLR proof at runtime, and RELRO's move of .got.plt into the read-only segment."
     }
   ],
   "lessons": [
@@ -968,6 +977,131 @@
         }
       ],
       "words": 1535
+    },
+    {
+      "id": 87,
+      "number": 1,
+      "day": 3,
+      "group": "pie",
+      "title": "Position independence",
+      "originalTitle": "Position independence",
+      "summary": "Read PIE, ASLR, and RELRO the way the toolchain actually implements them: zero trace in the IR (the -pie and -no-pie modules are byte-identical), everything in the ELF (EXEC vs DYN, FLAGS_1 PIE, absolute vs load-base-relative relocations, the RELRO segment), and the runtime proof — the fixed-address build prints the same pointers on every run, the PIE build prints a new base on every run.",
+      "takeaway": "Position independence is hardening that lives in the linker and the loader, not the IR: the position model leaves no mark in the module, the decision is recorded in the ELF header and the relocation table, ASLR randomizes the load base, and full RELRO closes the last writable GOT by moving .got.plt inside the read-only segment. A pass plugin can express none of it — it is a build-flag and load-time decision, verified with readelf, not opt.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "The first three parts of this volume left traces you can read: CFI left checks in the IR (`llvm.type.test` + `llvm.ubsantrap`), the canary left an attribute in the IR (`sspstrong`), the OLLVM transforms changed the IR's structure. This chapter asks where position independence lives, and the answer is: not in the IR at all. The threat it answers is the predictable-layout row of the landscape's threat table: ASLR randomizes the stack, heap, and library bases, but an executable that is not position independent is mapped at its fixed file addresses on every run, so every address an attacker would need — a function, a GOT slot, a return target — is stable in advance. PIE makes the program itself a load-time value."
+        },
+        {
+          "type": "heading",
+          "text": "The IR says nothing"
+        },
+        {
+          "type": "paragraph",
+          "text": "The fixture prints the address of a global and the address of `main` — the two kinds of self-address an attacker computes:"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n\nint global = 42;\n\nint main(void) {\n    printf(\"global at %p, main at %p\\n\", (void *)&global, (void *)main);\n    return 0;\n}"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -no-pie -O0 -S -emit-llvm pie_fixture.c -o pie_nopie.ll\nclang-23: warning: argument unused during compilation: '-no-pie'\n$ clang-23 -pie -O0 -S -emit-llvm pie_fixture.c -o pie_pie.ll\nclang-23: warning: argument unused during compilation: '-pie'\n$ cmp pie_nopie.ll pie_pie.ll\n(identical — and again at -O2)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The two position models produce byte-identical modules — at `-O0` and at `-O2` — and the compiler even warns that the flag is unused on the IR path. Where the canary chapter found a hint in the IR that the backend acted on, here the IR carries nothing: an IR reader cannot tell the two builds apart, and an IR pass cannot express or detect the position model. The decision is made and recorded below the IR."
+        },
+        {
+          "type": "heading",
+          "text": "The executable says it"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-readelf-23 -h pie_nopie | grep Type\n  Type:                              EXEC (Executable file)\n$ llvm-readelf-23 -h pie_pie | grep Type\n  Type:                              DYN (Shared object file)\n$ llvm-readelf-23 -d pie_pie | grep FLAGS\n  0x000000006ffffffb (FLAGS_1)      PIE"
+        },
+        {
+          "type": "paragraph",
+          "text": "The `-no-pie` executable is `EXEC`: the loader maps it at the fixed addresses recorded in the file — the `0x201xxx` range the demo prints. The PIE executable is a `DYN`: a position-independent object the loader treats exactly like a shared library — it chooses a base, and every address in the image is computed from it. The `(FLAGS_1) PIE` tag in the dynamic section is the loader's marker. (This toolchain defaults to PIE — an unflagged build is `DYN` with the tag and randomized addresses — which is why every command below spells the flag out.)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The relocation table shows how \"computed from the base\" works:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-objdump-23 -R pie_nopie\nDYNAMIC RELOCATION RECORDS\nOFFSET           TYPE                     VALUE\n00000000002028a0 R_X86_64_GLOB_DAT        __libc_start_main\n00000000002028a8 R_X86_64_GLOB_DAT        __gmon_start__\n00000000002038e0 R_X86_64_JUMP_SLOT       printf\n$ llvm-objdump-23 -R pie_pie\nDYNAMIC RELOCATION RECORDS\nOFFSET           TYPE                     VALUE\n00000000000027c0 R_X86_64_RELATIVE        *ABS*+0x16e0\n00000000000027c8 R_X86_64_RELATIVE        *ABS*+0x1720\n00000000000039b0 R_X86_64_RELATIVE        *ABS*+0x39b0\n0000000000002980 R_X86_64_GLOB_DAT        __libc_start_main\n..."
+        },
+        {
+          "type": "paragraph",
+          "text": "The `-no-pie` executable's relocations are all library relocations: the loader writes the final addresses of the imported functions into its GOT slots. The PIE executable carries those same entries *plus* `R_X86_64_RELATIVE` records — `*ABS*+0x16e0` and so on — which the loader resolves as `load_base + offset`, filling the executable's own writable slots — here, the `.fini_array` and `.init_array` entries and a `.data` slot; the `.got` is not among them, its library slots still coming from the `GLOB_DAT` records both builds carry. The program's self-addresses are load-time values: `&global` is not a constant baked into the file, it is the randomized base plus an offset."
+        },
+        {
+          "type": "heading",
+          "text": "ASLR at runtime"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ for i in 1 2 3; do ./pie_nopie; done\nglobal at 0x2038c0, main at 0x201680\nglobal at 0x2038c0, main at 0x201680\nglobal at 0x2038c0, main at 0x201680\n$ for i in 1 2 3; do ./pie_pie; done\nglobal at 0x603bc21939b8, main at 0x603bc2191730\nglobal at 0x65386ac319b8, main at 0x65386ac2f730\nglobal at 0x6072bb9f79b8, main at 0x6072bb9f5730"
+        },
+        {
+          "type": "paragraph",
+          "text": "Three runs of the `-no-pie` build: identical addresses. The executable maps at its fixed file addresses on every run, on every machine, so an attacker who ships the binary ships every target address with it. Three runs of the PIE build: a new base each time, with the offset between `global` and `main` (`0x2288`) invariant — ASLR randomizes the base, not the layout. This is the runtime face of the `EXEC` vs `DYN` distinction the header made. And it names a choice this book has made quietly for two chapters: the CFI and canary demos all built with `-no-pie` \"to keep printed addresses stable across runs\" — non-PIE is exactly a binary whose base the kernel does not randomize."
+        },
+        {
+          "type": "heading",
+          "text": "RELRO: making the GOT read-only"
+        },
+        {
+          "type": "paragraph",
+          "text": "The region PIE leaves writable is the GOT. In a PIE executable, calls to imported functions go through `.got.plt`, whose slots the loader writes — eagerly, or lazily on first call. A writable GOT is a standing target for the GOT-overwrite class of attack. RELRO (relocation read-only) is the linker/loader's answer: a `PT_GNU_RELRO` segment lists the ranges the loader flips to read-only after relocation is done. Read the two PIE builds the way `checksec` does — the RELRO segment, the section offsets, the dynamic flags:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-readelf-23 -lW pie_pie | grep GNU_RELRO\n  GNU_RELRO      0x0007c0 0x00000000000027c0 0x00000000000027c0 0x0001e8 0x000840 R   0x1\n$ llvm-readelf-23 -SW pie_pie | grep -E '\\.got|\\.data'\n  [20] .got              PROGBITS        0000000000002980 000980 000028 00  WA  0   0  8\n  [22] .data             PROGBITS        00000000000039a8 0009a8 000014 00  WA  0   0  8\n  [24] .got.plt          PROGBITS        00000000000039c0 0009c0 000028 00  WA  0   0  8\n$ llvm-readelf-23 -lW pie_fullrelro | grep GNU_RELRO\n  GNU_RELRO      0x0007c0 0x00000000000027c0 0x00000000000027c0 0x000220 0x000840 R   0x1\n$ llvm-readelf-23 -SW pie_fullrelro | grep -E '\\.got|\\.data'\n  [20] .got              PROGBITS        0000000000002990 000990 000028 00  WA  0   0  8\n  [21] .got.plt          PROGBITS        00000000000029b8 0009b8 000028 00  WA  0   0  8\n  [23] .data             PROGBITS        00000000000039e0 0009e0 000014 00  WA  0   0  8\n$ llvm-readelf-23 -d pie_fullrelro | grep FLAGS\n  0x000000000000001e (FLAGS)        BIND_NOW\n  0x000000006ffffffb (FLAGS_1)      NOW PIE"
+        },
+        {
+          "type": "paragraph",
+          "text": "In the default PIE build the RELRO segment covers `[0x27c0, 0x27c0 + 0x1e8)` = `[0x27c0, 0x29a8)`: `.init_array`, `.dynamic`, and `.got` — but not `.got.plt`, which sits at `0x39c0` next to `.data`, outside the segment. There is no `BIND_NOW`: the jump slots bind lazily on first call, and the table stays writable. That is the surface partial RELRO leaves open. Add `-Wl,-z,relro,-z,now` (full RELRO) and two things happen at once: the dynamic section gains `BIND_NOW`, so every jump slot is resolved at load time, and the linker physically moves `.got.plt` — from `0x39c0` to `0x29b8`, right after `.got`, inside the widened segment, whose end (`0x27c0 + 0x220 = 0x29e0`) is exactly `.got.plt`'s end. After the loader finishes, both GOT tables are read-only; a write to a jump slot faults."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "IR: nothing. `-pie` and `-no-pie` produce byte-identical modules (at -O0 and -O2), and the flag warns as unused on the IR path. An IR pass can neither express nor detect the position model.",
+            "ELF: everything. `Type` (`EXEC` vs `DYN`), `(FLAGS_1) PIE`, and the relocation set (library-only vs library + `R_X86_64_RELATIVE` self-relocations) fully determine the load behavior.",
+            "Loader: the base. With ASLR on (`randomize_va_space = 2` here), the PIE base changes on every `exec`; the `-no-pie` base is the fixed file address. The in-image layout — offsets like `0x2288` — is invariant either way.",
+            "Linker: the RELRO boundary. Full RELRO (`-z now`) moves `.got.plt` inside the `PT_GNU_RELRO` segment and binds the jump slots eagerly, so both GOT tables are read-only after load; the default PIE build leaves `.got.plt` writable for lazy binding."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Now the level map from the Volume 1 capstone reads as a measurement, not a claim: the \"platform hardening\" row — PIC/PIE, ASLR, RELRO, at the compiler + linker + operating system level, not hostable by the MiniShield registry — is exactly what the evidence above shows. The compiler chooses the relocation model, the linker writes the `Type`, the `FLAGS_1` tag, and the RELRO segment, and the loader picks the base and binds the GOT, after every IR pass has run. The right tool for this hardening is a build flag, and the right verification is `readelf` plus a runtime address probe. The part's standard — judge the final artifact — lands here in its most literal form: the artifact is the executable, and the hardening lives in its header."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: (a) The -no-pie and -pie builds of the fixture have byte-identical IR. What records the position decision in the two executables instead — name the header field and the dynamic-section tag. (b) The PIE executable's relocations include a type the -no-pie executable lacks, used for the executable's own writable slots. Name the type, state the value the loader writes, and name the slots it fills in this fixture. (c) Full RELRO closes the one region the default PIE build leaves writable. Which section is it, what does the linker do to it in the full-RELRO build, and which dynamic-section flag comes with the change?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) The ELF header's `Type` field: `EXEC` (the fixed-address executable, mapped at its recorded file addresses) versus `DYN` (the position-independent object the loader maps like a shared library), plus the dynamic section's `(FLAGS_1) PIE` tag on the PIE executable. Nothing in the IR marks the decision — the two modules are byte-identical.",
+                "(b) `R_X86_64_RELATIVE`: the loader writes `load_base + offset` (the records read `*ABS*+0x16e0` and so on) into the executable's own writable slots — here the `.fini_array` entry at `0x27c0`, the `.init_array` entry at `0x27c8`, and a `.data` slot at `0x39b0`; the `.got` is not among them, its library slots still coming from the `GLOB_DAT` records both builds carry. The self-relocations exist only in the PIE executable, because its own base — and therefore its own addresses — is randomized at load time.",
+                "(c) `.got.plt`, the jump table lazy binding fills: in the default build it sits at `0x39c0` next to `.data`, outside the RELRO segment, so it stays writable. The full-RELRO linker moves it to `0x29b8`, inside the widened `PT_GNU_RELRO` segment (whose end is exactly `.got.plt`'s end), and the dynamic section gains `BIND_NOW`, so every jump slot is resolved eagerly at load. After load, the whole RELRO range — both GOT tables — is read-only, and a write to a jump slot faults."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1680
     }
   ]
 }
