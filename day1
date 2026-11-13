@@ -1266,7 +1266,7 @@ Do not read every displayed block as one straight-line script. A call supplies t
 
 ### Walk one concrete execution
 
-Call add_one with x = 4. The add produces 5 and ret returns 5. There is only one block, no branch choice, and no memory slot in either listing. Collecting diagnostics does not add instructions to this path.
+Call add_one with x = 4. The add produces 5 and ret returns 5. There is only one block, no branch choice, and no memory slot in the listing. Collecting diagnostics does not add instructions to this path.
 
 <details>
 <summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
@@ -1281,17 +1281,8 @@ entry:
 }
 ```
 
-### After — add_one inspected
 
-```llvm
-define i32 @add_one(i32 %x) {
-entry:
-  %result = add i32 %x, 1
-  ret i32 %result
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1401,7 +1392,7 @@ Checkpoint: The fixture has four blocks and five instructions. Count static inst
 
 The nested traversal counts this module; it does not add instructions to it.
 
-The program is unchanged at this checkpoint. There are four blocks and five instructions: three branches, one PHI, one return. Those counts describe both listings.
+The program is unchanged at this checkpoint. There are four blocks and five instructions: three branches, one PHI, one return. Those counts describe the listing.
 
 ### Reading this LLVM program from zero
 
@@ -1449,26 +1440,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1665,26 +1638,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -1897,28 +1852,8 @@ exit:                                             ; preds = %header
 }
 ```
 
-### After — loop inspect
 
-```llvm
-define i32 @count_to(i32 %limit) {
-entry:
-  br label %header
-
-header:                                           ; preds = %body, %entry
-  %i = phi i32 [ 0, %entry ], [ %next, %body ]
-  %continue = icmp slt i32 %i, %limit
-  br i1 %continue, label %body, label %exit
-
-body:                                             ; preds = %header
-  %next = add i32 %i, 1
-  br label %header
-
-exit:                                             ; preds = %header
-  ret i32 %i
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -2099,30 +2034,12 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
-Follow the values and edges: The same PHI, constants, block order, and edges appear in both modules.
+Follow the values and edges: The listing keeps the same PHI, constants, block order, and edges.
 
 14. Start task 1.3 by printing successor relationships
 ======================================================
@@ -2233,26 +2150,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -2472,28 +2371,8 @@ exit:                                             ; preds = %header
 }
 ```
 
-### After — loop inspect
 
-```llvm
-define i32 @count_to(i32 %limit) {
-entry:
-  br label %header
-
-header:                                           ; preds = %body, %entry
-  %i = phi i32 [ 0, %entry ], [ %next, %body ]
-  %continue = icmp slt i32 %i, %limit
-  br i1 %continue, label %body, label %exit
-
-body:                                             ; preds = %header
-  %next = add i32 %i, 1
-  br label %header
-
-exit:                                             ; preds = %header
-  ret i32 %i
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 
@@ -2684,26 +2563,8 @@ join:                                             ; preds = %right, %left
 }
 ```
 
-### After — phi inspect
 
-```llvm
-define i32 @merge(i1 %condition) {
-entry:
-  br i1 %condition, label %left, label %right
-
-left:                                             ; preds = %entry
-  br label %join
-
-right:                                            ; preds = %entry
-  br label %join
-
-join:                                             ; preds = %right, %left
-  %value = phi i32 [ 10, %left ], [ 20, %right ]
-  ret i32 %value
-}
-```
-
-Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
 
 </details>
 

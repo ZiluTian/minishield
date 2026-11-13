@@ -1860,7 +1860,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Call add_one with x = 4. The add produces 5 and ret returns 5. There is only one block, no branch choice, and no memory slot in either listing. Collecting diagnostics does not add instructions to this path.",
+          "text": "Call add_one with x = 4. The add produces 5 and ret returns 5. There is only one block, no branch choice, and no memory slot in the listing. Collecting diagnostics does not add instructions to this path.",
           "irComparison": true,
           "irReadingGuide": true
         },
@@ -1879,17 +1879,8 @@
               "text": "define i32 @add_one(i32 %x) {\nentry:\n  %result = add i32 %x, 1\n  ret i32 %result\n}"
             },
             {
-              "type": "heading",
-              "text": "After — add_one inspected"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @add_one(i32 %x) {\nentry:\n  %result = add i32 %x, 1\n  ret i32 %result\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -1900,7 +1891,7 @@
           "irComparison": true
         }
       ],
-      "words": 1083,
+      "words": 1065,
       "quiz": {
         "q": "What does a successful verify pass establish?",
         "choices": [
@@ -2203,7 +2194,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The program is unchanged at this checkpoint. There are four blocks and five instructions: three branches, one PHI, one return. Those counts describe both listings.",
+          "text": "The program is unchanged at this checkpoint. There are four blocks and five instructions: three branches, one PHI, one return. Those counts describe the listing.",
           "irComparison": true
         },
         {
@@ -2310,17 +2301,8 @@
               "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
             },
             {
-              "type": "heading",
-              "text": "After — phi inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -2331,7 +2313,7 @@
           "irComparison": true
         }
       ],
-      "words": 1584,
+      "words": 1531,
       "quiz": {
         "q": "After the pass manager calls run(F, AM), what does your code do next?",
         "choices": [
@@ -2743,17 +2725,8 @@
               "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
             },
             {
-              "type": "heading",
-              "text": "After — phi inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -2764,7 +2737,7 @@
           "irComparison": true
         }
       ],
-      "words": 1785,
+      "words": 1732,
       "quiz": {
         "q": "Why put a break after a counting case?",
         "choices": [
@@ -3227,17 +3200,8 @@
               "text": "define i32 @count_to(i32 %limit) {\nentry:\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i = phi i32 [ 0, %entry ], [ %next, %body ]\n  %continue = icmp slt i32 %i, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i, 1\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i\n}"
             },
             {
-              "type": "heading",
-              "text": "After — loop inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i = phi i32 [ 0, %entry ], [ %next, %body ]\n  %continue = icmp slt i32 %i, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i, 1\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -3248,7 +3212,7 @@
           "irComparison": true
         }
       ],
-      "words": 2194,
+      "words": 2128,
       "quiz": {
         "q": "Why cross-check the pass counts against hand-counted fixtures?",
         "choices": [
@@ -3617,28 +3581,19 @@
               "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
             },
             {
-              "type": "heading",
-              "text": "After — phi inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
         },
         {
           "type": "paragraph",
-          "text": "Follow the values and edges: The same PHI, constants, block order, and edges appear in both modules.",
+          "text": "Follow the values and edges: The listing keeps the same PHI, constants, block order, and edges.",
           "irComparison": true
         }
       ],
-      "words": 1326,
+      "words": 1272,
       "quiz": {
         "q": "What does an empty diff between the two canonical IR files prove?",
         "choices": [
@@ -3897,17 +3852,8 @@
               "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
             },
             {
-              "type": "heading",
-              "text": "After — phi inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -3918,7 +3864,7 @@
           "irComparison": true
         }
       ],
-      "words": 1854,
+      "words": 1801,
       "quiz": {
         "q": "How many edges are in the phi.ll diamond?",
         "choices": [
@@ -4331,17 +4277,8 @@
               "text": "define i32 @count_to(i32 %limit) {\nentry:\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i = phi i32 [ 0, %entry ], [ %next, %body ]\n  %continue = icmp slt i32 %i, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i, 1\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i\n}"
             },
             {
-              "type": "heading",
-              "text": "After — loop inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i = phi i32 [ 0, %entry ], [ %next, %body ]\n  %continue = icmp slt i32 %i, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i, 1\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -4352,7 +4289,7 @@
           "irComparison": true
         }
       ],
-      "words": 2155,
+      "words": 2089,
       "quiz": {
         "q": "How does an analysis differ from a pass?",
         "choices": [
@@ -4738,17 +4675,8 @@
               "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
             },
             {
-              "type": "heading",
-              "text": "After — phi inspect"
-            },
-            {
-              "type": "code",
-              "language": "llvm",
-              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
-            },
-            {
               "type": "paragraph",
-              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+              "text": "This listing is a complete LLVM module defining the example function, not a fragment with omitted blocks. It has no main driver unless one is explicitly included; opt can parse and verify it, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. This listing was generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
             }
           ],
           "irComparison": true
@@ -4759,7 +4687,7 @@
           "irComparison": true
         }
       ],
-      "words": 2321,
+      "words": 2268,
       "quiz": {
         "q": "What should CFGAnalyzer::run() record for each block before returning?",
         "choices": [
