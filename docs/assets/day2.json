@@ -258,7 +258,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why must eligibility run before mutation? Why is a successful verifier run weaker than proving that a transformation preserves behavior?"
+          "text": "Checkpoint: Why must eligibility run before mutation? Why is a successful verifier run weaker than proving that a transformation preserves behavior?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The pass's contract is that rejected input comes back untouched: the eligibility guard sits at the top of `run()` (before the TODO mutation site in the template), so if we demoted instructions first and then discovered an unsupported feature, the function would be left half-transformed and could no longer be returned unchanged. The support decision must therefore complete before the first edit.",
+                "The verifier checks structural IR rules — well-formed instructions, valid terminators, SSA dominance — and says nothing about whether the transformed function computes what the original did: a swapped branch destination would verify cleanly and return the wrong answer, which is why Day 2 adds a differential comparison on a defined domain as separate evidence of behavior."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -294,7 +304,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: After the next small edit, can you name the expected IR difference and the relevant input fixture before running opt? The complete before/after section shows reference endpoints, not evidence that your working pass already implements them.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Yes — before running, name the fixture the edit affects (for example `merge.ll` for a demotion step, `loop.ll` for an entry-branch step) and the exact expected difference: which instruction appears (a store/load pair, a new `ms.dispatch` block, a rewritten terminator) and which fixtures must remain byte-identical at that stage.",
+                "The book's complete before/after module is the reference endpoint — what the finished pipeline emits — so matching it mid-build is accidental and mismatching it is expected; at this step your pass should be compared against the input fixture and the one difference you predicted, not against the final reference."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -484,7 +504,7 @@
           "irComparison": true
         }
       ],
-      "words": 2524,
+      "words": 2748,
       "quiz": {
         "q": "Why prepare SSA values before adding dispatcher edges?",
         "choices": [
@@ -568,7 +588,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: If join is entered from right, why must the PHI select 20? What information would disappear if the immediate predecessor became dispatcher?",
-          "conceptualIntro": true
+          "conceptualIntro": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The two paths compute different values: `left` stores 10 and `right` stores 20, and the join block's `phi i32 [ 10, %left ], [ 20, %right ]` resolves that choice by the edge actually used to enter. When join is entered from `right`, the program's answer is 20, so the PHI must select the `%right` incoming value.",
+                "A PHI's value is a function of which predecessor executed. If the immediate predecessor became `ms.dispatch`, every arrival would look like it came from the same block and the predecessor-identity information would vanish from the CFG — exactly what the demotion slot (the predecessor's store and the join's load) exists to preserve."
+              ]
+            }
+          ]
         },
         {
           "type": "task",
@@ -664,7 +694,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Predict one PHI for phi.ll and one for loop.ll. Then run the inspection checkpoint and compare canonical IR: it should be unchanged. Counting the object is not yet lowering its predecessor-dependent choice.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`phi.ll` has exactly one PHI: the join block's merge value with incoming values `[10, %left]` and `[20, %right]`. `loop.ll` has exactly one PHI: the loop counter with incoming value `0` on the first entry (from `%entry`) and the body's incremented value on the back edge.",
+                "The inspection run only counts and prints the PHIs, so the emitted canonical IR must be byte-identical to the input; counting (or printing) a PHI's incoming values reads the object without touching it, and the predecessor-dependent choice — which incoming value is live — is lowered only when a later lesson replaces the PHI with a slot load."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -707,7 +747,18 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: What does the vector own? Why do we retain pointers rather than copies? What changes when a later utility deletes a PHI?"
+          "text": "Checkpoint: What does the vector own? Why do we retain pointers rather than copies? What changes when a later utility deletes a PHI?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The vector owns its own contiguous array of pointer values (the addresses); the `PHINode` objects themselves are owned by their parent basic block, and ultimately by the function.",
+                "IR objects such as `PHINode` are non-copyable, so there is no meaningful copy to store — a vector of `PHINode` values would not compile — and a pointer to the live instruction is the only handle that lets the pass act on the real object in place.",
+                "When a later utility (for example `DemotePHIToStack`) erases a PHI from its parent block, the vector's stored pointer still holds the old address but the object at that address no longer exists — the entry dangles, which is why the day's rule is to collect all pointers first, then mutate, and never read or iterate entries after erasure."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -849,7 +900,7 @@
           "irComparison": true
         }
       ],
-      "words": 1726,
+      "words": 2077,
       "quiz": {
         "q": "Why prepare PHIs before routing incoming paths through one dispatcher?",
         "choices": [
@@ -988,7 +1039,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Rebuild, then check the same PHI counts as the previous lesson. The emitted IR must still match the input; fixing the host C++ type does not replace a target instruction.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The rebuilt pass must print the same PHI counts as lesson 1 — one for `phi.ll`, one for `loop.ll`, zero for `minishield-input.ll` — and the emitted canonical IR must be byte-identical to the input, because this step still performs no mutation.",
+                "The fix changed only a host-side C++ type (the worklist now stores the typed `PHINode*` obtained from `dyn_cast` instead of a base `Instruction*`), so no target instruction was replaced; the first actual IR edit still happens only when demotion runs in a later lesson."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1036,13 +1097,33 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: After a successful cast, do base and phi refer to two instructions or one? Who owns that instruction?"
+              "text": "Checkpoint: After a successful cast, do base and phi refer to two instructions or one? Who owns that instruction?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "One: a successful `dyn_cast` allocates or copies nothing — it returns a `PHINode*` to the same instruction that `base` (an `Instruction*`) already points at, so the two pointers are different static types naming a single object.",
+                    "That instruction is owned by its parent `BasicBlock` and, through it, by the function and the module: the cast and the `phis` worklist only hold borrowed addresses, and since no new PHI is ever created, neither the cast nor the vector owns the instruction."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why is &I later valid for a vector<Instruction*> but invalid here? Explain the difference between a runtime type test and the static type of an expression."
+          "text": "Checkpoint: Why is &I later valid for a vector<Instruction*> but invalid here? Explain the difference between a runtime type test and the static type of an expression.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`&I` — the address-of operator applied to the `Instruction&` loop variable — is statically an `Instruction*`. A base pointer is accepted wherever an `Instruction*` is expected, so `vector<Instruction*>` works, but `vector<PHINode*>` needs the more-derived pointer type, and C++ never inserts a downcast automatically, so the bare expression `&I` cannot produce one.",
+                "The static type of an expression is fixed by its syntax and declarations (here `Instruction*`), while the runtime type is which concrete class the pointed-to instruction actually is; a runtime type test (`dyn_cast<PHINode>`) asks the second question and returns a typed `PHINode*` or null, so the worklist can store a correctly typed pointer without assuming the cast is safe."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1184,7 +1265,7 @@
           "irComparison": true
         }
       ],
-      "words": 1491,
+      "words": 1780,
       "quiz": {
         "q": "Does a successful dyn_cast used only as an if condition retype I?",
         "choices": [
@@ -1263,7 +1344,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why is removing a PHI without replacing its users and incoming-value selection insufficient?",
-          "conceptualIntro": true
+          "conceptualIntro": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "A PHI has users: instructions in the join block consume its value, so erasing the node without replacing those uses leaves dangling SSA values that the verifier rejects.",
+                "The PHI's real job is the predecessor-dependent choice (left delivers 10, right delivers 20); simply removing the node throws that selection away, so demotion must reproduce it in memory — a stack slot, a store of the incoming value in each predecessor, and a load replacing the PHI's uses — so the chosen value still depends on which path executed."
+              ]
+            }
+          ]
         },
         {
           "type": "task",
@@ -1346,7 +1437,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: On phi.ll expect stores and a load with the original branches still present. Trace both conditions. Later preparation must remove the old empty-PHI early return, because it cannot skip all subsequent work.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The demoted `phi.ll` shows a new slot `alloca` in entry, `store i32 10, ptr %value.reg2mem` in left, `store i32 20, ptr %value.reg2mem` in right, and a load in join replacing the PHI, while the original branches (entry to left/right, left/right to join) remain: with a true condition, left stores 10 and join loads 10; with false, right stores 20 and join loads 20.",
+                "The old `if (phis.empty()) return all();` guard assumed “no PHI means nothing to do”, but a later fixture (`cross_block`) shows a function with zero PHIs can still have a value crossing block boundaries that must be demoted — so preparation must drop that early return and let every eligible function reach the escaping-value stage."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1399,13 +1500,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why is reserving vector capacity unrelated to preventing an erased instruction pointer from dangling?"
+              "text": "Checkpoint: Why is reserving vector capacity unrelated to preventing an erased instruction pointer from dangling?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Capacity only sizes the vector's own storage — the C++ heap array that holds the pointer values — while whether a pointer dangles depends on who owns the `PHINode` it points to and when that object is destroyed: `DemotePHIToStack` erases the PHI from its parent block, and the block and function (not the vector) own and free the instruction, so reserving extra slots for addresses does nothing for the lifetime of the object a saved address points at after erasure."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Trace both outcomes of the condition. Which store executes? What does join load? Why must changing IR invalidate cached analyses?"
+          "text": "Checkpoint: Trace both outcomes of the condition. Which store executes? What does join load? Why must changing IR invalidate cached analyses?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "With a true condition, left's store executes (writing 10) and join's load reads 10; with a false condition, right's store executes (writing 20) and the load reads 20 — exactly one store runs per execution, and the load always returns what the executed path wrote.",
+                "LLVM analysis results are cached against the IR as it was when computed; once a pass inserts slots or erases the PHI, those cached results no longer describe the current IR — referenced instructions may be gone and dataflow has changed — so a mutating pass must not trust a cache computed before the mutation (or must re-fetch it afterward)."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1580,7 +1700,7 @@
           "irComparison": true
         }
       ],
-      "words": 2152,
+      "words": 2557,
       "quiz": {
         "q": "What does demoting the PHI in the diamond preserve?",
         "choices": [
@@ -1626,7 +1746,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Can a two-block function with no merge point still have a value dependency that flattening must prepare? Give an example.",
-          "conceptualIntro": true
+          "conceptualIntro": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Yes: the `cross_block` fixture is a two-block function with no PHI at all, in which entry computes `%sum = add i32 %x, 1` and exit executes `ret i32 %sum` — the add's result is defined in one block and used in another, so it is a cross-block value that flattening must prepare (demote to a slot) even though no block has multiple predecessors.",
+                "That is exactly why the collection rule is “defined in block A, used in block B” rather than “has a PHI”: the absence of a merge point does not imply the absence of a cross-block dependency."
+              ]
+            }
+          ]
         },
         {
           "type": "task",
@@ -1735,7 +1865,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Find the header-defined reload consumed by the body or exit in the loop example. The original direct use depends on the graph’s dominance relationship, which new dispatcher edges can disrupt. This collection checkpoint itself does not repair that dependency.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "In `loop.ll` the header's counter reload — the load created by the PHI demotion — is consumed by the body (the increment) and by exit (the returned counter): a value defined in the header and used in other blocks.",
+                "The original direct use was sound because the header dominated those blocks: by the time they ran, the header had always executed. The dispatcher edge (`ms.dispatch` to `header`) changes how the loop is entered and can invalidate that dominance, so the direct use can no longer assume the defining load has run; this checkpoint only collects the dependency — the escaping-value demotion in a later lesson repairs it with a second slot."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1774,13 +1914,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why does “we never choose that state first” fail to repair a direct SSA use that no longer dominates?"
+              "text": "Checkpoint: Why does “we never choose that state first” fail to repair a direct SSA use that no longer dominates?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Dominance is checked on the graph, not on the values the state machine stores: every entry-to-use path must pass through the definition, and the new dispatcher edge creates a graph path that reaches the use without passing through the definition — even if the stored state IDs make that order infeasible at runtime. The SSA verifier does not infer the state-machine invariant that would excuse the missing dominance: \"we never choose that state first\" is a claim about runtime values, not about the graph, so the direct use stays invalid until it is demoted to memory, where the entry allocation — which dominates every use — carries the value."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Find the defining instruction and a use in a different block. Why does a fresh traversal have to happen after PHI demotion rather than before it?"
+          "text": "Checkpoint: Find the defining instruction and a use in a different block. Why does a fresh traversal have to happen after PHI demotion rather than before it?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "In the `cross_block` example the defining instruction is entry's `%sum = add i32 %x, 1` and the use in a different block is exit's `ret i32 %sum`.",
+                "PHI demotion inserts new instructions (the slot `alloca`, the predecessor stores, the join load) and erases the PHI, so a traversal before demotion would miss the cross-block uses that demotion itself creates and would still reference a PHI about to disappear; traversing after demotion sees the final value flow, with demotion's loads and stores included and nothing stale."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -1964,7 +2123,7 @@
           "irComparison": true
         }
       ],
-      "words": 2261,
+      "words": 2682,
       "quiz": {
         "q": "Why can a PHI-free function still need preparation?",
         "choices": [
@@ -2151,7 +2310,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: On the demoted loop, stores and branches must still appear in output, but they must not be reported as values to spill. The new load results do produce i32 values and can still be candidates.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The demoted `loop.ll` still contains stores (the demotion stores and the original ones) and branches (the original branches, plus the new dispatcher hops) — all void-typed instructions that must appear in the output IR but are excluded from the spill candidates because they produce no value.",
+                "The filter keys on the instruction's result type: `getType()->isVoidTy()` is true for stores and branches, so they are skipped, while the loads that demotion inserted have type `i32` (the loaded type), so they do produce a value and remain candidates for the escaping-value analysis."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2172,7 +2341,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why does ret i32 %x have void instruction type? Why does checking I.getOperand(0)->getType() answer a different question?"
+          "text": "Checkpoint: Why does ret i32 %x have void instruction type? Why does checking I.getOperand(0)->getType() answer a different question?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`ret` produces no SSA value at all — its result type is `void` — so `ret i32 %x` has void instruction type; the `i32` in the syntax is the type of the operand being returned, not of the instruction.",
+                "`I.getOperand(0)->getType()` asks for the type of the value the instruction takes (here `i32`), which is a different question from the type of the value the instruction produces; the spill analysis needs the latter (void, hence not a candidate), and answering with the former would classify every `ret i32` as a value producer."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2356,7 +2535,7 @@
           "irComparison": true
         }
       ],
-      "words": 1927,
+      "words": 2114,
       "quiz": {
         "q": "What is the result type of the instruction ret i32 %x?",
         "choices": [
@@ -2480,7 +2659,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: The allocation must stay in the IR and out of escapingValues. A reload from its slot can still be collected. This skip does not make non-entry or dynamic allocas safe: the later eligibility lesson imposes a separate support rule before full rewriting.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The demotion slot itself is an `alloca`, and if the collection reported it as an escaping value, the next demotion would allocate a slot for the slot — a regressive double demotion — so the `alloca` is filtered out with `isa<AllocaInst>`; the reload (the load from the slot) does produce a value and can still be collected as a candidate.",
+                "The collection filter only keeps the analysis from re-demoting the slots; it does not approve `alloca`s that are non-entry or variable-sized, because the eligibility lesson imposes a separate support rule (“only static entry allocas are supported”) before any full rewrite — hoisting such an alloca could change allocation frequency or lifetime."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2529,7 +2718,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why would skipping only void instructions leave alloca in consideration? When would you choose dyn_cast instead of isa?"
+          "text": "Checkpoint: Why would skipping only void instructions leave alloca in consideration? When would you choose dyn_cast instead of isa?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "An `alloca`'s result type is a pointer to the allocated type (the slot's address), not `void`, so the void-type filter alone does not exclude it — an explicit `isa<AllocaInst>` check is required to keep the slot out of `escapingValues`.",
+                "`isa<T>` is a boolean runtime test (“is this a T?”), which is enough for a filter that only needs to skip; `dyn_cast<T>` is the same test but returns the typed `T*` (or null), which is what you need when you want to call a method on the derived type — so a collection loop that only filters can use `isa`, while the PHI loop that calls `DemotePHIToStack` needs `dyn_cast`."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2713,7 +2912,7 @@
           "irComparison": true
         }
       ],
-      "words": 1911,
+      "words": 2136,
       "quiz": {
         "q": "Why does the ordinary value worklist exclude an entry alloca?",
         "choices": [
@@ -2838,7 +3037,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Use the complete cross_block example below: it has zero PHIs but sum is defined in entry and consumed in exit. It should reach collection. Write the suggested fixture yourself; the reference in the book does not create a test file.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The `cross_block` fixture — entry computing `%sum = add i32 %x, 1` and exit returning it — has zero PHIs, so before the fix the early return on empty PHIs short-circuited the whole pass and the escaping-value stage never ran; after removing the premature return, the function reaches collection, `sum` lands in `escapingValues` (and is printed as a cross-block value), and at this collection-only stage the module stays unchanged.",
+                "The checkpoint asks you to write the fixture file yourself (`tests/ir/cross-block.ll`): the book's reference section shows the expected input and output IR, but it does not create the test file — your own file is what the inspection run exercises."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -2868,7 +3077,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why is &I the right type for this vector but not the PHI vector? Why must success in the eligibility checker and preservation information remain separate decisions?"
+          "text": "Checkpoint: Why is &I the right type for this vector but not the PHI vector? Why must success in the eligibility checker and preservation information remain separate decisions?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The escaping-values worklist holds a mix of instruction kinds (`add`, `load`, ...), so its element type is the base `Instruction*` and `&I` fits; the PHI worklist holds only PHIs and the demotion helper takes a `PHINode*`, so that vector needs the typed pointer — an `Instruction*` there would not compile without a cast at every use.",
+                "Eligibility (is this function supported at all?) and the preservation set (which cached analyses does my mutation invalidate?) answer different questions with different consequences: a rejected function mutates nothing and preserves everything, while a transformed function must declare exactly the analyses it broke; entangling the two decisions either leaks a stale cached analysis into a later pass (an `all()` that should not have been returned) or rejects a function that could have been transformed, and neither failure shows up in the verifier."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3010,7 +3229,7 @@
           "irComparison": true
         }
       ],
-      "words": 1364,
+      "words": 1617,
       "quiz": {
         "q": "At the collection-only checkpoint, does a nonempty escapingValues list itself mean IR changed?",
         "choices": [
@@ -3129,7 +3348,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Ignoring the returned AllocaInst* does not delete the slot: the function owns inserted IR. Explain separately which helper erases its original PHI and which retains the original ordinary calculation.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The instructions the helpers create are inserted into the function's blocks, and the function (through its blocks) owns them, so ignoring the returned `AllocaInst*` merely loses the handle — the slot stays in the IR.",
+                "`DemotePHIToStack` erases the original PHI: the predecessor-dependent choice is reproduced by the slot stores and the PHI node itself is removed (a stored pointer to it dangles afterward), while `DemoteRegToStack` retains the original ordinary calculation — the instruction still executes — and adds the slot, a store of its result, and a reload at the uses."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3168,13 +3397,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: What would happen if you passed &I when I is already an Instruction*? Name the resulting type."
+              "text": "Checkpoint: What would happen if you passed &I when I is already an Instruction*? Name the resulting type.",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "`&I` takes the address of the pointer variable `I` itself, producing an lvalue of type `Instruction**` — the address of the handle, not the instruction. Because `DemoteRegToStack` expects an `Instruction&` and no implicit conversion exists from `Instruction**` to `Instruction&`, the call does not compile; and even in a function that did take a double pointer, you would be passing the wrong object and the wrong type."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Explain what *value does here, why phi previously needed no dereference, and why the vector is a worklist rather than an owner of LLVM instructions."
+          "text": "Checkpoint: Explain what *value does here, why phi previously needed no dereference, and why the vector is a worklist rather than an owner of LLVM instructions.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`DemoteRegToStack` declares its parameter as `Instruction&` (a reference), so the call passes `*value` — the dereference binds the reference to the instruction the pointer points at; `DemotePHIToStack` declares its parameter as `PHINode*` (a pointer), so the loop passes the `phi` pointer directly with no dereference — each helper's declared parameter type determines what you hand it.",
+                "The vector is a worklist of borrowed pointers: it owns its own array of addresses, but every instruction it points at is owned by the parent block and function; the vector never deletes or moves an instruction, and the moment a helper erases one, the corresponding entry becomes a dangling pointer."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3345,7 +3593,7 @@
           "irComparison": true
         }
       ],
-      "words": 1695,
+      "words": 1973,
       "quiz": {
         "q": "escapingValues stores Instruction*. What does the first DemoteRegToStack parameter require?",
         "choices": [
@@ -3467,7 +3715,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: In the cross_block example, sum = x + 1 must remain in entry and exit must return a loaded result. In the loop, inspect the extra slot carrying the header reload to other blocks. Memory transport does not permit arbitrary state execution order.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "In `cross_block`, entry still executes `add i32 %x, 1` (`DemoteRegToStack` retains the original calculation), then stores the result into the new slot, and exit's `ret i32 %sum` becomes a load from the slot followed by a return of the loaded value; in `loop.ll` the header's counter reload is itself a cross-block value, so it gets an extra slot — the header stores the reloaded counter, and the body and exit load it.",
+                "Once a value travels through memory, the store must happen before the load in execution order, and the original dominance-based guarantee no longer holds; the state machine's dispatch order is what enforces that ordering, because memory transport itself permits no arbitrary state execution order."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3505,7 +3763,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which transformation ran if phis is empty but escapingValues is not? Why must the final preservation result be none() in that case?"
+          "text": "Checkpoint: Which transformation ran if phis is empty but escapingValues is not? Why must the final preservation result be none() in that case?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The escaping-value demotion ran: no PHIs needed demoting, but the cross-block values (such as `cross_block`'s `sum`) received slots, stores, and loads, so the IR was changed by the second preparation stage.",
+                "The preservation result must be `none()` because the function was modified — the escaping-value stage inserted instructions — so any cached analysis computed before the mutation is now stale; only a function that both stages left untouched reports `all()`."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3689,7 +3957,7 @@
           "irComparison": true
         }
       ],
-      "words": 2054,
+      "words": 2246,
       "quiz": {
         "q": "After ordinary-value demotion, what must the final rewrite still preserve?",
         "choices": [
@@ -3822,7 +4090,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Check the path with x = 4 and x = 0. The expected results are 5 and 1 on this bounded domain. An actual runtime check needs a caller; the shown module defines a function, not a complete command-line main.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "With `x = 4`: entry computes `add i32 4, 1` = 5, stores 5 into the slot, and exit loads 5 and returns 5. With `x = 0`: entry computes `0 + 1` = 1, stores 1, and exit loads 1 and returns 1 — both paths confirm the demotion preserved the value, since the stored value equals the original `sum` and the loaded value equals what exit returns.",
+                "The module only defines the function (with an argument) — it has no `main` that calls it with concrete arguments — so an actual runtime check would need a caller the fixture does not provide; the check at this checkpoint is a manual trace of the IR over the bounded pair of inputs."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -3873,13 +4151,33 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Which pointer is dereferenced when the pass evaluates slot->getName(), and which is used when the target executes load i32, ptr %slot?"
+              "text": "Checkpoint: Which pointer is dereferenced when the pass evaluates slot->getName(), and which is used when the target executes load i32, ptr %slot?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "`slot->getName()` dereferences the host C++ pointer — the `AllocaInst*` whose address lives in the compiler process and points at the IR object — so that call inspects the IR inside the compiler.",
+                    "The target's `load i32, ptr %slot` uses the IR pointer value — the `alloca`'s result, of LLVM type `ptr` — which denotes the stack storage when the generated program runs: one pointer is a handle to an object the compiler inspects, the other is a value of the program being compiled."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: For x=4, what is stored and what is returned? Which object is the pointer, which is the i32, and which is just C++ bookkeeping?"
+          "text": "Checkpoint: For x=4, what is stored and what is returned? Which object is the pointer, which is the i32, and which is just C++ bookkeeping?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "For `x = 4`, the value stored into the slot is 5 and the value returned is 5 (the loaded value): the store writes the add's result, and the load defines a new SSA name for the integer read back.",
+                "The pointer is the slot itself — the `alloca`'s result, a `ptr` value in the IR that the store and load address; the i32 is 5 itself, the store's operand and the load's result, the program's actual data; and the C++ `AllocaInst*` that `DemoteRegToStack` returns is just host-side bookkeeping — a C++ pointer to the alloca instruction object in the IR, used by the pass and invisible to the executed program."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4050,7 +4348,7 @@
           "irComparison": true
         }
       ],
-      "words": 1880,
+      "words": 2214,
       "quiz": {
         "q": "Does the alloca result contain the saved integer directly?",
         "choices": [
@@ -4188,7 +4486,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: True must still produce 10 and false 20. Compare this with ordinary demotion: there the original calculation remains; here the PHI is erased. In both cases, loads/stores replace a dependence on the previous value representation, not the need to execute the correct path.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "True: entry branches to left, left stores 10, and join's load reads 10. False: entry branches to right, right stores 20, and join's load reads 20 — the demoted diamond still returns the right answer for each outcome.",
+                "In ordinary (escaping-value) demotion the original instruction still executes and the slot merely transports its result, while in PHI demotion the PHI itself is erased — the “calculation” is the predecessor-dependent selection, and the two predecessor stores reproduce it; in both cases the load/store pair replaces the value's representation (a direct SSA use becomes a memory round trip), not the need to execute the correct path, which still runs and whose store determines the value."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4247,13 +4555,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Trace the first two swaps by hand. What temporary values would a correct sequential implementation need?"
+              "text": "Checkpoint: Trace the first two swaps by hand. What temporary values would a correct sequential implementation need?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Entry gives `a = 1`, `b = 2`; the first back edge sets new `a` to old `b` (2) and new `b` to old `a` (1), so after the first swap `a = 2`, `b = 1`, and the second swap restores `a = 1`, `b = 2` — the values swap on every back edge, and both right-hand sides must use the old iteration's values. A correct sequential implementation therefore needs a temporary that preserves one of the old values (for example `tmp = a; a = b; b = tmp;`), because naively \"store `b` into `a`'s slot, then load `a`'s slot for `b`\" overwrites the old `a` and leaves both variables holding the old `b`."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why does each path load the right value? Why can PHI demotion still leave a new load result used outside its defining block, as in loop.ll?"
+          "text": "Checkpoint: Why does each path load the right value? Why can PHI demotion still leave a new load result used outside its defining block, as in loop.ll?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Each path stores its own incoming value into the single slot before reaching join, and join's load executes after the taken path's store, so the load always reads what the executed path wrote — 10 on the true path, 20 on the false one — even though the load lives in one shared block.",
+                "In `loop.ll` the PHI demotion inserts the counter load in the header, but that load's result is used by the body and exit — blocks outside the header — so the demotion itself creates a new cross-block value that the escaping-value stage must demote again (an extra slot); demotion can move a dependence, not always eliminate it."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4428,7 +4755,7 @@
           "irComparison": true
         }
       ],
-      "words": 2049,
+      "words": 2404,
       "quiz": {
         "q": "What replaces the PHI’s incoming-edge selection in the simple diamond?",
         "choices": [
@@ -4579,7 +4906,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: For the prepared diamond, expect left 0, right 1, join 2. The module stays unchanged at this checkpoint. Later dispatch must decode those same associations; storing zero universally is not a substitute for consulting the intended destination.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "For the prepared diamond the assignment is left 0, right 1, join 2 (entry is excluded from the state IDs — one-time setup, and its allocations must not re-run), and at this checkpoint the pass only computes and prints the table, so the emitted module is byte-identical to the input.",
+                "The later dispatcher decodes exactly these associations: each terminator's store writes the destination block's ID into the state slot and the dispatch switch jumps on the loaded ID, so a universal zero (a default-initialized entry, or a missing lookup treated as 0) would route every transition to the same block — which is why the checked `find`-based lookup must distinguish “no state” from “state 0”."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4628,7 +4965,18 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why are a vector and a map both useful? Why does entry not get a state? Why can state zero be an incorrect universal initialization value for a conditional entry?"
+          "text": "Checkpoint: Why are a vector and a map both useful? Why does entry not get a state? Why can state zero be an incorrect universal initialization value for a conditional entry?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The `stateBlocks` vector preserves a deterministic order — the assignment order that printing and later construction rely on — while the `DenseMap` `stateIDs` gives fast block-pointer-to-ID lookup, which each terminator's store needs for its destination; together they provide order for iteration and lookup for addressing.",
+                "Entry is one-time setup: it runs exactly once, before the state is first loaded, and its allocations must not re-run on every transition, so there is no state to dispatch back to it.",
+                "For a conditional entry the first state (left 0 or right 1) depends on the condition, so a universal “start at state 0” — a default slot value or a missing-lookup default — would assert that left always comes first and misroute the machine whenever the condition first takes right."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4798,7 +5146,7 @@
           "irComparison": true
         }
       ],
-      "words": 1874,
+      "words": 2123,
       "quiz": {
         "q": "Why preserve the existing entry as setup?",
         "choices": [
@@ -4935,7 +5283,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: The state table should now print the intended associations, while canonical IR remains identical. Explain why a missing lookup must not silently mean a legitimate state 0; the checked find-based reference later makes that invariant explicit.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "After the pointer-key fix the printed table matches the intended associations (left 0, right 1, join 2), and the emitted canonical IR is still byte-identical to the input, because this stage only computes and prints the table without touching the IR.",
+                "`0` is a real state (left's), so a missing key that silently returns the default 0 is indistinguishable from “the destination is left” — a misspelled or unregistered block would misroute the machine with no error; the later checked `find`-based reference makes the invariant explicit by treating a missing key after successful preflight as a fatal internal-contract error (“state destination missing after valid-input preflight”) rather than a fallback to 0."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -4978,13 +5336,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why can stateIDs[target] make a broken target lookup appear to work?"
+              "text": "Checkpoint: Why can stateIDs[target] make a broken target lookup appear to work?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "`operator[]` inserts a missing key with a default value, and for an unsigned state ID that default is zero — which is also a legitimate state ID (the first state, `left` in this lesson's table of left 0, right 1, join 2). So a broken or unregistered target does not error: it silently returns 0 and routes to that state's block, indistinguishable from a lookup of a block that really is state 0, and as a side effect it pollutes the map with an entry for the wrong key that later lookups will \"find\" — which is why the checked `find`/`end()` form treats a miss after preflight as an internal-contract failure instead of a fallback to 0."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why is copying a pointer element okay here even though for (auto BB : F) would try to copy a noncopyable block?"
+          "text": "Checkpoint: Why is copying a pointer element okay here even though for (auto BB : F) would try to copy a noncopyable block?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`for (auto BB : F)` declares the loop element as a `BasicBlock` value, so the loop would copy each block — and `BasicBlock` is noncopyable, so that form fails to compile; a pointer element is a different type: copying a `BasicBlock*` copies only the address (a word-sized value), and every copy still refers to the same single original block, so the worklist can hold many copies of the address without ever copying the block."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -5154,7 +5530,7 @@
           "irComparison": true
         }
       ],
-      "words": 1879,
+      "words": 2194,
       "quiz": {
         "q": "Which value belongs in a DenseMap<BasicBlock*, unsigned> key?",
         "choices": [
@@ -5333,7 +5709,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: In the resulting dump dispatch should have no predecessors yet. Its slot has no initialization store because that load is not executed. The next lesson must arrange a valid store before adding a live edge.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The constructed `ms.dispatch` block (its load plus switch) is inserted but nothing branches to it yet, so the dump shows it with no predecessors — it is dead code until the entry connection in the next lesson makes it reachable.",
+                "The state slot has no initialization store yet because its only load (inside dispatch) is not executed by any live path; the moment the next lesson adds a live edge, a valid store must happen before that load, so the dispatcher cannot read an uninitialized slot."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -5376,13 +5762,33 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why is “every Create... call adds exactly one instruction” an unsafe testing assumption?"
+              "text": "Checkpoint: Why is “every Create... call adds exactly one instruction” an unsafe testing assumption?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "`IRBuilder<>` folds by default: when the operands allow it (for example a `CreateSelect` or `CreateAdd` over constants), the method returns a `Constant` and inserts no instruction at all, so printed instruction counts can change without any semantic change. `auto*` only preserves the method's declared pointer result type and does not promise a concrete instruction subclass, so tests that count instructions or assume every builder result is an `Instruction` are unsafe — the safe interface is the common `Value*`, with `dyn_cast<Instruction>` used only when you actually need to test whether an instruction was inserted."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which block executes the allocation? Why is a switch destination not a substitute for that destination block’s own terminator? Why must new blocks not enter stateBlocks?"
+          "text": "Checkpoint: Which block executes the allocation? Why is a switch destination not a substitute for that destination block’s own terminator? Why must new blocks not enter stateBlocks?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The entry block executes the allocation: the `ms.state` `alloca` is placed in entry (the eligibility rule requires static entry allocas), and entry runs once before any dispatch.",
+                "A switch case only routes control into its destination block; it does not replace that block's own terminator — once control is inside the block, the block still executes its own branch or `ret` to leave, so the switch answers “which block next” for its own block only.",
+                "`ms.dispatch` and `ms.invalid` are the machine's routing machinery, not original program states; if they entered `stateBlocks` (and the ID map), the snapshot and rewrite would treat the dispatcher's own switch as an original terminator to lower and assign states to the machine's own blocks — the rewrite would end up rewriting its own routing."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -5562,7 +5968,7 @@
           "irComparison": true
         }
       ],
-      "words": 2410,
+      "words": 2735,
       "quiz": {
         "q": "Why is a valid but disconnected dispatcher only an intermediate checkpoint?",
         "choices": [
@@ -5689,7 +6095,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Read the first compiler error rather than treating a later opt run on a stale plugin as confirmation. Once compilation succeeds, verify the emitted module separately. State which error is a C++ issue and which would be an IR issue.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "When the build fails, the first compiler error names a C++ problem — for example `ms.dispatch` parsed as member access, since a dot is not a legal identifier character in C++ — and a later `opt` run that “works” may simply be loading the stale `.so` from the last successful build, which proves nothing about the new code.",
+                "Once compilation succeeds, the emitted module must be verified separately: the two error domains have different owners, a C++ declaration or identifier error is the compiler's problem and stops the build, while a missing terminator or an invalid block is an IR problem reported by the LLVM verifier when the module is checked or printed."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -5714,7 +6130,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Distinguish the pointer variable, the object it identifies, and its IR name. Which problem belongs to the C++ compiler and which to the LLVM verifier?"
+          "text": "Checkpoint: Distinguish the pointer variable, the object it identifies, and its IR name. Which problem belongs to the C++ compiler and which to the LLVM verifier?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The pointer variable (for example a `BasicBlock*` named `dispatch`) is a C++ identifier holding an address; the object it identifies is the `BasicBlock` in the IR, owned by the function; and its IR name (`\"ms.dispatch\"`) is the block's label string set via `setName` — a dot is legal inside that quoted name and is what appears in the dump.",
+                "The C++ compiler owns the identifier rules — `ms.dispatch` as a variable name is a syntax error (a dot is member access), a compile-time, C++-side problem — while the LLVM verifier owns the structural IR rules: a block with no terminator, or a dangling use, is a verifier-side problem that surfaces only when the module is checked."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -5894,7 +6320,7 @@
           "irComparison": true
         }
       ],
-      "words": 1914,
+      "words": 2149,
       "quiz": {
         "q": "What is \"ms.dispatch\" in BasicBlock::Create(..., \"ms.dispatch\", &F)?",
         "choices": [
@@ -6032,7 +6458,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Run loop.ll with verify. Entry should store header’s ID 0 and branch to ms.dispatch; dispatch should now list entry as a predecessor. A conditional phi.ll entry is still unchanged at this stage, and the remaining loop transitions are not yet flattened.",
-          "sessionWalkthrough": true
+          "sessionWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Running `loop.ll` through the pass with verify: entry's original `br label %header` is replaced by a store of the header's state ID (0) into the `ms.state` slot and `br label %ms.dispatch`, so `ms.dispatch` now lists entry as a predecessor, and the header/body loop edges are still direct.",
+                "`phi.ll`'s conditional entry (a `br i1` to left or right) is still unchanged at this stage — this lesson handles only the unconditional entry, and the conditional entry's state selection belongs to a later lesson — and the remaining loop transitions (header to body/exit, body back to header) are not yet flattened: the original-terminator rewrite comes in the later rewrite lesson."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -6094,7 +6530,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why must the old branch stay alive until replacements are emitted? Why does a conditional entry require more than storing the first state ID?"
+          "text": "Checkpoint: Why must the old branch stay alive until replacements are emitted? Why does a conditional entry require more than storing the first state ID?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Until the replacement exists, the old branch is the entry block's only terminator; erasing it first would leave the block without a terminator (an invalid IR state the verifier rejects) and would destroy the builder's insertion anchor and the successor information it still needs, so the pass emits the store and the new branch before `entryTerminator->eraseFromParent()`.",
+                "A conditional entry's first state is not a constant: it is left's ID (0) or right's ID (1) depending on the condition, so entry must select the first state from the condition (for example a `select` of the two state IDs) and then store it; storing one universal ID would hard-code one path and misroute the other, which is why the lesson's `UncondBr`-only case deliberately leaves conditional entries untouched."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -6288,7 +6734,7 @@
           "irComparison": true
         }
       ],
-      "words": 2837,
+      "words": 3076,
       "quiz": {
         "q": "At this checkpoint, which original branches have been redirected?",
         "choices": [
@@ -6669,7 +7115,18 @@
           "type": "checkpoint",
           "text": "Checkpoint: Expect “inline assembly is not supported” and unchanged canonical output for the focused fixture. Explain why call void can matter even without a produced value, and why CallBase is broader than CallInst. Verify the convergent rule separately.",
           "eligibilityWalkthrough": true,
-          "sessionProgressUpdate": true
+          "sessionProgressUpdate": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The focused fixture (a function containing inline assembly) is rejected by the guard with “inline assembly is not supported”, and the emitted canonical IR is byte-identical to the input, because rejection happens before any mutation.",
+                "A `call void` produces no SSA value but can still have side effects — memory writes or other observable effects — that the state machine's reordering must respect, so the guard cannot ignore value-less calls; and `CallBase` is broader than `CallInst` because it is the shared base of `CallInst` and `InvokeInst`, so checking `CallBase` catches both ordinary and EH calls.",
+                "The convergent rule (“convergent calls are not supported”) is a separate guard check with its own fixture, so it must be verified separately rather than inferred from the inline-assembly result."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -6738,7 +7195,18 @@
           "type": "checkpoint",
           "text": "Checkpoint: Expect “convergent calls are not supported” with identical canonical output. Explain why a scalar result and an ordinary external callee do not remove the participation contract. Keep this rule distinct from the operand-bundle check.",
           "eligibilityWalkthrough": true,
-          "convergenceWalkthrough": true
+          "convergenceWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The convergent-call fixture is rejected with “convergent calls are not supported” and the canonical output is identical to the input, because the guard rejects before any mutation.",
+                "The `convergent` attribute is a participation contract — every call to that function within a loop must reach the same convergence point together — and it is a control-flow obligation that holds whether the result is a plain scalar and whether the callee is an ordinary external function; neither fact removes the contract, which the machine's reordering cannot preserve.",
+                "This rule is distinct from the operand-bundle check: bundles are attached call metadata with their own rejection message (“operand bundles are unsupported”), and a call can be convergent without bundles and vice versa."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -6813,7 +7281,18 @@
           "type": "checkpoint",
           "text": "Checkpoint: Expect “operand bundles are unsupported” with unchanged canonical output. Identify the ordinary argument, bundle tag, and payload separately; explain why counting arguments would test the wrong property.",
           "eligibilityWalkthrough": true,
-          "operandBundleWalkthrough": true
+          "operandBundleWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The operand-bundle fixture is rejected with “operand bundles are unsupported” and the canonical output is unchanged (rejection before mutation).",
+                "In `call void @observe(i32 %x) [ \"deopt\"(i32 %x) ]` the three roles are separate: the ordinary argument is `i32 %x` (a value of the callee's type), the bundle tag is the quoted string `deopt`, and the payload is the typed `(i32 %x)` state the bundle carries — the same local value may appear in both places, but the two uses have different semantic roles.",
+                "Counting arguments would test the wrong property: a legitimate multi-argument call with no bundle would trip a count, while a one-argument call with a bundle would slip past it — the guard must ask specifically whether the call carries an operand bundle, not how many arguments it has."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -6895,7 +7374,17 @@
           "type": "checkpoint",
           "text": "Checkpoint: Expect “returns_twice calls are unsupported” and identical canonical output. Explain why one static SSA call/result can need special control-flow handling without producing two simultaneous result values.",
           "eligibilityWalkthrough": true,
-          "returnsTwiceWalkthrough": true
+          "returnsTwiceWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The `returns_twice` fixture is rejected with “returns_twice calls are unsupported” and the canonical output is identical to the input (rejection before mutation).",
+                "A `returns_twice` call (the setjmp/longjmp family) can resume control at the call site more than once at runtime, so the same SSA result may be read on more than one pass with different values and control can flow backward to a point before the call — yet statically the IR shows one call instruction and one result value, never two simultaneous results; the state machine's snapshot assumes forward-only control flow, so the guard rejects the function even though the static IR looks ordinary."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -6964,7 +7453,18 @@
           "type": "checkpoint",
           "text": "Checkpoint: Expect “naked functions are unsupported” with identical canonical IR. Explain why the predicate is on F rather than CallBase, and why this non-executable structural fixture can test a guard without demonstrating a working naked backend routine.",
           "eligibilityWalkthrough": true,
-          "nakedWalkthrough": true
+          "nakedWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The naked-function fixture (a function carrying the `naked` attribute) is rejected with “naked functions are unsupported” and the canonical IR is identical to the input.",
+                "`naked` is a function attribute — it suppresses the compiler's prologue and epilogue, so the body must satisfy the whole calling convention itself — which describes the function being processed, so the predicate is on `F` (`F.hasFnAttribute(llvm::Attribute::Naked)`), checked before the block/instruction traversal rather than on a `CallBase` inside it; the machine's state slot and dispatcher are added under ordinary frame assumptions that a naked function does not honor.",
+                "The guard is a structural, attribute-based check that fires on the attribute alone before any code generation or execution, so a fixture that merely carries the `naked` attribute can test that the guard rejects and leaves the IR unchanged, without needing a working naked backend routine that actually executes prologue-less code."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -7121,7 +7621,16 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why does putting values in memory not eliminate every SSA dominance requirement?"
+              "text": "Checkpoint: Why does putting values in memory not eliminate every SSA dominance requirement?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Demotion removes the direct cross-block data use, but the `alloca`'s result is itself an SSA pointer: every store into the slot and every load from it uses that pointer as an operand, and each such use must be dominated by the allocation. If the dispatcher can reach a use without passing through the allocation — a non-entry allocation, or a graph path that bypasses entry — the pointer use still violates dominance even though the original value now travels through memory, which is why the eligibility rule keeps only static entry allocas."
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -7140,7 +7649,16 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why can a musttail call become invalid even when its opcode and callee are unchanged?"
+              "text": "Checkpoint: Why can a musttail call become invalid even when its opcode and callee are unchanged?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "`musttail` requires a tail-call transfer — the function returns the call's result immediately, and LLVM's rules constrain the instructions permitted between that call and its return. The rewrite inserts spill reloads and state stores and reroutes control through `ms.dispatch` between the call and the return: same opcode, same callee, but the required call/return relationship is broken, so the prototype rejects `musttail` before any edit — \"do not modify calls\" is not enough, because moving the surrounding control flow or inserting value transport changes the call's contract."
+                  ]
+                }
+              ]
             },
             {
               "type": "paragraph",
@@ -7150,7 +7668,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Name a source feature rejected by this prototype and the invariant the rejection protects. Why must every rejection happen before the first demotion?"
+          "text": "Checkpoint: Name a source feature rejected by this prototype and the invariant the rejection protects. Why must every rejection happen before the first demotion?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "For example: a function with the `naked` attribute is rejected (“naked functions are unsupported”) because the machine's assumptions about entry setup (static entry allocas, inserted instructions) do not hold for a function that suppresses its prologue/epilogue; a `musttail` call is rejected (“musttail calls are unsupported”) because `musttail` constrains what may appear between the call and the following return, and an inserted spill or dispatcher hop would break that promise; a non-entry or variable-size `alloca` is rejected (“only static entry allocas are supported”) because hoisting it into the one-time setup could change allocation frequency or lifetime.",
+                "The pass promises that a rejected function comes back untouched; if any mutation — even the first demotion — happened before a later check failed, the function would be left half-transformed and that promise would break, so the guard scans the whole function first and only when every check passes does any demotion begin."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -7296,7 +7824,7 @@
           "irComparison": true
         }
       ],
-      "words": 5441,
+      "words": 6411,
       "quiz": {
         "q": "Can you safely hoist every non-entry alloca into entry?",
         "choices": [
@@ -7492,7 +8020,17 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Expect the new source to compile and the current pass’s emitted LLVM program to stay unchanged, because it still uses the existing implementation. The scaffold itself contains no mutation and returns false. Next, snapshot original prepared blocks, IDs, and terminators before adding any dispatcher blocks; otherwise a traversal could accidentally include and rewrite its own new routing machinery.",
-          "builderImplementationWalkthrough": true
+          "builderImplementationWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The new `StateMachineBuilder` source compiles and the current pass's emitted program stays byte-identical, because the placeholder is deliberately left disconnected — `FlatteningPass` still calls the existing construction code, and the scaffold's `build()` contains no mutation and truthfully returns `false`.",
+                "The snapshot (the original blocks, the assigned state IDs, and every original block's terminator, including entry's — it must choose the first state) must be taken before `ms.dispatch` and `ms.invalid` are created; otherwise the later terminator-rewriting traversal would include the newly created blocks and treat the dispatcher's own switch as an original terminator to lower — the rewrite would end up rewriting its own routing machinery."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -7513,13 +8051,33 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why is a non-owning Function& preferable to new Function(...) for this interface?"
+              "text": "Checkpoint: Why is a non-owning Function& preferable to new Function(...) for this interface?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "The `Function` is already owned by the module (and the `LLVMContext`), and the pass manager hands the pass the very object it will run; `new Function(...)` would create a second copy outside the module whose edits the module, the pass manager, and later passes would never see, and whose lifetime you would have to manage yourself. `Function&` instead borrows the mutable, LLVM-owned object in place, and the returned `bool` reports whether that borrowed function was mutated — not a newly allocated function."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which responsibilities remain in the pass, which in eligibility, and which in the builder?"
+          "text": "Checkpoint: Which responsibilities remain in the pass, which in eligibility, and which in the builder?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The pass (`FlatteningPass::run`) keeps the orchestration: it receives the function, runs the stages in order (eligibility, then value preparation, then construction), and reports the preservation result to the analysis manager.",
+                "Eligibility (`FunctionEligibility::check`) owns the support boundary alone: it decides whether the function is supported at all and rejects before any mutation, protecting the “rejected input comes back untouched” invariant.",
+                "The builder (`minishield::StateMachineBuilder::build`) owns graph construction: it takes a valid, accepted, prepared function and translates its control flow — state assignment, snapshot, dispatcher construction, and terminator rewriting — returning whether construction changed the IR; value preparation (demotion) stays in the pass, not the builder."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -7704,7 +8262,7 @@
           "irComparison": true
         }
       ],
-      "words": 2595,
+      "words": 3165,
       "quiz": {
         "q": "Why snapshot terminators before creating new blocks?",
         "choices": [
@@ -7828,7 +8386,16 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Trace execution after break and after continue in the complete helper."
+              "text": "Checkpoint: Trace execution after break and after continue in the complete helper.",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "After `break` (for example from the `CondBr` case, with `next` set to the selected state) control leaves the opcode switch and runs the shared tail — `b.CreateStore(next, slot)`, `b.CreateBr(dispatch)`, `T->eraseFromParent()`: the original terminator is replaced by a state store and a branch to dispatch. After `continue` (the `Ret`/`Unreachable` cases) the tail is skipped entirely and the outer terminator loop moves on to the next block's terminator, so the return/unreachable stays in place and the still-null `next` is never stored; confusing the two is exactly the warned failure — `break` on `ret` reaches the tail with `next` null (an invalid null store), and `continue` on a conditional branch leaves that transition unrewritten."
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -7843,13 +8410,31 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Why would replacing arbitrary control-dependent operations with eager computations plus select require more care?"
+              "text": "Checkpoint: Why would replacing arbitrary control-dependent operations with eager computations plus select require more care?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "A `select` chooses between values, not between which instructions execute: eagerly computing both alternatives executes the instructions that produced them, so if either side has side effects (a call, a store, a trap) or its own control-flow semantics, running both changes the program's behavior where the original control dependency executed only one. Here the select's operands are state constants, so no side-effecting operations are being speculatively executed; generalizing the trick to arbitrary control-dependent operations would require proving that both sides are pure and safe to execute eagerly."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: How would a true/false state swap pass verify and still compute the wrong answer?"
+          "text": "Checkpoint: How would a true/false state swap pass verify and still compute the wrong answer?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The swap only changes which i32 constants `CreateSelect` stores — `select i1 %condition, i32 1, i32 0` instead of `select i1 %condition, i32 0, i32 1` — and that is still a perfectly valid instruction: the types match, the store and the branch to dispatch are well-formed, and the dispatcher's switch still covers every state, so the verifier has nothing to flag; but at runtime a true condition now stores right's ID (1) and false stores left's ID (0), so dispatch routes each outcome to the opposite block and `phi.ll` returns 20 for true and 10 for false — swapping the constants preserves valid types but reverses behavior, and a verifier-only check cannot catch it."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -8034,7 +8619,7 @@
           "irComparison": true
         }
       ],
-      "words": 1942,
+      "words": 2276,
       "quiz": {
         "q": "What does CreateSelect return here?",
         "choices": [
@@ -8168,13 +8753,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: How is a host C++ integer 3 different from an LLVM ConstantInt representing target value 3?"
+              "text": "Checkpoint: How is a host C++ integer 3 different from an LLVM ConstantInt representing target value 3?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "A host C++ integer 3 is a value in the compiler's own memory — data in the C++ program itself. An LLVM `ConstantInt` is a `Value` object in the target module's constant pool: a target-program constant of a specific LLVM type (`i32 3`), referenced as an operand by target instructions and printed in the IR. When the default folder folds `b.CreateAdd(b.getInt32(1), b.getInt32(2))`, the `Value*` result is that IR `Constant` inside the module — not a C++ `int` the compiler can use — which is why `next` is declared `llvm::Value*` rather than `Instruction*`, and why blindly casting builder results to `Instruction` is not a valid assumption."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why must default be initialized first? Why must the compare operands use the original switch type?"
+          "text": "Checkpoint: Why must default be initialized first? Why must the compare operands use the original switch type?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The default case is the destination for every input that matches no listed case, so initializing `next` to the default destination's state (`next = stateOf(sw->getDefaultDest())`) before the case loop is what preserves unmatched inputs; initializing `next` to zero (or leaving it unset) would silently reroute every unmatched input to block 0, changing the program's behavior on the default path.",
+                "The original switch's condition is an integer that is not necessarily `i32` (an `i64` or `i8` switch is legal), and `icmp eq` requires both operands to have the same type; the case constants already carry the condition's type, so comparing the condition against each case value in the original type is what keeps every case decision valid — the comparison yields `i1` to drive the chained selects, while the destination state constants remain `i32`, and those two roles must not be mixed."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -8372,7 +8976,7 @@
           "irComparison": true
         }
       ],
-      "words": 1998,
+      "words": 2258,
       "quiz": {
         "q": "Can two different switch case constants map to the same state?",
         "choices": [
@@ -8515,13 +9119,32 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: Which stage’s block count does your test record?"
+              "text": "Checkpoint: Which stage’s block count does your test record?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "The count N is taken immediately before building the dispatcher, after SSA preparation (PHI demotion and escaping-value demotion) has completed — the prepared function, before this helper's edits; because the helper adds exactly two blocks (`ms.dispatch` and `ms.invalid`), its result has N+2 blocks. The test must describe this algorithm (N before, N+2 after for this design), not a remembered number like input N+1 from the old roadmap, since a different design or earlier preparation can change that count."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which terminator is intentionally never in the snapshot? Why does the helper use a fatal internal-contract error rather than partially returning success?"
+          "text": "Checkpoint: Which terminator is intentionally never in the snapshot? Why does the helper use a fatal internal-contract error rather than partially returning success?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The dispatcher's own switch terminator (`ms.dispatch`'s) is intentionally never in the snapshot: the `terminators` vector captures every original block's terminator — including entry's, since it must choose the first state — before `ms.dispatch` and `ms.invalid` are created, so the rewrite's input set contains only original terminators and the machine's own routing switch is never lowered as if it were one.",
+                "By the time the rewrite runs, successful preflight and the state assignment have guaranteed that every original terminator's destination has a state; a missing key (or an unknown terminator kind, “unsupported terminator escaped preflight”) therefore indicates an internal bug, not an unsupported input, and `report_fatal_error` stops cleanly while naming the violated contract — a partial success would leave a half-rewritten function with some terminators flattened and others still original, a worse and harder-to-diagnose state than an immediate, named failure."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -8706,7 +9329,7 @@
           "irComparison": true
         }
       ],
-      "words": 2155,
+      "words": 2387,
       "quiz": {
         "q": "Which switch must remain after rewriting original switches?",
         "choices": [
@@ -8830,13 +9453,34 @@
             },
             {
               "type": "checkpoint",
-              "text": "Checkpoint: How would you test that the builder runs when a PHI was already demoted?"
+              "text": "Checkpoint: How would you test that the builder runs when a PHI was already demoted?",
+              "answers": [
+                {
+                  "type": "list",
+                  "ordered": true,
+                  "items": [
+                    "Run a function whose PHIs are already gone but which still needs preparation — the `cross_block` fixture (zero PHIs; `sum` defined in entry and consumed in exit): its PHI worklist is empty, but its escaping values are not, so the change flag is already true before the builder call — exactly the case where a buggy `changed = changed || build(F)` would short-circuit and skip construction. Confirm the builder ran by checking that the machine's artifacts appear in the emitted IR (the `ms.state` alloca, the `ms.dispatch`/`ms.invalid` blocks, and the rewritten entry terminator) — equivalently, that the second `minishield-stats` in the verify pipeline observes the new blocks and edges; if the builder were skipped, the module would show only the demotion."
+                  ]
+                }
+              ]
             }
           ]
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which helper owns policy? Which phase changes data flow? Which creates CFG edges? What exactly does the final bool summarize?"
+          "text": "Checkpoint: Which helper owns policy? Which phase changes data flow? Which creates CFG edges? What exactly does the final bool summarize?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The eligibility guard owns the policy: it decides whether the function is supported at all, before any other phase runs.",
+                "The preparation phase (demoting PHIs and escaping values) changes data flow: values that were direct SSA uses now travel through stack slots via stores and loads, changing how data moves without yet changing control flow.",
+                "The construction phase (state-machine building) creates the CFG edges: the entry branch to `ms.dispatch`, the dispatcher's switch cases, and the rewritten original terminators.",
+                "The final `bool` summarizes whether any phase changed the function — which is exactly what the preservation result is keyed on (`none()` if the IR changed, `all()` if it did not) and what the pass reports to the analysis manager."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -9040,7 +9684,7 @@
           "irComparison": true
         }
       ],
-      "words": 2275,
+      "words": 2525,
       "quiz": {
         "q": "Why can changed = changed || build(F) be wrong?",
         "choices": [
@@ -9159,7 +9803,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: What would a correct-looking but unreachable dispatcher prove? Why must instructions and edges both be inspected?"
+          "text": "Checkpoint: What would a correct-looking but unreachable dispatcher prove? Why must instructions and edges both be inspected?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "A dispatcher whose load and switch cases all look correct but has no live predecessor proves only that the construction placed the right instructions — the machine was built but never entered, and whatever control flow remains is what actually executes; it is a built-but-unconnected machine that demonstrates nothing about behavior.",
+                "Instructions and edges are independent failure modes: a block can hold a perfect switch with no incoming branch (built but not connected), or an incoming edge with a wrong switch (connected but not built correctly); inspecting the instructions verifies the machine's parts, while inspecting the edges (predecessors, branches, switch destinations) verifies that control actually flows through them, and only both together confirm the final shape."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -9349,7 +10003,7 @@
           "irComparison": true
         }
       ],
-      "words": 1904,
+      "words": 2026,
       "quiz": {
         "q": "Does finding the text ms.dispatch prove flattening is active?",
         "choices": [
@@ -9477,7 +10131,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why is -disable-O0-optnone present? Why transform the function module and link a common driver afterward?"
+          "text": "Checkpoint: Why is -disable-O0-optnone present? Why transform the function module and link a common driver afterward?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`-disable-O0-optnone` is present because, without it, clang's `-O0` would attach the `optnone` attribute to the function and the optional pass would not run on it; the flag makes the front end emit unoptimized IR without that attribute, so the loaded `minishield-flatten` pass actually transforms the common `common.ll` input.",
+                "The fixture module defines only the function — no `main` — so to observe behavior you first transform it (`opt` with the pass plugin, producing `protected.ll`) and then link the resulting module against the common driver (`discount_driver.c`), a shared `main` that parses arguments, enforces the bounded domain, and prints the result; transforming first and linking afterward keeps the tested transformation isolated from the driver, which stays identical for the original and protected builds."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -9743,7 +10407,7 @@
           "irComparison": true
         }
       ],
-      "words": 3383,
+      "words": 3510,
       "quiz": {
         "q": "Why use the same common IR for both builds?",
         "choices": [
@@ -9883,7 +10547,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why can preserving SSA validity still produce a wrong value when a hand-written PHI lowering overwrites an old incoming value?"
+          "text": "Checkpoint: Why can preserving SSA validity still produce a wrong value when a hand-written PHI lowering overwrites an old incoming value?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "SSA validity is structural — every use has a definition, every block has a terminator — so a hand-written lowering that pairs an incoming value with the wrong edge, or lets one path's store overwrite the slot before another path's load reads it, still produces perfectly valid IR that the verifier accepts; but the machine now delivers the wrong value on that path, because value correctness — which incoming value each transition must carry — is a semantic property the verifier does not check.",
+                "The parallel-PHI fixture makes this concrete: the two loop PHIs exchange old values (next `a` is old `b`, next `b` is old `a`) and their incomings are selected together; a naive sequential store sequence can overwrite one old value before the other PHI's store reads it, so the separate saved slots are what keep the old values available — which is why the lesson says not to replace LLVM's helper with that shortcut."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -10092,7 +10766,7 @@
           "irComparison": true
         }
       ],
-      "words": 2388,
+      "words": 2551,
       "quiz": {
         "q": "What does a two-latch fixture test?",
         "choices": [
@@ -10199,7 +10873,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Why can stronger optimization improve runtime while weakening the intended obfuscation structure?"
+          "text": "Checkpoint: Why can stronger optimization improve runtime while weakening the intended obfuscation structure?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The state machine is an indirection — a dispatcher, a state slot, and a switch — that computes what a simpler expression could compute directly; a stronger optimizer recognizes and removes that indirection, so on the tiny merge fixture `-O2` eliminates the dispatcher and the stack slots entirely, leaving `%spec.select = select i32 10, i32 20` plus a return (with `range(i32 10, 21)` and the `mustprogress nofree norecurse nosync nounwind willreturn memory(none)` attributes).",
+                "The runtime improvement and the loss of obfuscation are the same transformation viewed twice: the optimizer removes exactly the machinery the flattening added, so a fast, correct executable may no longer contain the flattened structure — which is why the lesson says to inspect the optimized IR (and disassembly) and to report when a fixture no longer demonstrates flattening."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -10413,7 +11097,7 @@
           "irComparison": true
         }
       ],
-      "words": 1971,
+      "words": 2109,
       "quiz": {
         "q": "Does an unreachable default provide safe error recovery?",
         "choices": [
@@ -10507,7 +11191,17 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Which unchecked item currently limits your confidence most, and what concrete experiment would address it?"
+          "text": "Checkpoint: Which unchecked item currently limits your confidence most, and what concrete experiment would address it?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The item that usually limits confidence most is the one with no executed evidence yet — typically “accepted fixtures match original behavior on the defined test domain”, because verify and identical canonical IR prove form, not meaning; a plausible-looking output is not evidence, and “the code compiles” does not fill the behavior boxes.",
+                "The concrete experiment is the differential comparison from lesson 24: build the original and protected variants from the same common IR, run both with the same driver and backend flags over the bounded domain (for example amounts `-1, 0, 1, 99, 100, 1000, 10000` and every level for `discount`, both conditions for `phi.ll`, counts `0, 1, 2` for the swap loop), and compare exit status and stdout — any mismatch is a counterexample to keep as a regression, and full agreement upgrades that checklist item from “traced” to “verified on the domain”."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -10711,7 +11405,7 @@
           "irComparison": true
         }
       ],
-      "words": 2093,
+      "words": 2244,
       "quiz": {
         "q": "When should a Day 2 exit box be checked?",
         "choices": [
@@ -10727,8 +11421,8 @@
       "id": 44,
       "day": 2,
       "number": 28,
-      "title": "Look up a Day 2 term",
-      "originalTitle": "Look up a Day 2 term",
+      "title": "Glossary. Terms used in Day 2",
+      "originalTitle": "Glossary. Terms used in Day 2",
       "summary": "A compact reference for the general compiler and project vocabulary used in Day 2; LLVM-specific and C++-specific terms each have their own document.",
       "takeaway": "Look up the word, then return to the concrete IR example.",
       "source": "day2",
@@ -10751,7 +11445,28 @@
         },
         {
           "type": "task",
-          "text": "Task: Use this reference when a term interrupts your progress. The Day 1 glossary remains available under the Day 1 tab."
+          "text": "Task: Use this reference when a term interrupts your progress. The [Day 1 glossary](#lesson-26) remains available under the Day 1 tab."
+        },
+        {
+          "type": "heading",
+          "text": "Terms in this document"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Group",
+              "Terms"
+            ],
+            [
+              "General CS and compiler concepts",
+              "SSA, Dominance, Demotion (as a technique), Cross-block / escaping value, Worklist, Constant folding, Tail call, Undefined behavior, Differential test"
+            ],
+            [
+              "Project vocabulary",
+              "State ID, Dispatcher, Setup / entry, Support contract, Prototype checkpoint, Prototype scope, Where to return"
+            ]
+          ]
         },
         {
           "type": "heading",
@@ -10763,12 +11478,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Static single assignment: every value has exactly one defining instruction, and a definition must dominate its uses. It is a static, checkable replacement for dynamic assignment discipline: you can prove where a value came from by reading the graph, without simulating the execution."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "define i32 @pick(i1 %flag) {\nentry:\n  %a = add i32 1, 2\n  br label %join\njoin:\n  ret i32 %a\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"SSA (static single assignment)\": every value in LLVM IR is defined exactly once and used only after that definition; merges are handled by PHI nodes instead of redefining names, and `verify` checks the constraint."
         },
         {
           "type": "paragraph",
@@ -10784,12 +11494,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A block D dominates a block B when every path from the entry to B passes through D. The invariant it protects: a use sees a value only if every route to it went through the definition, so the dependency is a property of the graph rather than of one execution."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "define i32 @pick(i1 %flag) {\nentry:\n  %a = add i32 1, 2\n  br i1 %flag, label %t, label %f\nt:\n  br label %join\nf:\n  br label %join\njoin:\n  ret i32 %a\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Dominator\": a block B dominates a block A when every path from the function entry to A passes through B; dominance underpins the back-edge definition and the `DominatorTreeAnalysis`."
         },
         {
           "type": "paragraph",
@@ -11095,10 +11800,20 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition."
+          "text": "Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Take “demotion (as a technique)”: the glossary's merge example shows it concretely — entry declares `%value.reg2mem = alloca i32, align 4`, left executes `store i32 10, ptr %value.reg2mem`, right executes `store i32 20, ptr %value.reg2mem`, and join executes `%value.reload = load i32, ptr %value.reg2mem` followed by `ret i32 %value.reload`.",
+                "Instead of a PHI that picks `[10, %left]` or `[20, %right]` by the predecessor edge, the value now lives in memory: whichever path executes writes its own constant, and join reads back what the executed path wrote — so demotion is the replacement of SSA value transport with explicit stack storage, exactly what `DemotePHIToStack` performs mechanically in lesson 3 and what lets new dispatcher edges stop breaking the data flow."
+              ]
+            }
+          ]
         }
       ],
-      "words": 1960,
+      "words": 2054,
       "quiz": {
         "q": "A load reads %slot, but nothing in the function ever stored to it. What does the load read?",
         "choices": [
@@ -11114,8 +11829,8 @@
       "id": 71,
       "day": 2,
       "number": 29,
-      "title": "Look up a Day 2 LLVM term",
-      "originalTitle": "Look up a Day 2 LLVM term",
+      "title": "Glossary. LLVM terms used in Day 2",
+      "originalTitle": "Glossary. LLVM terms used in Day 2",
       "summary": "The LLVM-specific terms of Day 2: the IR constructs the pass reads and writes, the call and function properties the guard checks, and the C++ API surface the pass uses.",
       "takeaway": "Name the construct, then name the API that reads or writes it.",
       "source": "day2",
@@ -11136,6 +11851,47 @@
         },
         {
           "type": "heading",
+          "text": "Terms in this document"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Group",
+              "Terms"
+            ],
+            [
+              "Printed-IR vocabulary",
+              "define vs declare, Block labels, % values vs labels, @ symbols, i1 / i32 and typed constants, ptr, align, \"; preds\" comments"
+            ],
+            [
+              "Memory",
+              "PHI, alloca, load / store, void result, select"
+            ],
+            [
+              "Aggregates",
+              "struct results (one entry: aggregates built field by field with `insertvalue`)"
+            ],
+            [
+              "Control flow",
+              "Terminator, br / conditional br, switch, ret, unreachable"
+            ],
+            [
+              "Calls and attributes",
+              "call, CallBase / CallInst, tail / musttail, returns_twice, convergent, operand bundle, inline asm, naked, Function attribute vs call flag, Function declaration"
+            ],
+            [
+              "Function and block properties",
+              "Intrinsic, Coroutine intrinsic, Presplit coroutine, Personality function, EH pad, Address-taken basic block, Static entry alloca, Terminator whitelist"
+            ],
+            [
+              "The C++ API side",
+              "isa / cast / dyn_cast, LLVMContext, IRBuilder and insertion point, getInt32Ty / getInt32, DenseMap, PreservedAnalyses, eraseFromParent, isUsedOutsideOfBlock, DemotePHIToStack / DemoteRegToStack"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
           "text": "Printed-IR vocabulary"
         },
         {
@@ -11144,12 +11900,7 @@
         },
         {
           "type": "paragraph",
-          "text": "define starts a function with a body; declare records the signature of a function without a body. The guard’s first check is exactly this distinction: a declaration has no blocks to inspect or rewrite, so isDeclaration rejects before any other check."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "declare i32 @puts(ptr)\n\ndefine i32 @main() {\nentry:\n  %r = call i32 @puts(ptr null)\n  ret i32 %r\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Declaration vs. definition (function)\": a `declare` signature announces a function with no body; a `define` provides the body, and passes only run on definitions — `F.isDeclaration()` detects the former."
         },
         {
           "type": "paragraph",
@@ -11304,12 +12055,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A PHI node selects an incoming value by the edge used to enter the block: each [ VALUE, %PREDECESSOR ] pair says if you came from this block, the value is this. A CFG merge needs one because each edge can deliver a different value, and SSA needs exactly one definition."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\nleft:\n  br label %join\nright:\n  br label %join\njoin:\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"PHI node / phi\": at a block’s entry a PHI picks which value flows in from which predecessor — `%x = phi i32 [ 1, %left ], [ 2, %right ]` — because SSA forbids redefining a value’s name at a merge point."
         },
         {
           "type": "paragraph",
@@ -11430,12 +12176,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The final instruction of a complete basic block; it produces the block’s outgoing control flow. A block must end with exactly one valid terminator, which is why an empty ms.invalid block fails verify until lesson 15 finishes it with unreachable."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "define void @endings(i1 %c) {\nentry:\n  br i1 %c, label %a, label %b\na:\n  ret void\nb:\n  unreachable\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Terminator\": the last instruction of a basic block, which transfers control (`br`, `switch`, `ret`, `unreachable`, …); Day 1’s policy accepts `CondBr`, `UncondBr`, `Switch`, `Ret`, and `Unreachable` only."
         },
         {
           "type": "paragraph",
@@ -11506,12 +12247,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A terminator asserting that no defined execution reaches this point; actually executing it is undefined behavior, not recovery, a return, or input validation. In the state machine it is the ms.invalid destination: the invariant that a stored state ID is always one we assigned is what keeps execution off it."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "define void @bad_id(i32 %s) {\nentry:\n  switch i32 %s, label %ms.invalid [\n    i32 0, label %ok\n  ]\nok:\n  ret void\nms.invalid:\n  unreachable\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Unreachable\": a terminator marking a point that cannot execute, transferring control nowhere."
         },
         {
           "type": "paragraph",
@@ -11709,12 +12445,7 @@
         },
         {
           "type": "paragraph",
-          "text": "An operation whose semantics LLVM itself defines, written as a call to a llvm.* name with no user body — llvm.ctpop.i32 counts set bits, for example. The guard rejects explicit intrinsic calls conservatively: the prototype does not reason about each intrinsic’s extra semantics."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "declare i32 @llvm.ctpop.i32(i32)\n\ndefine i32 @count_bits(i32 %x) {\nentry:\n  %count = call i32 @llvm.ctpop.i32(i32 %x)\n  ret i32 %count\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Intrinsic\": an operation declared by LLVM itself under the reserved `llvm.` namespace, whose semantics LLVM knows and which is lowered directly to target code; in IR it appears as an ordinary `call`."
         },
         {
           "type": "paragraph",
@@ -11730,12 +12461,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The llvm.coro.begin / end / suspend / resume family that builds coroutine state machines. The guard does not handle coroutine IR, so the general intrinsic rule rejects these calls; the dedicated entry exists so a diagnostic can name the real cause."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "declare ptr @llvm.coro.noop()\n\ndefine ptr @coroutine_handle() {\nentry:\n  %handle = call ptr @llvm.coro.noop()\n  ret ptr %handle\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Coroutine\": a function that can be suspended and resumed, expressed in LLVM IR through the `llvm.coro.*` intrinsics (the `begin` / `end` / `suspend` / `resume` family that builds coroutine state machines). The guard does not handle coroutine IR, so the general intrinsic rule rejects these calls; the dedicated entry exists so a diagnostic can name the real cause."
         },
         {
           "type": "paragraph",
@@ -11747,12 +12473,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A coroutine already lowered into an ordinary function plus an explicit state machine — its CFG is not the shape this pass assumes, so Function::isPresplitCoroutine rejects it before any inspection."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/Function.h\"\n#include <utility>\n\nstd::pair<bool, const char *> check_coroutine(const llvm::Function &F) {\n    if (F.isPresplitCoroutine())\n        return {false, \"presplit coroutine is unsupported\"};\n    return {true, \"\"};\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Coroutine\", which also names the presplit case: a coroutine the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()`. Its CFG is not the shape this pass assumes, so the guard rejects it before any inspection."
         },
         {
           "type": "paragraph",
@@ -11764,12 +12485,7 @@
         },
         {
           "type": "paragraph",
-          "text": "The personality attribute names a language’s exception-handling entry routine; when it is present, control can flow through exception handling instead of through branches alone. The guard reads hasPersonalityFn and rejects, because the rewrite has no model for EH flow."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "declare i32 @llvm_eh_personality(i8*, ...)\ndeclare void @may_throw(i32)\n\ndefine void @driver(i32 %x) personality i32 (i8*, ...)* @llvm_eh_personality {\nentry:\n  invoke void @may_throw(i32 %x)\n          to label %ok unwind label %handler\nok:\n  ret void\nhandler:\n  %lp = landingpad { i8*, i32 } cleanup\n  ret void\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Personality routine\": the function a language runtime calls while an exception unwinds; a function that can receive exceptions carries one, and `F.hasPersonalityFn()` asks whether it does. The guard reads `hasPersonalityFn` and rejects, because the rewrite has no model for EH flow."
         },
         {
           "type": "paragraph",
@@ -11781,12 +12497,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A landingpad or cleanuppad instruction that catches or unwinds an exception, paired with the invoke and callbr terminators. BasicBlock::isEHPad identifies the block, and the terminator whitelist excludes the EH terminators, so both halves of the mechanism are rejected."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "declare i32 @llvm_eh_personality(i8*, ...)\ndeclare void @may_throw(i32)\n\ndefine void @driver(i32 %x) personality i32 (i8*, ...)* @llvm_eh_personality {\nentry:\n  invoke void @may_throw(i32 %x)\n          to label %ok unwind label %handler\nok:\n  ret void\nhandler:\n  %lp = landingpad { i8*, i32 } cleanup\n  ret void\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"EH pad\": the first instruction of a block that receives exceptional control — `landingpad`, `catchpad`, `cleanuppad`, or `catchswitch` — asked by `BB.isEHPad()`."
         },
         {
           "type": "paragraph",
@@ -11802,12 +12513,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A block whose address can be used as a value (blockaddress), so the CFG is no longer the complete description of control flow. BasicBlock::hasAddressTaken detects it, and the guard rejects."
-        },
-        {
-          "type": "code",
-          "language": "llvm",
-          "text": "define ptr @address_taken() {\nentry:\n  br label %target\ntarget:\n  ret ptr blockaddress(@address_taken, %target)\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Address-taken block\": a basic block whose address is used as a value in the IR (produced by `blockaddress`) — a value a program can compute with, not just a control-flow destination, so the CFG alone no longer describes control flow. `BasicBlock::hasAddressTaken` detects it, and the guard rejects."
         },
         {
           "type": "paragraph",
@@ -11861,12 +12567,7 @@
         },
         {
           "type": "paragraph",
-          "text": "isa<T>(V) is a type check returning a bool; cast<T>(V) asserts and returns a typed pointer; dyn_cast<T>(V) checks and returns nullptr when V is not T. Day 2 uses the if-initializer form so the pointer is typed and scoped to the check: the declaration, the check, and the use happen in one statement."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/Instructions.h\"\n#include \"llvm/Support/Casting.h\"\n#include <vector>\n\nvoid collect_phis(llvm::BasicBlock &BB,\n                  std::vector<llvm::PHINode *> &phis) {\n    for (auto &I : BB)\n        if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))\n            phis.push_back(phi);\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"isa<T>(X) / dyn_cast<T>(X)\": `isa` answers “is this value a T?” with a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise; `cast` asserts. Day 2 uses the if-initializer form so the pointer is typed and scoped to the check: the declaration, the check, and the use happen in one statement."
         },
         {
           "type": "paragraph",
@@ -11902,9 +12603,21 @@
           "text": "IRBuilder inserts instructions at a chosen position: the insertion point is where the next instruction goes, and a pointer-based constructor can insert before an existing instruction or at the end of a block. Lesson 14 builds new blocks and terminates them with the builder."
         },
         {
+          "type": "paragraph",
+          "text": "Mechanically, each `Create*` method constructs the instruction, links it into the block at the builder’s insertion point, and advances the point past it. Successive calls therefore write the instruction stream in order, and each call returns the new value as a `Value *` that a later call can use as an operand — in lesson 14, `CreateLoad` produces `ms.current` and the following `CreateSwitch` takes it as its condition. Operations with no SSA result (`CreateStore`, `CreateUnreachable`) return nothing, matching the void-result entry above."
+        },
+        {
+          "type": "paragraph",
+          "text": "The constructors choose the point in two ways. The pointer form `IRBuilder<>(invalidBlock)` targets the end of the block, which is the only legal position on a freshly created empty block — the `invalidBuilder` and `dispatchBuilder` of lesson 14. The iterator form `IRBuilder<>(&*entry->getFirstInsertionPt())` targets an existing block instead: `getFirstInsertionPt()` is an iterator to the first legal insertion position, `*` obtains that instruction, `&` hands it to the constructor, and every `Create*` on that builder (`setup`) inserts before it. `SetInsertionPoint` moves an existing builder to a new position. Each builder object holds its own point, so the three builders in the dispatcher step — `setup`, `dispatchBuilder`, `invalidBuilder` — write into three different blocks without stepping on each other."
+        },
+        {
+          "type": "paragraph",
+          "text": "Two behaviors the book leans on. First, a `Create*` call does not always create: when its operands are constants the method may fold the result and return a `Constant` without inserting any instruction at all — that is the constant-input `CreateSelect` lesson 14’s checkpoint names, and it is why “every Create... call adds exactly one instruction” is an unsafe assumption. Second, `IRBuilder<>` is the default instantiation of the template `IRBuilder<Derived>`: the empty angle brackets give the plain builder that constructs the ordinary instruction classes. Operand types and constants come from the builder’s context through `getInt32Ty()` / `getInt32(n)` (the next entry), not from raw constructor calls."
+        },
+        {
           "type": "code",
           "language": "cpp",
-          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/IRBuilder.h\"\n\nvoid finish_block(llvm::BasicBlock &BB) {\n    llvm::IRBuilder<> builder(&BB);\n    builder.CreateUnreachable();\n}"
+          "text": "#include \"llvm/IR/BasicBlock.h\"\n#include \"llvm/IR/IRBuilder.h\"\n\n// Lesson 14's dispatcher step, compressed: the two insertion-point forms.\nvoid begin_dispatch(llvm::Function &F,\n                    std::vector<llvm::BasicBlock *> stateBlocks) {\n    llvm::BasicBlock *entry = &F.front();\n    llvm::BasicBlock *dispatcher =\n        llvm::BasicBlock::Create(F.getContext(), \"ms.dispatch\", &F);\n    llvm::BasicBlock *invalidBlock =\n        llvm::BasicBlock::Create(F.getContext(), \"ms.invalid\", &F);\n\n    // Iterator form: insert before entry's first existing instruction.\n    llvm::IRBuilder<> setup(&*entry->getFirstInsertionPt());\n    llvm::AllocaInst *stateSlot =\n        setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\");\n\n    // Pointer form: both fresh blocks are empty, so the end of the block is\n    // the only legal position. Each builder keeps its own insertion point.\n    llvm::IRBuilder<> invalidBuilder(invalidBlock);\n    invalidBuilder.CreateUnreachable();\n\n    llvm::IRBuilder<> dispatch(dispatcher);\n    llvm::Value *current =\n        dispatch.CreateLoad(dispatch.getInt32Ty(), stateSlot, \"ms.current\");\n    llvm::SwitchInst *sw = dispatch.CreateSwitch(\n        current, invalidBlock, static_cast<unsigned>(stateBlocks.size()));\n    // addCase(int constant, BB) calls would attach one edge per state block.\n}"
         },
         {
           "type": "paragraph",
@@ -11954,12 +12667,11 @@
         },
         {
           "type": "paragraph",
-          "text": "The pass’s report of which cached analysis results remain valid after it runs. all() promises nothing changed — safe only when nothing changed; none() says recompute everything. A changed CFG returns none() here: all() is a cache-validity promise, not an undo operation."
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"PreservedAnalyses\": the value a transformation pass returns, describing which cached analyses remain valid after its changes — `::all()` promises nothing was touched, `::none()` says recompute everything; it reports cache validity only, not behavior."
         },
         {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/PassManager.h\"\n\nllvm::PreservedAnalyses preserve_if_changed(bool changed) {\n    return changed ? llvm::PreservedAnalyses::none()\n                   : llvm::PreservedAnalyses::all();\n}"
+          "type": "paragraph",
+          "text": "A changed CFG returns `none()` here: `all()` is a cache-validity promise, not an undo operation."
         },
         {
           "type": "paragraph",
@@ -12022,10 +12734,20 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Name a construct from this document and the API that reads or writes it. Then state which lesson introduced it and which invariant the construct protects."
+          "text": "Checkpoint: Name a construct from this document and the API that reads or writes it. Then state which lesson introduced it and which invariant the construct protects.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "The `unreachable` terminator — the construct that ends a block by asserting no defined execution reaches that point (actually executing it is undefined behavior, not recovery or input validation). It is written with the builder's `CreateUnreachable` and read as a terminator: `BasicBlock::getTerminator()` returning the `Instruction::Unreachable` opcode, which the guard's terminator whitelist checks.",
+                "Lesson 14 points the dispatcher's default case at `ms.invalid`, and lesson 15 finishes that block with `unreachable`; the invariant the construct protects is that the stored state ID is always one we assigned — every stored ID decodes to a real state block, and execution never reaches `ms.invalid`."
+              ]
+            }
+          ]
         }
       ],
-      "words": 4049,
+      "words": 4409,
       "quiz": {
         "q": "Which pair denotes a type and a value, respectively?",
         "choices": [
@@ -12041,8 +12763,8 @@
       "id": 72,
       "day": 2,
       "number": 30,
-      "title": "Look up a Day 2 C++ term",
-      "originalTitle": "Look up a Day 2 C++ term",
+      "title": "Glossary. C++ terms used in Day 2",
+      "originalTitle": "Glossary. C++ terms used in Day 2",
       "summary": "The C++ language concepts the Day 2 lessons rely on: pointers and references, casts, classes, and translation units.",
       "takeaway": "Say whether a value is borrowed, copied, or owned before you write the expression.",
       "source": "day2",
@@ -12063,6 +12785,35 @@
         },
         {
           "type": "heading",
+          "text": "Terms in this document"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Group",
+              "Terms"
+            ],
+            [
+              "Pointers and references",
+              "Pointer vs reference, Borrowed reference parameter (Function &), Address-of vs reference declaration, Pointer-to-const vs const pointer, Iterator invalidation"
+            ],
+            [
+              "Types and conversion",
+              "auto deduction, Range-for element type, Upcast / downcast, Short-circuit evaluation, if-initializers"
+            ],
+            [
+              "Classes and translation units",
+              "namespace, #pragma once, Class vs struct, Static member function, Declaration vs definition, Default arguments"
+            ],
+            [
+              "Ownership and lifetime",
+              "(the final entry: who owns an IR object, and what a pass may not outlive)"
+            ]
+          ]
+        },
+        {
+          "type": "heading",
           "text": "Pointers and references"
         },
         {
@@ -12071,12 +12822,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A pointer stores an address and can be reseated; a reference is an alias that binds to one object for its lifetime. Day 2’s worklists store pointers because they must point at the instruction; pass parameters take references because they borrow it."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#include \"llvm/IR/Instructions.h\"\n\nllvm::Instruction *address_of(llvm::Instruction &I) {\n    return &I;\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"Reference vs. pointer\": a reference is another name for an existing object; a pointer stores an object’s address. Day 2’s worklists store pointers because they must point at the instruction; pass parameters take references because they borrow it."
         },
         {
           "type": "paragraph",
@@ -12282,12 +13028,7 @@
         },
         {
           "type": "paragraph",
-          "text": "A compiler directive that includes a header at most once per translation unit, no matter how many times the include chain reaches it. Day 2’s builder header (lesson 18) starts with it so the class is declared exactly once even when several files include it."
-        },
-        {
-          "type": "code",
-          "language": "cpp",
-          "text": "#pragma once\n#include \"llvm/IR/Function.h\"\n\nnamespace minishield {\nclass StateMachineBuilder {\npublic:\n    static bool build(llvm::Function &F);\n};\n}"
+          "text": "See the [Day 1 glossary](#lesson-26) entry \"#pragma once\": a compiler directive meaning “include this header at most once per translation unit”. Day 2’s builder header (lesson 18) starts with it so the class is declared exactly once even when several files include it."
         },
         {
           "type": "paragraph",
@@ -12388,10 +13129,20 @@
         },
         {
           "type": "checkpoint",
-          "text": "Checkpoint: Pick one expression from the Day 2 lessons and say whether each value in it is borrowed, copied, or owned. Then name the lesson that introduced the construct."
+          "text": "Checkpoint: Pick one expression from the Day 2 lessons and say whether each value in it is borrowed, copied, or owned. Then name the lesson that introduced the construct.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "Pick `for (auto &BB : F)` (the state-assignment loop over the function's blocks): `F` is borrowed — a reference parameter the pass reads and mutates in place, never owning or copying it; each `BB` is borrowed too — `auto &` binds a reference to the actual block, not a copy, and a copy could not exist anyway because `BasicBlock` is noncopyable (so `for (auto BB : F)` fails to compile); the address-of expression `&BB` produces a `BasicBlock*` key for the state-ID map, where the pointer is a copy of the address but the block it names remains owned by the function.",
+                "The construct — a range-for over a function's blocks binding each block by reference — was introduced in lesson 1's PHI collection (the outer `for (auto &BB : F` around the inner `for (auto &I : BB`), and lesson 13's pointer-key fix (`&BB` as the `DenseMap` key rather than the reference itself) is what made the reference-versus-pointer distinction in this exact expression explicit."
+              ]
+            }
+          ]
         }
       ],
-      "words": 1438,
+      "words": 1653,
       "quiz": {
         "q": "In the declaration static bool build(llvm::Function &F), what does the & do to F?",
         "choices": [
