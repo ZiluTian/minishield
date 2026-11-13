@@ -6944,7 +6944,7 @@ C. When its expected output looks plausible
 
 Answer: A. Reading and planning are not execution evidence. Keep those states distinct.
 
-2.8.1 Terms used in Volume 2
+2.8.1 Look up a term
 ========================
 
 Use terms to recover the reason for an operation
@@ -7287,7 +7287,7 @@ B. Zero, because LLVM zero-initializes every stack slot
 C. A verifier error, because every load requires a store
 
 Answer: A. A load is just a memory read: it returns whatever bytes the slot currently holds. The verifier checks types and dominance, not that the slot was written first.
-2.8.2 LLVM terms used in Volume 2
+2.8.2 LLVM concepts
 =============================
 
 Read the term, then find the construct
@@ -7994,7 +7994,7 @@ B. getInt32(2) and getInt32Ty()
 C. eraseFromParent() and continue
 
 Answer: A. An instruction builder often needs both an LLVM Type* and particular constant values. They are different API inputs.
-2.8.3 C++ terms used in Volume 2
+2.8.3 C++ concepts
 ============================
 
 Check the ownership before you write the expression
