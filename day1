@@ -1034,6 +1034,40 @@ It does not prove that transformed code has the same behavior as the input.
 Observed error: function(minishield-flatten)] had an extra closing bracket.
 Pipeline syntax must be valid before LLVM can run any pass.
 
+### LLVM program before and after this checkpoint
+
+This is the complete minishield-input.ll smoke example used by the run command. Day 1 runs an inspection/stub checkpoint; do not use the later Day 2 transforming implementation as an unchanged-output baseline.
+
+The program is unchanged at this checkpoint. Loading a plugin, running it, and verifying output do not require the pass to change the function. Diagnostics are separate from emitted IR.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — add_one original
+
+```llvm
+define i32 @add_one(i32 %x) {
+entry:
+  %result = add i32 %x, 1
+  ret i32 %result
+}
+```
+
+### After — add_one inspected
+
+```llvm
+define i32 @add_one(i32 %x) {
+entry:
+  %result = add i32 %x, 1
+  ret i32 %result
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: add_one still computes x + 1 and returns it from the same entry block.
 
 7. Start task 1.2 by declaring StatsPass
 ========================================
@@ -1079,6 +1113,58 @@ has changed. Using const references makes the read-only intent visible.
 Checkpoint using phi.ll: merge has four blocks and five instructions:
 three branches, one PHI, and one return.
 
+### LLVM program before and after this checkpoint
+
+The nested traversal counts this module; it does not add instructions to it.
+
+The program is unchanged at this checkpoint. There are four blocks and five instructions: three branches, one PHI, one return. Those counts describe both listings.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — phi original
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+### After — phi inspect
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: Locate one conditional branch in entry and two unconditional branches, then find the PHI and return in join.
 
 9. Make the new pass available, then rebuild the plugin
 =======================================================
@@ -1153,6 +1239,58 @@ execute many times, but its static call count is still one. Count Call and
 Invoke separately. Branch instructions are not the same as successor edges.
 Loop counting is deferred to task 1.3 rather than reporting a false zero.
 
+### LLVM program before and after this checkpoint
+
+Classifying opcodes adds C++ counters to the pass, not instructions to the target function.
+
+The program is unchanged at this checkpoint. The report changes as classifications are implemented, but the IR remains identical.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — phi original
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+### After — phi inspect
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: Both the conditional and unconditional branches retain their original destinations.
 
 11. Cross-check the supplied fixtures
 =====================================
@@ -1279,6 +1417,62 @@ An empty diff is expected. Apply the same count and unchanged-IR checks to
 all fixtures when you write the test scripts. See task 1.2 in [the plan](PLAN.md)
 for the milestone's exit criteria.
 
+### LLVM program before and after this checkpoint
+
+Hand-count the loop fixture before comparing the statistics report.
+
+The program is unchanged at this checkpoint. The header PHI, comparison, increment, and branch edges are preserved by inspection. The PHI is one static instruction even when the loop repeats.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — loop original
+
+```llvm
+define i32 @count_to(i32 %limit) {
+entry:
+  br label %header
+
+header:                                           ; preds = %body, %entry
+  %i = phi i32 [ 0, %entry ], [ %next, %body ]
+  %continue = icmp slt i32 %i, %limit
+  br i1 %continue, label %body, label %exit
+
+body:                                             ; preds = %header
+  %next = add i32 %i, 1
+  br label %header
+
+exit:                                             ; preds = %header
+  ret i32 %i
+}
+```
+
+### After — loop inspect
+
+```llvm
+define i32 @count_to(i32 %limit) {
+entry:
+  br label %header
+
+header:                                           ; preds = %body, %entry
+  %i = phi i32 [ 0, %entry ], [ %next, %body ]
+  %continue = icmp slt i32 %i, %limit
+  br i1 %continue, label %body, label %exit
+
+body:                                             ; preds = %header
+  %next = add i32 %i, 1
+  br label %header
+
+exit:                                             ; preds = %header
+  ret i32 %i
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: Follow entry → header → body → header and header → exit. Static instruction counts are not iteration counts.
 
 12. Turn test_all.sh output into a readable table
 =================================================
@@ -1354,6 +1548,58 @@ PreservedAnalyses::none() unless particular analyses are explicitly maintained.
 PreservedAnalyses reports cache validity; it does not run the verifier or
 prove semantic equivalence.
 
+### LLVM program before and after this checkpoint
+
+This is the explicit unchanged-IR contract for the statistics pass.
+
+The program is unchanged at this checkpoint. Canonical before/after equality is expected for a read-only pass. A later flattening pass has a different contract.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — phi original
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+### After — phi inspect
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: The same PHI, constants, block order, and edges appear in both modules.
 
 14. Start task 1.3 by printing successor relationships
 ======================================================
@@ -1384,6 +1630,58 @@ as predecessors; entry has none in this fixture. Printing block names is
 helpful for this exercise, but names are not guaranteed to exist on all LLVM
 blocks and should not be used as the graph's identity.
 
+### LLVM program before and after this checkpoint
+
+Printing successors observes the graph; it does not connect new edges.
+
+The program is unchanged at this checkpoint. The reported four edges come from the same three branch instructions in the input and output.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — phi original
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+### After — phi inspect
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: entry has two successors; left and right each lead to join; join has none.
 
 15. Declare a reusable CFGAnalyzer analysis
 ===========================================
@@ -1511,6 +1809,62 @@ changes. This first exercise only declares the interface. Implementation,
 registration with the function analysis manager, terminator information,
 and loop detection follow after the basic graph works.
 
+### LLVM program before and after this checkpoint
+
+Registering and requesting a reusable analysis computes a C++ result describing this function.
+
+The program is unchanged at this checkpoint. The cached result is separate from the LLVM program. No instructions, blocks, or PHIs are inserted by the analysis.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — loop original
+
+```llvm
+define i32 @count_to(i32 %limit) {
+entry:
+  br label %header
+
+header:                                           ; preds = %body, %entry
+  %i = phi i32 [ 0, %entry ], [ %next, %body ]
+  %continue = icmp slt i32 %i, %limit
+  br i1 %continue, label %body, label %exit
+
+body:                                             ; preds = %header
+  %next = add i32 %i, 1
+  br label %header
+
+exit:                                             ; preds = %header
+  ret i32 %i
+}
+```
+
+### After — loop inspect
+
+```llvm
+define i32 @count_to(i32 %limit) {
+entry:
+  br label %header
+
+header:                                           ; preds = %body, %entry
+  %i = phi i32 [ 0, %entry ], [ %next, %body ]
+  %continue = icmp slt i32 %i, %limit
+  br i1 %continue, label %body, label %exit
+
+body:                                             ; preds = %header
+  %next = add i32 %i, 1
+  br label %header
+
+exit:                                             ; preds = %header
+  ret i32 %i
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: The loop’s header still selects the initial 0 or the preceding body’s next value.
 
 16. Next exercise: implement the basic analysis before adding loops
 ===================================================================
@@ -1596,6 +1950,58 @@ Recursion cycles between function calls, not blocks within a function. Print loo
 
 Checkpoint: explain why an analysis result is requested by reference, why dominance argument order matters, and why back-edge count is not automatically a loop count.
 
+### LLVM program before and after this checkpoint
+
+BlockInfo records borrow pointers to the blocks shown here. Building those records does not replace any block.
+
+The program is unchanged at this checkpoint. Collecting predecessor/successor data leaves the entire module unchanged. Predecessor print order is not a semantic difference.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — phi original
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+### After — phi inspect
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+
+left:                                             ; preds = %entry
+  br label %join
+
+right:                                            ; preds = %entry
+  br label %join
+
+join:                                             ; preds = %right, %left
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: Compare actual branch operands rather than the order of a diagnostic list.
 
 17. Understand references, pointers, and addresses while implementing the CFG
 =============================================================================
@@ -2213,6 +2619,50 @@ The statistics pass's `Call` opcode counter also counts intrinsic calls:
 they still have opcode `Call`. Being recognized as an intrinsic does not
 change the instruction's opcode into a separate intrinsic opcode.
 
+### LLVM program before and after this checkpoint
+
+Recognizing a coroutine intrinsic is a type/name inspection. The complete fixture makes the declaration and call context visible.
+
+The program is unchanged at this checkpoint. The check neither lowers the intrinsic nor erases its call. That unsupported function must be rejected before transformation.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — coroutine original
+
+```llvm
+; Function Attrs: nounwind memory(none)
+declare ptr @llvm.coro.noop() #0
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+
+attributes #0 = { nounwind memory(none) }
+```
+
+### After — coroutine inspect
+
+```llvm
+; Function Attrs: nounwind memory(none)
+declare ptr @llvm.coro.noop() #0
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+
+attributes #0 = { nounwind memory(none) }
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: The intrinsic declaration and the call are both still present.
 
 22. Integrate eligibility decisions into the flattening stub
 ============================================================
@@ -2284,6 +2734,50 @@ The existing fixtures demonstrate:
 Rejection reports the first failing check. The required statistics pass still
 inspects `optnone` functions; the optional flattening pass may not run on them.
 
+### LLVM program before and after this checkpoint
+
+Eligibility makes a decision before any rewrite. Here the coroutine call is valid IR but outside the supported input contract.
+
+The program is unchanged at this checkpoint. Rejection means leaving the function and its declaration untouched, rather than partially demoting or reconnecting it.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — coroutine original
+
+```llvm
+; Function Attrs: nounwind memory(none)
+declare ptr @llvm.coro.noop() #0
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+
+attributes #0 = { nounwind memory(none) }
+```
+
+### After — coroutine full
+
+```llvm
+; Function Attrs: nounwind memory(none)
+declare ptr @llvm.coro.noop() #0
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+
+attributes #0 = { nounwind memory(none) }
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: Find the same intrinsic call before and after; a printed rejection is not an LLVM replacement instruction.
 
 23. Isolate rejection checks with new fixtures
 ==============================================
@@ -2382,6 +2876,44 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 Expect a coroutine-intrinsic rejection for `coroutine_handle`, and an
 address-taken-block rejection for `address_taken`.
 
+### LLVM program before and after this checkpoint
+
+This complete fixture isolates an address-taken block as a rejection reason.
+
+The program is unchanged at this checkpoint. The global blockaddress and function are preserved. An unrelated earlier rejection should not be the only reason this test passes.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — address original
+
+```llvm
+define ptr @address_taken() {
+entry:
+  br label %target
+
+target:                                           ; preds = %entry
+  ret ptr blockaddress(@address_taken, %target)
+}
+```
+
+### After — address full
+
+```llvm
+define ptr @address_taken() {
+entry:
+  br label %target
+
+target:                                           ; preds = %entry
+  ret ptr blockaddress(@address_taken, %target)
+}
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: The branch destination whose address is exposed cannot simply be renamed into an arbitrary dispatcher state without handling that contract.
 
 24. Check that rejected functions remain unchanged
 ==================================================
@@ -2437,6 +2969,50 @@ The presplit coroutine marker is a separate rejection path to test next.
 These exercises do not yet establish complete eligibility coverage or prove
 that a future transformation preserves behavior.
 
+### LLVM program before and after this checkpoint
+
+A negative test must prove both the intended rejection and unchanged canonical output.
+
+The program is unchanged at this checkpoint. The reference check rejects this input before mutation. Compare normalized IR rather than the original file’s whitespace.
+
+<details>
+<summary>LLVM IR — Read the complete before-and-after LLVM modules</summary>
+
+### Before — coroutine original
+
+```llvm
+; Function Attrs: nounwind memory(none)
+declare ptr @llvm.coro.noop() #0
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+
+attributes #0 = { nounwind memory(none) }
+```
+
+### After — coroutine full
+
+```llvm
+; Function Attrs: nounwind memory(none)
+declare ptr @llvm.coro.noop() #0
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+
+attributes #0 = { nounwind memory(none) }
+```
+
+Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation.
+
+</details>
+
+Follow the values and edges: No state slot, dispatcher switch, or demotion loads/stores should appear in the rejected function.
 
 Glossary. Terms used in the README and Day 1
 ============================================

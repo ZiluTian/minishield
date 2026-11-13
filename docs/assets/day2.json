@@ -257,9 +257,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why must eligibility run before mutation? Why is a successful verifier run weaker than proving that a transformation preserves behavior?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Preview of the complete Day 2 pipeline, not an edit to make in the background lesson. Later checkpoints reach this shape in smaller steps.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The PHI becomes path-specific stores plus a load; state storage and a switch route original transitions through dispatch.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\njoin:                                             ; preds = %ms.dispatch\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %right, %left, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: True still reaches left’s store of 10, false reaches right’s store of 20, and both eventually return the selected value.",
+          "irComparison": true
         }
       ],
-      "words": 852,
+      "words": 1193,
       "quiz": {
         "q": "Why prepare SSA values before adding dispatcher edges?",
         "choices": [
@@ -447,9 +497,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: What does the vector own? Why do we retain pointers rather than copies? What changes when a later utility deletes a PHI?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This lesson only collects PHINode pointers. The after listing is the expected output before adding demotion.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. The worklist and its count exist in the C++ pass, outside the target program. The PHI stays in join.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi inspect"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Locate the one PHI that is counted. Nothing has yet replaced its incoming-edge choice.",
+          "irComparison": true
         }
       ],
-      "words": 731,
+      "words": 977,
       "quiz": {
         "q": "Why prepare PHIs before routing incoming paths through one dispatcher?",
         "choices": [
@@ -607,9 +707,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why is &I later valid for a vector<Instruction*> but invalid here? Explain the difference between a runtime type test and the static type of an expression."
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Fixing dyn_cast/push_back types repairs the pass implementation, not the target IR.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. The vector now holds the correct typed pointer; no program instruction is created or deleted.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi inspect"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The checked pointer refers to the existing PHI shown in both listings.",
+          "irComparison": true
         }
       ],
-      "words": 495,
+      "words": 730,
       "quiz": {
         "q": "Does a successful dyn_cast used only as an if condition retype I?",
         "choices": [
@@ -795,9 +945,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Trace both outcomes of the condition. Which store executes? What does join load? Why must changing IR invalidate cached analyses?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input: the original phi.ll diamond. Output: PHI demotion only; there is no dispatcher yet.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: entry gets one value slot, left and right store their incoming constants, join loads the selected value, and the PHI is deleted.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: On the left path the load returns 10; on the right path it returns 20. The original branches are unchanged.",
+          "irComparison": true
         }
       ],
-      "words": 772,
+      "words": 1036,
       "quiz": {
         "q": "What does demoting the PHI in the diamond preserve?",
         "choices": [
@@ -962,9 +1162,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Find the defining instruction and a use in a different block. Why does a fresh traversal have to happen after PHI demotion rather than before it?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input here is already after PHI demotion of loop.ll. This lesson discovers remaining cross-block results without demoting them.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. Collection leaves the program exactly as shown. In particular, the load of the loop variable is still defined in header and used in body/exit.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Trace the loaded value into the comparison, increment, and return. The earlier PHI is gone but the cross-block use remains.",
+          "irComparison": true
         }
       ],
-      "words": 769,
+      "words": 1086,
       "quiz": {
         "q": "Why can a PHI-free function still need preparation?",
         "choices": [
@@ -1137,9 +1387,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why does ret i32 %x have void instruction type? Why does checking I.getOperand(0)->getType() answer a different question?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The void-result filter changes which objects enter the candidate list. It does not erase void operations.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. Stores and branch/return effects remain in the output. They are excluded from a worklist of result values because they have no result to transport.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Distinguish the value produced by load from the effect of store and the control transfer of br.",
+          "irComparison": true
         }
       ],
-      "words": 450,
+      "words": 762,
       "quiz": {
         "q": "What is the result type of the instruction ret i32 %x?",
         "choices": [
@@ -1277,9 +1577,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why would skipping only void instructions leave alloca in consideration? When would you choose dyn_cast instead of isa?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The alloca filter keeps the storage foundation out of the ordinary-result worklist.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. The entry allocation stays in place and its pointer remains available to stores and loads. Filtering is not another transformation.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The alloca result is a ptr even though the slot stores i32; its existence must dominate all accesses.",
+          "irComparison": true
         }
       ],
-      "words": 430,
+      "words": 735,
       "quiz": {
         "q": "Why does the ordinary value worklist exclude an entry alloca?",
         "choices": [
@@ -1399,9 +1749,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why is &I the right type for this vector but not the PHI vector? Why must success in the eligibility checker and preservation information remain separate decisions?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This complete cross_block module has zero PHIs but has a value used in another block. At the collection checkpoint it stays unchanged.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. Removing the premature return allows sum to be discovered. Actual memory transport is added in lesson 9.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — cross original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @cross_block(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  br label %exit\n\nexit:                                             ; preds = %entry\n  ret i32 %sum\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — cross inspect"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @cross_block(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  br label %exit\n\nexit:                                             ; preds = %entry\n  ret i32 %sum\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: sum is defined by add in entry and directly returned from exit, so a zero PHI count is not an empty preparation plan.",
+          "irComparison": true
         }
       ],
-      "words": 484,
+      "words": 689,
       "quiz": {
         "q": "At the collection-only checkpoint, does a nonempty escapingValues list itself mean IR changed?",
         "choices": [
@@ -1530,9 +1930,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Explain what *value does here, why phi previously needed no dereference, and why the vector is a worklist rather than an owner of LLVM instructions."
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This pair illustrates the intended helper effect whose C++ signature you are reading. It is the next mutation stage, not a second demotion call to add here.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The add remains, a slot stores its result, and exit returns a loaded value instead of directly naming sum.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — cross original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @cross_block(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  br label %exit\n\nexit:                                             ; preds = %entry\n  ret i32 %sum\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — cross prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @cross_block(i32 %x) {\nentry:\n  %sum.reg2mem = alloca i32, align 4\n  %sum = add i32 %x, 1\n  store i32 %sum, ptr %sum.reg2mem, align 4\n  br label %exit\n\nexit:                                             ; preds = %entry\n  %sum.reload = load i32, ptr %sum.reg2mem, align 4\n  ret i32 %sum.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Passing *value to Instruction& refers to the existing add instruction; it does not evaluate x + 1 in the compiler process.",
+          "irComparison": true
         }
       ],
-      "words": 482,
+      "words": 708,
       "quiz": {
         "q": "escapingValues stores Instruction*. What does the first DemoteRegToStack parameter require?",
         "choices": [
@@ -1657,9 +2107,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Which transformation ran if phis is empty but escapingValues is not? Why must the final preservation result be none() in that case?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input: PHIs have already been demoted. Output: the remaining escaping ordinary results are now demoted as well.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: A second slot carries the header load’s result to body and exit. Local reloads replace those direct cross-block uses; the arithmetic and branches remain.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i.reload, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %i.reload.reg2mem = alloca i32, align 4\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  store i32 %i.reload, ptr %i.reload.reg2mem, align 4\n  %i.reload.reload = load i32, ptr %i.reload.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %i.reload.reload1 = load i32, ptr %i.reload.reg2mem, align 4\n  %next = add i32 %i.reload.reload1, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %header\n  %i.reload.reload2 = load i32, ptr %i.reload.reg2mem, align 4\n  ret i32 %i.reload.reload2\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The extra memory operations transport a value, not another control decision. Stores must still happen before the corresponding runtime reads.",
+          "irComparison": true
         }
       ],
-      "words": 534,
+      "words": 882,
       "quiz": {
         "q": "After ordinary-value demotion, what must the final rewrite still preserve?",
         "choices": [
@@ -1814,9 +2314,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: For x=4, what is stored and what is returned? Which object is the pointer, which is the i32, and which is just C++ bookkeeping?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This is the complete module behind the ordinary-value trace. It does not yet contain state storage or a dispatcher.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The calculation sum = x + 1 stays in entry; a store and exit-side load replace only its cross-block transport.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — cross original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @cross_block(i32 %x) {\nentry:\n  %sum = add i32 %x, 1\n  br label %exit\n\nexit:                                             ; preds = %entry\n  ret i32 %sum\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — cross prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @cross_block(i32 %x) {\nentry:\n  %sum.reg2mem = alloca i32, align 4\n  %sum = add i32 %x, 1\n  store i32 %sum, ptr %sum.reg2mem, align 4\n  br label %exit\n\nexit:                                             ; preds = %entry\n  %sum.reload = load i32, ptr %sum.reg2mem, align 4\n  ret i32 %sum.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: For x = 4, the add computes 5, the slot receives 5, and exit loads and returns 5.",
+          "irComparison": true
         }
       ],
-      "words": 650,
+      "words": 866,
       "quiz": {
         "q": "Does the alloca result contain the saved integer directly?",
         "choices": [
@@ -1984,9 +2534,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why does each path load the right value? Why can PHI demotion still leave a new load result used outside its defining block, as in loop.ll?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This is the complete module behind the predecessor-specific PHI trace.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The executed left or right path writes its own incoming value into the entry slot; join reads it. The PHI itself disappears.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi phi"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: There are two possible stores in the IR, but only the chosen incoming path executes before join.",
+          "irComparison": true
         }
       ],
-      "words": 685,
+      "words": 942,
       "quiz": {
         "q": "What replaces the PHI’s incoming-edge selection in the simple diamond?",
         "choices": [
@@ -2151,9 +2751,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why are a vector and a map both useful? Why does entry not get a state? Why can state zero be an incorrect universal initialization value for a conditional entry?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input and output are the fully prepared diamond. State numbering has not inserted any state instructions yet.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. The C++ tables assign left → 0, right → 1, join → 2 without changing the module. Entry is deliberately excluded.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: These numbers describe existing block identities; no switch can use them until the next construction stage.",
+          "irComparison": true
         }
       ],
-      "words": 581,
+      "words": 864,
       "quiz": {
         "q": "Why preserve the existing entry as setup?",
         "choices": [
@@ -2304,9 +2954,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why is copying a pointer element okay here even though for (auto BB : F) would try to copy a noncopyable block?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Fixing map-key and insertion syntax repairs the host C++ state table.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. Correct addresses and unique ID associations do not rename, move, or rewrite any LLVM block at this checkpoint.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: left/right/join are the same objects whose addresses become keys; the map is not part of emitted IR.",
+          "irComparison": true
         }
       ],
-      "words": 580,
+      "words": 855,
       "quiz": {
         "q": "Which value belongs in a DenseMap<BasicBlock*, unsigned> key?",
         "choices": [
@@ -2499,9 +3199,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Which block executes the allocation? Why is a switch destination not a substitute for that destination block’s own terminator? Why must new blocks not enter stateBlocks?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input: prepared diamond. Output: dispatcher construction only, still deliberately disconnected.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: entry gains ms.state; dispatch gains a load and switch; invalid ends in unreachable. Original entry and state-block branches still follow their old destinations.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi dispatch"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %ms.dispatch, %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %ms.dispatch, %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %ms.dispatch, %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The preds annotation for ms.dispatch is empty. Its state load is not executed yet, so this is valid construction evidence rather than a complete flattener.",
+          "irComparison": true
         }
       ],
-      "words": 941,
+      "words": 1269,
       "quiz": {
         "q": "Why is a valid but disconnected dispatcher only an intermediate checkpoint?",
         "choices": [
@@ -2618,9 +3368,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Distinguish the pointer variable, the object it identifies, and its IR name. Which problem belongs to the C++ compiler and which to the LLVM verifier?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This pair shows the intended valid output once block-variable syntax and the missing invalid terminator are fixed. The invalid C++ draft has no successful LLVM output to compare.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The actual block name is a label; the C++ pointer is a handle. The emitted invalid block is explicitly terminated.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi dispatch"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %ms.dispatch, %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %ms.dispatch, %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %ms.dispatch, %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: ms.invalid is reached by the dispatcher’s default edge and ends in unreachable; its spelling alone gives it no behavior.",
+          "irComparison": true
         }
       ],
-      "words": 423,
+      "words": 760,
       "quiz": {
         "q": "What is \"ms.dispatch\" in BasicBlock::Create(..., \"ms.dispatch\", &F)?",
         "choices": [
@@ -2785,9 +3585,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why must the old branch stay alive until replacements are emitted? Why does a conditional entry require more than storing the first state ID?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input: prepared loop with a disconnected dispatcher. Output: only the original unconditional entry edge is translated.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: entry stores state 0 for header and branches to dispatch. The original header/body loop edges remain direct; this is a first-hop checkpoint.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop dispatch"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %ms.state = alloca i32, align 4\n  %i.reload.reg2mem = alloca i32, align 4\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  br label %header\n\nheader:                                           ; preds = %ms.dispatch, %body, %entry\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  store i32 %i.reload, ptr %i.reload.reg2mem, align 4\n  %i.reload.reload = load i32, ptr %i.reload.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %ms.dispatch, %header\n  %i.reload.reload1 = load i32, ptr %i.reload.reg2mem, align 4\n  %next = add i32 %i.reload.reload1, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %ms.dispatch, %header\n  %i.reload.reload2 = load i32, ptr %i.reload.reg2mem, align 4\n  ret i32 %i.reload.reload2\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %header\n    i32 1, label %body\n    i32 2, label %exit\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop entry"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %ms.state = alloca i32, align 4\n  %i.reload.reg2mem = alloca i32, align 4\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nheader:                                           ; preds = %ms.dispatch, %body\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  store i32 %i.reload, ptr %i.reload.reg2mem, align 4\n  %i.reload.reload = load i32, ptr %i.reload.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload.reload, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %ms.dispatch, %header\n  %i.reload.reload1 = load i32, ptr %i.reload.reg2mem, align 4\n  %next = add i32 %i.reload.reload1, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  br label %header\n\nexit:                                             ; preds = %ms.dispatch, %header\n  %i.reload.reload2 = load i32, ptr %i.reload.reg2mem, align 4\n  ret i32 %i.reload.reload2\n\nms.dispatch:                                      ; preds = %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %header\n    i32 1, label %body\n    i32 2, label %exit\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The state write now precedes the dispatcher load. Follow entry → dispatch → header before tracing the original loop.",
+          "irComparison": true
         }
       ],
-      "words": 1039,
+      "words": 1519,
       "quiz": {
         "q": "At this checkpoint, which original branches have been redirected?",
         "choices": [
@@ -2943,9 +3793,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Name a source feature rejected by this prototype and the invariant the rejection protects. Why must every rejection happen before the first demotion?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This valid function contains a variable-size alloca. The stricter guard rejects it before preparation or construction.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. The output is identical: no partial spills, state slot, or new edges. Being valid LLVM IR is separate from being supported by this pass.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — dynamic original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @dynamic(i32 %n) {\nentry:\n  %storage = alloca i8, i32 %n, align 1\n  br label %done\n\ndone:                                             ; preds = %entry\n  ret i32 %n\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — dynamic full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @dynamic(i32 %n) {\nentry:\n  %storage = alloca i8, i32 %n, align 1\n  br label %done\n\ndone:                                             ; preds = %entry\n  ret i32 %n\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The allocation count is n, not a constant static entry allocation. The refusal is intentional, not a verifier failure.",
+          "irComparison": true
         }
       ],
-      "words": 942,
+      "words": 1148,
       "quiz": {
         "q": "Can you safely hoist every non-entry alloca into entry?",
         "choices": [
@@ -3074,9 +3974,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Which responsibilities remain in the pass, which in eligibility, and which in the builder?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This compares the monolithic complete reference with the same algorithm behind StateMachineBuilder. It is a C++ responsibility split, not a new IR transformation.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The program is unchanged at this checkpoint. The helper boundary does not add another dispatcher or change any state choice. This is the final-shape reference, not an intermediate scaffold to run.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\njoin:                                             ; preds = %ms.dispatch\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %right, %left, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\njoin:                                             ; preds = %ms.dispatch\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %right, %left, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: The builder owns graph construction conceptually; LLVM still owns the function and blocks shown here.",
+          "irComparison": true
         }
       ],
-      "words": 517,
+      "words": 950,
       "quiz": {
         "q": "Why snapshot terminators before creating new blocks?",
         "choices": [
@@ -3222,9 +4172,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: How would a true/false state swap pass verify and still compute the wrong answer?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This focused example translates the conditional entry only, applying the select/store/branch case from this lesson. The state-block branches are left direct for visibility.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The original br i1 becomes select(condition, 0, 1), a state store, and an unconditional edge to dispatch. The two destination blocks still represent the same true/false outcomes.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi dispatch"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %ms.dispatch, %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %ms.dispatch, %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %ms.dispatch, %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi conditional entry"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %ms.dispatch, %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: With true, select chooses left’s ID 0; with false it chooses right’s ID 1. Swapping these constants would verify but compute the wrong result.",
+          "irComparison": true
         }
       ],
-      "words": 527,
+      "words": 929,
       "quiz": {
         "q": "What does CreateSelect return here?",
         "choices": [
@@ -3365,9 +4365,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why must default be initialized first? Why must the compare operands use the original switch type?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The original switch is in entry; its destination blocks return directly. This example isolates lowering that switch while retaining the dispatcher switch.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The next state starts as the default ID, comparisons test each original case value, and chained selects choose a matching destination ID before the store.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — switch dispatch"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @select_case(i32 %value) {\nentry:\n  %ms.state = alloca i32, align 4\n  switch i32 %value, label %other [\n    i32 0, label %zero\n    i32 1, label %one\n  ]\n\nzero:                                             ; preds = %ms.dispatch, %entry\n  ret i32 10\n\none:                                              ; preds = %ms.dispatch, %entry\n  ret i32 20\n\nother:                                            ; preds = %ms.dispatch, %entry\n  ret i32 -1\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %zero\n    i32 1, label %one\n    i32 2, label %other\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — switch switch entry"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @select_case(i32 %value) {\nentry:\n  %ms.state = alloca i32, align 4\n  %0 = icmp eq i32 %value, 0\n  %ms.next = select i1 %0, i32 0, i32 2\n  %1 = icmp eq i32 %value, 1\n  %ms.next1 = select i1 %1, i32 1, i32 %ms.next\n  store i32 %ms.next1, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nzero:                                             ; preds = %ms.dispatch\n  ret i32 10\n\none:                                              ; preds = %ms.dispatch\n  ret i32 20\n\nother:                                            ; preds = %ms.dispatch\n  ret i32 -1\n\nms.dispatch:                                      ; preds = %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %zero\n    i32 1, label %one\n    i32 2, label %other\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Inputs 0, 1, and 8 must still return 10, 20, and -1. Only the dispatcher’s switch survives in the after module.",
+          "irComparison": true
         }
       ],
-      "words": 526,
+      "words": 894,
       "quiz": {
         "q": "Can two different switch case constants map to the same state?",
         "choices": [
@@ -3517,9 +4567,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Which terminator is intentionally never in the snapshot? Why does the helper use a fatal internal-contract error rather than partially returning success?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Input: value preparation is complete but original branches remain. Output: the full builder rewrites every original non-terminal transition.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: entry chooses a state; left and right store join’s state and return to dispatch; join keeps its return. dispatch and invalid are appended once.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi prepare"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %value.reg2mem = alloca i32, align 4\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  store i32 10, ptr %value.reg2mem, align 4\n  br label %join\n\nright:                                            ; preds = %entry\n  store i32 20, ptr %value.reg2mem, align 4\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\njoin:                                             ; preds = %ms.dispatch\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %right, %left, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Every live dispatcher visit follows a state store naming the next original destination. The prepared value slot and state slot have different jobs.",
+          "irComparison": true
         }
       ],
-      "words": 767,
+      "words": 1127,
       "quiz": {
         "q": "Which switch must remain after rewriting original switches?",
         "choices": [
@@ -3650,9 +4750,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Which helper owns policy? Which phase changes data flow? Which creates CFG edges? What exactly does the final bool summarize?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This pair shows the complete orchestrated pipeline: guard, PHI demotion, ordinary-result demotion, then graph construction.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: Both value-transport slots and the state slot are present; all original branch transitions route through dispatch. The terminal return stays in exit.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i = phi i32 [ 0, %entry ], [ %next, %body ]\n  %continue = icmp slt i32 %i, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i, 1\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %ms.state = alloca i32, align 4\n  %i.reload.reg2mem = alloca i32, align 4\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nheader:                                           ; preds = %ms.dispatch\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  store i32 %i.reload, ptr %i.reload.reg2mem, align 4\n  %i.reload.reload = load i32, ptr %i.reload.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload.reload, %limit\n  %ms.next = select i1 %continue, i32 1, i32 2\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nbody:                                             ; preds = %ms.dispatch\n  %i.reload.reload1 = load i32, ptr %i.reload.reg2mem, align 4\n  %next = add i32 %i.reload.reload1, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nexit:                                             ; preds = %ms.dispatch\n  %i.reload.reload2 = load i32, ptr %i.reload.reg2mem, align 4\n  ret i32 %i.reload.reload2\n\nms.dispatch:                                      ; preds = %body, %header, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %header\n    i32 1, label %body\n    i32 2, label %exit\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Compare this final loop against lesson 16’s first-hop output: header and body now return to dispatch too.",
+          "irComparison": true
         }
       ],
-      "words": 585,
+      "words": 981,
       "quiz": {
         "q": "Why can changed = changed || build(F) be wrong?",
         "choices": [
@@ -3772,9 +4922,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: What would a correct-looking but unreachable dispatcher prove? Why must instructions and edges both be inspected?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Structural inspection compares the original graph with the actual complete transformed graph.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The dispatcher is reached from entry and both non-terminal state paths; join’s old predecessor-based PHI has already been replaced.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  br i1 %condition, label %left, label %right\n\nleft:                                             ; preds = %entry\n  br label %join\n\nright:                                            ; preds = %entry\n  br label %join\n\njoin:                                             ; preds = %right, %left\n  %value = phi i32 [ 10, %left ], [ 20, %right ]\n  ret i32 %value\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\njoin:                                             ; preds = %ms.dispatch\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %right, %left, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Follow branch operands and switch destinations, rather than assuming a block with a familiar name is live.",
+          "irComparison": true
         }
       ],
-      "words": 447,
+      "words": 774,
       "quiz": {
         "q": "Does finding the text ms.dispatch prove flattening is active?",
         "choices": [
@@ -3903,9 +5103,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why is -disable-O0-optnone present? Why transform the function module and link a common driver afterward?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "These are the actual standalone kernel modules from the documented discount.c frontend pipeline, before and after the complete pass. The untransformed argument/printing driver is intentionally outside both modules.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: The original O0 kernel already uses entry allocas; flattening adds the state protocol and reroutes branches/switches. Declarations, attributes, and metadata required by each full module are included.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — discount original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\n; Function Attrs: noinline nounwind uwtable\ndefine dso_local i32 @calculate_discount(i32 noundef %0, i32 noundef %1) #0 {\n  %3 = alloca i32, align 4\n  %4 = alloca i32, align 4\n  %5 = alloca i32, align 4\n  %6 = alloca i32, align 4\n  store i32 %0, ptr %4, align 4\n  store i32 %1, ptr %5, align 4\n  %7 = load i32, ptr %4, align 4\n  %8 = icmp slt i32 %7, 0\n  br i1 %8, label %9, label %10\n\n9:                                                ; preds = %2\n  store i32 0, ptr %3, align 4\n  br label %23\n\n10:                                               ; preds = %2\n  %11 = load i32, ptr %5, align 4\n  switch i32 %11, label %15 [\n    i32 0, label %12\n    i32 1, label %13\n    i32 2, label %14\n  ]\n\n12:                                               ; preds = %10\n  store i32 0, ptr %6, align 4\n  br label %16\n\n13:                                               ; preds = %10\n  store i32 5, ptr %6, align 4\n  br label %16\n\n14:                                               ; preds = %10\n  store i32 10, ptr %6, align 4\n  br label %16\n\n15:                                               ; preds = %10\n  store i32 15, ptr %6, align 4\n  br label %16\n\n16:                                               ; preds = %15, %14, %13, %12\n  %17 = load i32, ptr %4, align 4\n  %18 = load i32, ptr %4, align 4\n  %19 = load i32, ptr %6, align 4\n  %20 = mul nsw i32 %18, %19\n  %21 = sdiv i32 %20, 100\n  %22 = sub nsw i32 %17, %21\n  store i32 %22, ptr %3, align 4\n  br label %23\n\n23:                                               ; preds = %16, %9\n  %24 = load i32, ptr %3, align 4\n  ret i32 %24\n}\n\nattributes #0 = { noinline nounwind uwtable \"frame-pointer\"=\"all\" \"min-legal-vector-width\"=\"0\" \"no-trapping-math\"=\"true\" \"stack-protector-buffer-size\"=\"8\" \"target-cpu\"=\"x86-64\" \"target-features\"=\"+cmov,+cx8,+fxsr,+mmx,+sse,+sse2,+x87\" \"tune-cpu\"=\"generic\" }\n\n!llvm.module.flags = !{!0, !1, !2, !3}\n!llvm.ident = !{!4}\n\n!0 = !{i32 8, !\"PIC Level\", i32 2}\n!1 = !{i32 7, !\"PIE Level\", i32 2}\n!2 = !{i32 7, !\"uwtable\", i32 2}\n!3 = !{i32 7, !\"frame-pointer\", i32 2}\n!4 = !{!\"clang version 23.1.5 (https://github.com/conda-forge/clangdev-feedstock 30fd4e93e83162141ae372db80ef9db7baa31094)\"}"
+            },
+            {
+              "type": "heading",
+              "text": "After — discount full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\n; Function Attrs: noinline nounwind uwtable\ndefine dso_local i32 @calculate_discount(i32 noundef %0, i32 noundef %1) #0 {\n  %ms.state = alloca i32, align 4\n  %3 = alloca i32, align 4\n  %4 = alloca i32, align 4\n  %5 = alloca i32, align 4\n  %6 = alloca i32, align 4\n  store i32 %0, ptr %4, align 4\n  store i32 %1, ptr %5, align 4\n  %7 = load i32, ptr %4, align 4\n  %8 = icmp slt i32 %7, 0\n  %ms.next = select i1 %8, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n9:                                                ; preds = %ms.dispatch\n  store i32 0, ptr %3, align 4\n  store i32 7, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n10:                                               ; preds = %ms.dispatch\n  %11 = load i32, ptr %5, align 4\n  %12 = icmp eq i32 %11, 0\n  %ms.next1 = select i1 %12, i32 2, i32 5\n  %13 = icmp eq i32 %11, 1\n  %ms.next2 = select i1 %13, i32 3, i32 %ms.next1\n  %14 = icmp eq i32 %11, 2\n  %ms.next3 = select i1 %14, i32 4, i32 %ms.next2\n  store i32 %ms.next3, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n15:                                               ; preds = %ms.dispatch\n  store i32 0, ptr %6, align 4\n  store i32 6, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n16:                                               ; preds = %ms.dispatch\n  store i32 5, ptr %6, align 4\n  store i32 6, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n17:                                               ; preds = %ms.dispatch\n  store i32 10, ptr %6, align 4\n  store i32 6, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n18:                                               ; preds = %ms.dispatch\n  store i32 15, ptr %6, align 4\n  store i32 6, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n19:                                               ; preds = %ms.dispatch\n  %20 = load i32, ptr %4, align 4\n  %21 = load i32, ptr %4, align 4\n  %22 = load i32, ptr %6, align 4\n  %23 = mul nsw i32 %21, %22\n  %24 = sdiv i32 %23, 100\n  %25 = sub nsw i32 %20, %24\n  store i32 %25, ptr %3, align 4\n  store i32 7, ptr %ms.state, align 4\n  br label %ms.dispatch\n\n26:                                               ; preds = %ms.dispatch\n  %27 = load i32, ptr %3, align 4\n  ret i32 %27\n\nms.dispatch:                                      ; preds = %19, %18, %17, %16, %15, %10, %9, %2\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %9\n    i32 1, label %10\n    i32 2, label %15\n    i32 3, label %16\n    i32 4, label %17\n    i32 5, label %18\n    i32 6, label %19\n    i32 7, label %26\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}\n\nattributes #0 = { noinline nounwind uwtable \"frame-pointer\"=\"all\" \"min-legal-vector-width\"=\"0\" \"no-trapping-math\"=\"true\" \"stack-protector-buffer-size\"=\"8\" \"target-cpu\"=\"x86-64\" \"target-features\"=\"+cmov,+cx8,+fxsr,+mmx,+sse,+sse2,+x87\" \"tune-cpu\"=\"generic\" }\n\n!llvm.module.flags = !{!0, !1, !2, !3}\n!llvm.ident = !{!4}\n\n!0 = !{i32 8, !\"PIC Level\", i32 2}\n!1 = !{i32 7, !\"PIE Level\", i32 2}\n!2 = !{i32 7, !\"uwtable\", i32 2}\n!3 = !{i32 7, !\"frame-pointer\", i32 2}\n!4 = !{!\"clang version 23.1.5 (https://github.com/conda-forge/clangdev-feedstock 30fd4e93e83162141ae372db80ef9db7baa31094)\"}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Trace a negative amount to its return path and a positive amount through level selection. Compare both executables with the same driver and backend settings.",
+          "irComparison": true
         }
       ],
-      "words": 602,
+      "words": 1598,
       "quiz": {
         "q": "Why use the same common IR for both builds?",
         "choices": [
@@ -4046,9 +5296,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why can preserving SSA validity still produce a wrong value when a hand-written PHI lowering overwrites an old incoming value?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This complete swap-loop fixture fills in the counter and exits missing from the earlier conceptual PHI fragment. It tests interacting loop-carried choices.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: Three PHIs are prepared before dispatch rewriting. The next iteration must receive old b as a and old a as b, without sequential overwriting losing an old value.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — parallel original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @swap_loop(i32 %count) {\nentry:\n  br label %loop\n\nloop:                                             ; preds = %latch, %entry\n  %a = phi i32 [ 1, %entry ], [ %b, %latch ]\n  %b = phi i32 [ 2, %entry ], [ %a, %latch ]\n  %i = phi i32 [ 0, %entry ], [ %next, %latch ]\n  %more = icmp slt i32 %i, %count\n  br i1 %more, label %latch, label %exit\n\nlatch:                                            ; preds = %loop\n  %next = add i32 %i, 1\n  br label %loop\n\nexit:                                             ; preds = %loop\n  %answer = sub i32 %a, %b\n  ret i32 %answer\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — parallel full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @swap_loop(i32 %count) {\nentry:\n  %ms.state = alloca i32, align 4\n  %a.reload.reg2mem = alloca i32, align 4\n  %b.reload.reg2mem = alloca i32, align 4\n  %i.reload.reg2mem = alloca i32, align 4\n  %i.reg2mem = alloca i32, align 4\n  %b.reg2mem = alloca i32, align 4\n  %a.reg2mem = alloca i32, align 4\n  store i32 1, ptr %a.reg2mem, align 4\n  store i32 2, ptr %b.reg2mem, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nloop:                                             ; preds = %ms.dispatch\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  store i32 %i.reload, ptr %i.reload.reg2mem, align 4\n  %b.reload = load i32, ptr %b.reg2mem, align 4\n  store i32 %b.reload, ptr %b.reload.reg2mem, align 4\n  %a.reload = load i32, ptr %a.reg2mem, align 4\n  store i32 %a.reload, ptr %a.reload.reg2mem, align 4\n  %i.reload.reload = load i32, ptr %i.reload.reg2mem, align 4\n  %more = icmp slt i32 %i.reload.reload, %count\n  %ms.next = select i1 %more, i32 1, i32 2\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nlatch:                                            ; preds = %ms.dispatch\n  %i.reload.reload1 = load i32, ptr %i.reload.reg2mem, align 4\n  %next = add i32 %i.reload.reload1, 1\n  %b.reload.reload2 = load i32, ptr %b.reload.reg2mem, align 4\n  store i32 %b.reload.reload2, ptr %a.reg2mem, align 4\n  %a.reload.reload = load i32, ptr %a.reload.reg2mem, align 4\n  store i32 %a.reload.reload, ptr %b.reg2mem, align 4\n  store i32 %next, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nexit:                                             ; preds = %ms.dispatch\n  %b.reload.reload = load i32, ptr %b.reload.reg2mem, align 4\n  %a.reload.reload3 = load i32, ptr %a.reload.reg2mem, align 4\n  %answer = sub i32 %a.reload.reload3, %b.reload.reload\n  ret i32 %answer\n\nms.dispatch:                                      ; preds = %latch, %loop, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %loop\n    i32 1, label %latch\n    i32 2, label %exit\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Counts 0, 1, and 2 return -1, 1, and -1. The generated helpers preserve the parallel incoming-value meaning.",
+          "irComparison": true
         }
       ],
-      "words": 509,
+      "words": 1061,
       "quiz": {
         "q": "What does a two-latch fixture test?",
         "choices": [
@@ -4156,9 +5456,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Why can stronger optimization improve runtime while weakening the intended obfuscation structure?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This pair is a different boundary: complete MiniShield output versus actual subsequent default<O2> output on LLVM 23.1.5. It is not another MiniShield rewrite.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: O2 eliminates the dispatcher and stack slots for this tiny fixture, reducing the answer to a direct select. The shown optimized module is captured output, not an invented expected shape.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — phi full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @merge(i1 %condition) {\nentry:\n  %ms.state = alloca i32, align 4\n  %value.reg2mem = alloca i32, align 4\n  %ms.next = select i1 %condition, i32 0, i32 1\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nleft:                                             ; preds = %ms.dispatch\n  store i32 10, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nright:                                            ; preds = %ms.dispatch\n  store i32 20, ptr %value.reg2mem, align 4\n  store i32 2, ptr %ms.state, align 4\n  br label %ms.dispatch\n\njoin:                                             ; preds = %ms.dispatch\n  %value.reload = load i32, ptr %value.reg2mem, align 4\n  ret i32 %value.reload\n\nms.dispatch:                                      ; preds = %right, %left, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %left\n    i32 1, label %right\n    i32 2, label %join\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — phi optimized"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "; Function Attrs: mustprogress nofree norecurse nosync nounwind willreturn memory(none)\ndefine range(i32 10, 21) i32 @merge(i1 %condition) local_unnamed_addr #0 {\nentry:\n  %spec.select = select i1 %condition, i32 10, i32 20\n  ret i32 %spec.select\n}\n\nattributes #0 = { mustprogress nofree norecurse nosync nounwind willreturn memory(none) }"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Behavior can agree even when the intended flattened structure no longer survives. Inspect final code before claiming a final-artifact flattening demonstration.",
+          "irComparison": true
         }
       ],
-      "words": 456,
+      "words": 804,
       "quiz": {
         "q": "Does an unreachable default provide safe error recovery?",
         "choices": [
@@ -4253,9 +5603,59 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: Which unchecked item currently limits your confidence most, and what concrete experiment would address it?"
+        },
+        {
+          "type": "heading",
+          "text": "LLVM program before and after this checkpoint",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Use the entire loop pair to review the Day 2 exit criteria. This is a reference endpoint, not a claim that the learner implementation has reached it.",
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "What changes: Preparation and construction both contribute visible changes. No single grep for switch proves that all transitions or values are correct.",
+          "irComparison": true
+        },
+        {
+          "type": "deep",
+          "lens": "llvm",
+          "title": "Read the complete before-and-after LLVM modules",
+          "blocks": [
+            {
+              "type": "heading",
+              "text": "Before — loop original"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  br label %header\n\nheader:                                           ; preds = %body, %entry\n  %i = phi i32 [ 0, %entry ], [ %next, %body ]\n  %continue = icmp slt i32 %i, %limit\n  br i1 %continue, label %body, label %exit\n\nbody:                                             ; preds = %header\n  %next = add i32 %i, 1\n  br label %header\n\nexit:                                             ; preds = %header\n  ret i32 %i\n}"
+            },
+            {
+              "type": "heading",
+              "text": "After — loop full"
+            },
+            {
+              "type": "code",
+              "language": "llvm",
+              "text": "define i32 @count_to(i32 %limit) {\nentry:\n  %ms.state = alloca i32, align 4\n  %i.reload.reg2mem = alloca i32, align 4\n  %i.reg2mem = alloca i32, align 4\n  store i32 0, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nheader:                                           ; preds = %ms.dispatch\n  %i.reload = load i32, ptr %i.reg2mem, align 4\n  store i32 %i.reload, ptr %i.reload.reg2mem, align 4\n  %i.reload.reload = load i32, ptr %i.reload.reg2mem, align 4\n  %continue = icmp slt i32 %i.reload.reload, %limit\n  %ms.next = select i1 %continue, i32 1, i32 2\n  store i32 %ms.next, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nbody:                                             ; preds = %ms.dispatch\n  %i.reload.reload1 = load i32, ptr %i.reload.reg2mem, align 4\n  %next = add i32 %i.reload.reload1, 1\n  store i32 %next, ptr %i.reg2mem, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nexit:                                             ; preds = %ms.dispatch\n  %i.reload.reload2 = load i32, ptr %i.reload.reg2mem, align 4\n  ret i32 %i.reload.reload2\n\nms.dispatch:                                      ; preds = %body, %header, %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %header\n    i32 1, label %body\n    i32 2, label %exit\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+            },
+            {
+              "type": "paragraph",
+              "text": "Both listings are complete LLVM modules defining the example function, not fragments with omitted blocks. They have no main driver unless one is explicitly included; opt can parse and verify them, while execution requires a caller. Names, alignments, and printer annotations may differ in your own output. These listings were generated and verified with the isolated LLVM 23.1.5 teaching references, not copied from an assumed completed learner implementation."
+            }
+          ],
+          "irComparison": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Follow the values and edges: Identify each slot’s role, every state store, both loop outcomes, and the terminal return before checking the corresponding evidence boxes.",
+          "irComparison": true
         }
       ],
-      "words": 390,
+      "words": 799,
       "quiz": {
         "q": "When should a Day 2 exit box be checked?",
         "choices": [
