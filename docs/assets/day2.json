@@ -7393,7 +7393,18 @@
         {
           "type": "checkpoint",
           "text": "Checkpoint: A header declaration alone should cause no LLVM program change. Explain why a static method needs no builder object, why Function& is mutable but borrowed, and why the declaration cannot supply a linked implementation by itself.",
-          "builderInterfaceWalkthrough": true
+          "builderInterfaceWalkthrough": true,
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "A non-static member is called through an object, and an object exists to hold state. `build` has no state: everything it needs arrives through `F`, and everything it computes (the entry block, the snapshots, the state IDs) is fresh per call and dies with it. A `this` pointing at zero bytes of state would only suggest a per-builder configuration that does not exist. `static` says the class is only the name that owns the function, so callers write `StateMachineBuilder::build(F)` without constructing anything. `FunctionEligibility::check` is static for the same reason; if a design had state to carry between calls, that would be the moment to make it non-static.",
+                "The reference copies nothing and owns nothing: it binds to the caller’s existing `Function`, whose lifetime belongs to the caller (ultimately the `Module` and `LLVMContext`). Mutability lives in the reference’s type, not in the object: `Function &` lets the body rewrite the CFG in place, while `check`’s `const Function &` forbids it. The same object can be reached read-only or read-write through different declarations.",
+                "A declaration is a promise about a symbol; the definition is the machine code. The compiler type-checks against the promise, but a real program also needs the linker to resolve the call: without the `.cpp` definition, linking fails with `undefined reference to 'minishield::StateMachineBuilder::build(llvm::Function&)'`. The header is the shared contract, included by many translation units that each compile only the promise; the `.cpp` is the single implementation, compiled once and linked into every consumer. A header no `.cpp` includes compiles to nothing, which is why `ninja: no work to do` was the honest report for the declaration-only step."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
