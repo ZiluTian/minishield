@@ -218,6 +218,24 @@ that behaves differently. That is why lesson 13's empty-diff check (the
 pass must leave the IR unchanged while it is a stub) and, later, real
 testing, are the actual safety nets.
 
+### Study-session walkthrough — separate the program being compiled from the pass doing the work
+
+The books were revised after the learner asked for beginner knowledge gaps to be filled. This replay connects the project’s tools before asking the reader to recognize their APIs. It is orientation, not an additional implementation checkpoint.
+
+Question for this replay: When I run opt, am I executing the C function, compiling the C++ pass, or transforming the LLVM program?
+
+```text
+your C++ pass sources → compiler/linker → libMiniShield.so
+LLVM input module + opt + that plugin → inspected or rewritten LLVM module
+LLVM module + backend + caller → an executable program
+```
+
+There are two programs to keep separate: the compiler-side plugin and the program described by its input IR. Printing a message in StatsPass executes inside opt; creating an LLVM add inserts a computation for the target program to execute later. A successful plugin build does not by itself run either a test input or the target function.
+
+Task: Small writing step: Point to one file belonging to the plugin and one file describing an input program. Identify the command responsible for each arrow.
+
+Checkpoint: Explain what opt -disable-output suppresses: it prevents writing the transformed module, not compiler-side diagnostic printing. Before writing a pass, be able to name which program each code example belongs to.
+
 0. Create the minishield Conda environment
 ==========================================
 
@@ -295,7 +313,24 @@ LIBRARY_PATH supplies link-time library search paths used by the compiler driver
 
 Checkpoint: distinguish these four operations: install the environment, activate the environment, configure the project with CMake, and build the project with Ninja. They are separate steps.
 
+### Study-session walkthrough — activation selects tools; the manifest describes their installation
 
+After the README was shortened, the learner asked how the minishield Conda environment was created. The useful distinction is the saved package recipe versus the state of a particular shell, not a need to recreate an already working environment.
+
+Question for this replay: What changes when I activate minishield, and why can a new terminal accidentally use different tools?
+
+```bash
+conda activate minishield
+command -v opt
+opt --version
+llvm-config --version
+```
+
+environment.yml records the named environment and its dependencies. Creating it installs packages; activation selects their paths for the current shell. Headers and libraries are development inputs, while executables such as opt and clang are tools you run. The project directory and its build directory are separate from the environment. LLVM headers, the compiler, and opt must belong to the compatible release used by the plugin.
+
+Task: Small writing step: Inspect the existing environment and tool versions first. Read the manifest entries before changing any package; do not create a second environment merely to repeat a successful setup.
+
+Checkpoint: Check that the selected opt/llvm-config report the intended LLVM 23 toolchain. When linking with this Conda setup, also set LIBRARY_PATH as the setup section explains; activation and compiler library search are distinct pieces of the configuration.
 
 1. Understand what CMake is configuring
 =======================================
@@ -684,7 +719,24 @@ Two more details from that snippet worth keeping:
   single top-level `CMakeLists.txt` and adds exactly one subdirectory later:
   `tests/`, for the standard CTest/GoogleTest setup.
 
+### Study-session walkthrough — give headers, linked symbols, and output paths different jobs
 
+An early request asked what target_include_directories, target_link_libraries, and set_target_properties do. These solve different problems even though all are attached to the same MiniShield target.
+
+Question for this replay: Why is finding an LLVM header not enough to produce a loadable plugin?
+
+```cmake
+target_include_directories(MiniShield PRIVATE ${LLVM_INCLUDE_DIRS})
+target_link_libraries(MiniShield PRIVATE LLVM)
+set_target_properties(MiniShield PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+```
+
+This CMake fragment belongs after target creation. Include paths help the C++ compiler find declarations while compiling source files. Linking resolves the LLVM functions/types’ out-of-line code through the imported LLVM library. The output-directory property chooses where the built module is placed; it does not find headers or register a pass. PRIVATE limits these usage requirements to this target in this initial module-only layout.
+
+Task: Small writing step: Explain each line against the error it could address: missing header, unresolved library symbol, or looking for the .so in the wrong directory. Keep the reusable-core changes for Day 3 separate.
+
+Checkpoint: Reconfigure after changing CMake and rebuild. Finding LLVMConfig.cmake discovers package information; it does not magically compile missing project .cpp files or teach opt a pipeline name.
 
 2. Generate the build instructions before trying to build
 =========================================================
@@ -765,6 +817,25 @@ Verified against this environment; each of these bit the actual build:
   harmless for a pass plugin: those libraries are already inside the shared
   `libLLVM-23.so`.
 
+### Study-session walkthrough — build.ninja comes from configuration, not from the build command
+
+The learner ran cmake --build build and received “loading build.ninja: No such file or directory.” The next question asked what created that file. This was a configure/generate prerequisite, not a Ninja instruction-count or source-code failure.
+
+Question for this replay: Which command creates the build instructions, and which command executes them?
+
+```bash
+cmake -G Ninja -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_COMPILER="$CONDA_PREFIX/bin/clang++-23" \
+  -DLLVM_DIR="$CONDA_PREFIX/lib/cmake/llvm"
+cmake --build build
+```
+
+Run from the project root with the environment active. -S selects source configuration and -B selects generated build state. -G chooses Ninja. The configure step reads CMakeLists and generates build.ninja only when it completes successfully. --build then invokes the configured build tool. A C++ compilation error occurs later and has a different remedy.
+
+Task: Small writing step: Run configuration first and resolve its first real failure before attempting the build. Do not create an empty build.ninja by hand.
+
+Checkpoint: The later “ninja: no work to do” message means the build graph considers its outputs up to date; it is not a test result. Run an opt smoke/verification command next rather than interpreting an unchanged build as proof of correct behavior.
 
 3. Split the plugin into an entry point and a pass
 ==================================================
@@ -823,6 +894,23 @@ Plugin.cpp also needed semicolons after the callback registration expression
 and the returned aggregate initializer. Read the compiler location and check
 the surrounding statement boundaries when diagnosing these syntax errors.
 
+### Study-session walkthrough — a header declaration, implementation, and plugin entry point are not interchangeable
+
+The learner asked how to define Plugin.cpp and FlatteningPass after CMake was ready. The session also found a declaration file named .cpp while includes requested .h, plus missing statement semicolons in the entry-point code.
+
+Question for this replay: Why does listing an implementation in CMake not replace including its class declaration?
+
+```text
+FlatteningPass.h   declares the pass class and its run() interface
+FlatteningPass.cpp defines that class’s run() behavior
+Plugin.cpp         exposes the plugin entry point and registers parsing callbacks
+```
+
+This is a file-role sketch. Each .cpp is compiled as a translation unit; it must see the declarations it uses through includes. The linker later combines compiled definitions. The plugin entry point returns LLVM’s version/name/registration information, while run() implements the per-function operation. Giving a declaration file the wrong name breaks the include contract before pass behavior is involved.
+
+Task: Small writing step: Write/check the header interface first, include it from both users, then supply exactly one matching method definition. Read compiler diagnostics around complete C++ statements and aggregate initializers.
+
+Checkpoint: A successful link establishes that referenced definitions were supplied. Loading the module and recognizing a pipeline name are subsequent checks. Keep those layers separate when locating the next error.
 
 4. Choose optional or required pass behavior explicitly
 =======================================================
@@ -884,6 +972,24 @@ If MiniShield must perform hardening even on `optnone` functions, use
 the pass may be skipped; it does not change which functions the flattening
 algorithm can safely handle or which analyses remain valid after `run()`.
 
+### Study-session walkthrough — required changes skipping behavior, not scheduling
+
+The learner compared OptionalPassInfoMixin, RequiredPassInfoMixin, and plain PassInfoMixin. This clarified a policy question: may LLVM skip the pass on a function such as one marked optnone? It did not remove the need to register or invoke it.
+
+Question for this replay: If StatsPass is required, why must I still give opt the minishield-stats pipeline name?
+
+```cpp
+class StatsPass : public llvm::RequiredPassInfoMixin<StatsPass> {
+public:
+    // The run() declaration belongs here.
+};
+```
+
+This is an interface fragment. The CRTP-style base receives the derived class type and supplies pass information/policy. In this LLVM installation plain PassInfoMixin retains optional behavior for compatibility; explicit optional/required bases state the intended policy more clearly. We chose a required statistics pass so diagnostic inspection can run even on optnone input; flattening remained optional.
+
+Task: Small writing step: Choose and explain the mixin for each pass. Leave parser registration and pipeline invocation as explicit separate work.
+
+Checkpoint: Use an optnone fixture to check skipping behavior once registration works. Do not treat “required” as meaning the pass is always present in every compiler pipeline, automatically loaded, or semantically necessary for the target program to run.
 
 5. Register the pass name that opt will recognize
 =================================================
@@ -1000,6 +1106,25 @@ Build the plugin:
 
 It lands at `build/libMiniShield.so`, where the `opt` commands point.
 
+### Study-session walkthrough — turn a user-facing pipeline string into a pass object
+
+The session separated defining a C++ class from making its spelling recognizable to opt. Registration is the bridge: the pipeline parser asks the plugin whether it understands a name, and the callback adds the corresponding pass object.
+
+Question for this replay: Where does the string minishield-stats become a call to StatsPass::run?
+
+```cpp
+if (Name == "minishield-stats") {
+    FPM.addPass(minishield::StatsPass());
+    return true;
+}
+return false;
+```
+
+This is a parsing-callback fragment, not a standalone function. Name is the string being parsed. FPM is the function pass manager that owns the scheduled pass instance. Returning true means this callback recognized the requested element; it is a C++ parser result, not a boolean computed by the target program. The callback must also have the correct installed LLVM signature.
+
+Task: Small writing step: Add one recognized name and ensure its declaration is included in Plugin.cpp. Rebuild the .so before loading it.
+
+Checkpoint: A typo in the command string, an unregistered name, or a stale plugin can all look like an unknown-pass failure. Loading the shared library successfully proves only that loading worked, not that this callback recognized the requested pipeline element.
 
 6. Run a small smoke input and distinguish validity from correctness
 ====================================================================
@@ -1033,6 +1158,24 @@ It does not prove that transformed code has the same behavior as the input.
 
 Observed error: function(minishield-flatten)] had an extra closing bracket.
 Pipeline syntax must be valid before LLVM can run any pass.
+
+### Study-session walkthrough — a balanced pipeline is checked before the pass runs
+
+After an up-to-date build, the learner asked how to verify it. The session then showed an invalid pipeline ending with function(minishield-flatten)] instead of matching parentheses. That parse failure happens before the pass can inspect a function.
+
+Question for this replay: What does verify establish, and why did a stray ] stop the command before any transformation?
+
+```bash
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/minishield-input.ll -o build/smoke-checked.ll
+```
+
+The shell quotes keep the pipeline as one argument. function(...) wraps a function-pass pipeline; the following comma schedules module verification. -S requests textual IR, and -o names generated output. verify checks IR rules such as typing, terminators, and dominance; it does not prove that the rewritten program returns the original answers.
+
+Task: Small writing step: Correct only the unmatched bracket/parenthesis first, then rerun the smoke command after a successful build.
+
+Checkpoint: Distinguish pipeline-parse failure, plugin-load failure, verifier failure, and wrong program results. A well-formed unchanged stub can pass verify, and a well-formed wrong transformation can too. The before/after example and later behavioral tests answer different questions.
 
 ### LLVM program before and after this checkpoint
 
@@ -1110,6 +1253,23 @@ implementation of the traversal.
 Checkpoint: compare the declaration with the later definition. Class name,
 namespace, parameter types, and return type must agree.
 
+### Study-session walkthrough — finish a small interface before solving its behavior
+
+The learner reported finishing StatsPass.h before proceeding. That checkpoint established the class/method interface; it did not mean the implementation, source list, and registration were already complete.
+
+Question for this replay: Which promise does the header make to Plugin.cpp and StatsPass.cpp?
+
+```cpp
+llvm::PreservedAnalyses run(
+    llvm::Function &F,
+    llvm::FunctionAnalysisManager &AM);
+```
+
+This public declaration belongs in the pass class. It says run borrows a mutable Function and an analysis manager and returns preservation information. It does not allocate a new function, define a traversal, or execute automatically. The out-of-line definition must agree in namespace, class name, parameter types, and return type. LLVM supplies the function when its manager runs the pass.
+
+Task: Small writing step: Check the declaration against the intended definition before adding counting logic. Include the header in the implementation and plugin source.
+
+Checkpoint: A header can compile in one file while another translation unit still lacks its include. The next integration lesson handles the observed namespace-member error and unknown pipeline name separately; neither should be “fixed” by duplicating the class definition in Plugin.cpp.
 
 8. Count blocks and instructions before classifying instructions
 ================================================================
@@ -1134,6 +1294,25 @@ has changed. Using const references makes the read-only intent visible.
 
 Checkpoint using phi.ll: merge has four blocks and five instructions:
 three branches, one PHI, and one return.
+
+### Study-session walkthrough — the function manager already chose the function
+
+The statistics implementation began with nested block/instruction traversal. The teaching broke counting away from classification so a wrong total could be located before adding opcode-specific cases.
+
+Question for this replay: Do I need another module-to-function loop inside a function pass, and does the range-for loop copy the LLVM objects?
+
+```cpp
+unsigned total = 0;
+for (const llvm::BasicBlock &BB : F)
+    for (const llvm::Instruction &I : BB)
+        ++total;
+```
+
+This fragment belongs inside run(). F is already the function selected by LLVM’s function pass manager. Each reference names an existing block or instruction without copying it. A const view is sufficient for counting because inspection should not mutate IR. Reset counters for each run() invocation so one function’s result does not accumulate into the next.
+
+Task: Small writing step: First report only the block total and instruction total. Hand-count phi.ll before adding any classification branch or switch.
+
+Checkpoint: The fixture has four blocks and five instructions. Count static instructions, not runtime visits: a loop can execute one static instruction many times. Printing diagnostics and incrementing C++ counters should leave canonical LLVM output unchanged.
 
 ### LLVM program before and after this checkpoint
 
@@ -1241,6 +1420,23 @@ from including FlatteningPass.h twice instead of including StatsPass.h.
 The compiler needs the declaration in this translation unit. CMake's source
 list supplies the implementation at link time; it does not replace includes.
 
+### Study-session walkthrough — diagnose runtime registration separately from compile-time visibility
+
+Two concrete errors occurred: opt reported unknown function pass minishield-stats, and the rebuild reported no StatsPass member in namespace minishield. The latter came from including FlatteningPass.h twice rather than including StatsPass.h.
+
+Question for this replay: Why can adding StatsPass.cpp to CMake still leave Plugin.cpp unable to name the class?
+
+```cpp
+#include "minishield/StatsPass.h"
+// Inside the registered parsing callback:
+FPM.addPass(minishield::StatsPass());
+```
+
+The include supplies a declaration while Plugin.cpp is compiled. Listing StatsPass.cpp as a target source supplies the compiled method definition later at link time. Parser registration teaches the loaded plugin a user-facing name. These are three separate connections; none substitutes for the others. A build failure may leave the previous .so on disk, so an old library can still load while lacking the new registration.
+
+Task: Small writing step: Check the include, target source list, and callback branch, then rebuild successfully before rerunning opt.
+
+Checkpoint: Classify the failure by stage: compiler visibility, linker definition, loader, or parser. Do not read an unknown-pass error from a stale .so as evidence that your newly edited callback was actually tested.
 
 10. Add instruction classifications in small increments
 =======================================================
@@ -1284,6 +1480,31 @@ These are static instruction counts. One recursive call instruction can
 execute many times, but its static call count is still one. Count Call and
 Invoke separately. Branch instructions are not the same as successor edges.
 Loop counting is deferred to task 1.3 rather than reporting a false zero.
+
+### Study-session walkthrough — switch classification still needs the installed opcode names
+
+The learner preferred a switch over if/else. The first opcode example used Instruction::Br, but the installed LLVM 23 headers provide CondBr and UncondBr separately. The session also caught the danger of missing break and omitting a counted field from the printed report.
+
+Question for this replay: How can a switch compile yet report a wrong count?
+
+```cpp
+switch (I.getOpcode()) {
+case llvm::Instruction::CondBr:
+    // Increment your conditional-branch counter.
+    break;
+case llvm::Instruction::UncondBr:
+    // Increment your unconditional-branch counter.
+    break;
+default:
+    break;
+}
+```
+
+This is a classification fragment inside the instruction traversal. A case chooses a C++ counter update; it does not change the target branch. Without break, execution can fall through into another classification, such as also counting a branch as a switch. Names from another LLVM release may fail at compilation rather than runtime.
+
+Task: Small writing step: Implement the two branch cases first using Instruction.def from this installation, then add the remaining opcodes and their report fields.
+
+Checkpoint: On phi.ll expect one conditional and two unconditional branches. Its conditional contributes two CFG edges but only one branch instruction. Confirm every requested counter is printed and that a switch fixture alone increments the switch count.
 
 ### LLVM program before and after this checkpoint
 
@@ -1487,6 +1708,25 @@ An empty diff is expected. Apply the same count and unchanged-IR checks to
 all fixtures when you write the test scripts. See task 1.2 in [the plan](PLAN.md)
 for the milestone's exit criteria.
 
+### Study-session walkthrough — write an expectation before trusting a report
+
+The session used small IR fixtures with expected highlights rather than a visually impressive dump as the only check. The learner later wanted the directory runner to print this information as a readable table.
+
+Question for this replay: What independent fact lets me decide whether the pass’s output is correct?
+
+```text
+phi.ll, hand-counted:
+blocks 4; instructions 5
+conditional branches 1; unconditional branches 2
+PHIs 1; returns 1; switches 0; calls 0
+```
+
+These are static properties of the fixture, not values computed by a second copy of the same counting algorithm. Read labels for blocks and actual instruction lines for instructions; comments and blank lines count as neither. Include fixtures where a field is zero as well as ones where it is nonzero, so a counter that always prints zero cannot appear correct.
+
+Task: Small writing step: Write the expected row for one fixture before running the plugin. Compare every reported field, including zero fields that a compact table might omit.
+
+Checkpoint: A matching table is evidence for these fixture expectations, not a behavior-preservation test. Keep expected counts separate from measured runtime frequency, and add an assertion/failure status when turning the readable report into a real test.
+
 ### LLVM program before and after this checkpoint
 
 Hand-count the loop fixture before comparing the statistics report.
@@ -1620,6 +1860,25 @@ Check syntax without executing, then run:
 The syntax check is silent on success. It does not validate awk logic or
 whether the counts are correct.
 
+### Study-session walkthrough — a readable test runner is still a program with syntax
+
+The learner asked to run every test in a directory and print a table. The concrete shell failure was “unexpected end of file”; the recorded runner ended its loop with don instead of done, so Bash was still waiting for the loop to close.
+
+Question for this replay: Why does Bash point at the end of the file instead of the misspelled closing word?
+
+```bash
+for input in tests/ir/*.ll; do
+    # Run opt for "$input", check its status, then format its report.
+    :
+done
+bash -n test_all.sh
+```
+
+This is a loop sketch, not a complete runner to overwrite the learner’s script. : is a no-op placeholder. The parser tracks opened constructs such as do/if and their closing done/fi. It may only discover at end-of-file that a required closer never arrived. Separately, statistics use stderr, so command capture must deliberately include diagnostics and preserve a failure status instead of printing a successful-looking row.
+
+Task: Small writing step: Correct the closing word and run bash -n before executing the local script. Keep test_all.sh local unless you separately choose to track it.
+
+Checkpoint: Check a successful input and an intentionally failing command. A nice table must not hide nonzero opt status, and running all files does not assert their expected counts unless the runner actually compares them.
 
 13. Check that inspection preserves the IR
 ==========================================
@@ -1644,6 +1903,26 @@ future flattening pass restructures the CFG, generally return
 PreservedAnalyses::none() unless particular analyses are explicitly maintained.
 PreservedAnalyses reports cache validity; it does not run the verifier or
 prove semantic equivalence.
+
+### Study-session walkthrough — prove that reading did not secretly edit the program
+
+The session’s “clean” checkpoint compared the statistics pass with an LLVM-printed baseline. This tests the pass’s read-only promise instead of relying on a diagnostic saying that it only inspected input.
+
+Question for this replay: Why compare two canonical LLVM outputs rather than diff a handwritten source file directly against generated IR?
+
+```bash
+opt -S tests/ir/phi.ll -o build/phi-baseline.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-stats),verify' \
+  -S tests/ir/phi.ll -o build/phi-inspected.ll
+diff -u build/phi-baseline.ll build/phi-inspected.ll
+```
+
+Both commands parse/print the same original input, so harmless differences between handwritten formatting and LLVM’s printer do not become false changes. -S selects text IR; -o keeps generated modules separate from diagnostic stderr. An empty diff is the expected result for this inspection checkpoint. PreservedAnalyses::all() is a promise that cached facts remain valid, not an operation that rolls back edits.
+
+Task: Small writing step: Run the comparison after a successful rebuild. Keep these generated files under build/; the book’s sample output is not a reason to commit before/after artifacts.
+
+Checkpoint: State what this establishes and what it does not: unchanged IR is expected for stats, whereas a real flattener should change accepted input and needs other correctness evidence.
 
 ### LLVM program before and after this checkpoint
 
@@ -1750,6 +2029,23 @@ Checkpoint: predecessors reverse the relationship. join has left and right
 as predecessors; entry has none in this fixture. Printing block names is
 helpful for this exercise, but names are not guaranteed to exist on all LLVM
 blocks and should not be used as the graph's identity.
+
+### Study-session walkthrough — one branch instruction can represent two graph edges
+
+The learner printed successor/predecessor relationships for phi.ll and asked how to visualize the result. The output showed entry’s two destinations, left/right feeding join, and a predecessor order that need not match a hand-drawn left-to-right picture.
+
+Question for this replay: Why do we count three branch instructions but four CFG edges?
+
+```text
+entry → left  → join
+      ↘ right → join
+```
+
+This is a graph sketch, not runnable LLVM syntax. entry ends in one conditional instruction with two successors. left and right each end in one unconditional instruction with one successor. join returns and has no outgoing edge. Reaching join from either path is what gives the PHI its incoming choice. Printing that relation neither creates new edges nor executes both paths.
+
+Task: Small writing step: Draw each successor edge from the report, then annotate the final opcode of every block. Add terminator reporting after the basic successor report works.
+
+Checkpoint: For the diamond, predict entry’s br, left/right’s br, and join’s ret before running. Do not require join’s predecessors to print in a particular order; compare the relation itself. Use the existing interactive diamond to trace both outcomes.
 
 ### LLVM program before and after this checkpoint
 
@@ -1954,6 +2250,26 @@ changes. This first exercise only declares the interface. Implementation,
 registration with the function analysis manager, terminator information,
 and loop detection follow after the basic graph works.
 
+### Study-session walkthrough — return graph facts instead of making later passes parse text
+
+After CFG printing worked, the lesson introduced a reusable CFGAnalyzer header. The learner asked what was wrong with the current header, leading to a smaller interface-first exercise before implementing the graph traversal.
+
+Question for this replay: What should another pass receive from CFGAnalyzer: printed lines, copied blocks, or a result of borrowed block records?
+
+```cpp
+struct BlockInfo {
+    const llvm::BasicBlock *block;
+    std::vector<const llvm::BasicBlock *> successors;
+};
+// The full Result also contains the other records described above.
+```
+
+This is a record fragment inside the analysis class. The vector owns its pointer elements, but the function owns the blocks they identify. An analysis returns computed Result data, unlike a transformation’s PreservedAnalyses return. AnalysisInfoMixin and its unique static Key let LLVM distinguish/cache this analysis; the private-key friend grants the mixin access, not ownership of the graph.
+
+Task: Small writing step: Declare the minimal records and run() interface, then provide the single out-of-line AnalysisKey definition in the implementation. Do not add a separate static-key definition to every include site.
+
+Checkpoint: Explain how StatsPass can ask FAM for the result without parsing diagnostic strings. Also explain why a later CFG rewrite cannot keep using stale pointers/relations without respecting analysis invalidation.
+
 ### LLVM program before and after this checkpoint
 
 Registering and requesting a reusable analysis computes a C++ result describing this function.
@@ -2121,6 +2437,29 @@ Initialize loopCount to zero in Result. getLoopsInPreorder() includes nested loo
 Recursion cycles between function calls, not blocks within a function. Print loops and back edges inside the one-line statistics summary if the table formatter should include them. Extra CFG diagnostic lines are filtered out by the table runner.
 
 Checkpoint: explain why an analysis result is requested by reference, why dominance argument order matters, and why back-edge count is not automatically a loop count.
+
+### Study-session walkthrough — fill one record completely, then append it
+
+The implementation exercise turned each visited block into a BlockInfo. Successors, predecessors, and terminators were added in small steps, and the session later reported them alongside function statistics. Loop/back-edge analysis extended that same basic traversal rather than replacing it.
+
+Question for this replay: Which object should info.block identify, and when should this iteration’s record be added to the result?
+
+```cpp
+CFGAnalyzer::Result result{};
+for (const llvm::BasicBlock &BB : F) {
+    BlockInfo info{};
+    info.block = &BB;
+    // Fill successors, predecessors, and terminatorOpcode here.
+    result.blocks.push_back(info);
+}
+return result;
+```
+
+This is the basic run() body fragment. {} initializes each record; &BB obtains the current function-owned block’s address. Append after filling the fields so the result receives this iteration’s data. Copying a record/vector copies its pointer values, not the blocks. Request standard dominator/loop analyses only after their manager registration is in place.
+
+Task: Small writing step: Start with block and successor records, check the diamond, then fill predecessors and final opcodes. Add reachable dominator back-edge/LoopInfo queries as the documented extension.
+
+Checkpoint: Expect four records and four edges for phi.ll. On a loop, keep loop count separate from back-edge count: several latch edges can belong to one natural loop. The analysis itself must leave LLVM IR unchanged.
 
 ### LLVM program before and after this checkpoint
 
@@ -2370,6 +2709,24 @@ for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
 }
 ```
 
+### Study-session walkthrough — a reference is another name, not an already stored pointer
+
+The learner asked whether BB could be stored directly because it was a reference and info.block held a pointer. The mistaken step was treating “refers to an object” as meaning the C++ expression already has pointer type.
+
+Question for this replay: Does BB name the block object, or does it hold a BasicBlock* value?
+
+```cpp
+const llvm::BasicBlock &BB = F.getEntryBlock();
+info.block = &BB;
+// BB.getName() accesses the object.
+// info.block->getName() follows the stored pointer.
+```
+
+The & in the declaration forms a reference type. BB is an alias for the existing block; no block copy is created. The & in the expression &BB is address-of and produces a pointer to that block, not an address of a separate reference object. A pointer value can be copied into the record; a reference binding cannot be treated as an interchangeable pointer expression.
+
+Task: Small writing step: Read each & aloud according to its position: reference declaration or address-of expression. Write the assignment to info.block using its declared pointer type.
+
+Checkpoint: Use . when you have the object/reference and -> when you have a pointer. Neither field access transfers ownership. Be able to trace the pointer back to the block still owned by F, rather than imagining a second block stored in the record.
 
 18. Read pointer and reference syntax in traversal loops
 ========================================================
@@ -2477,6 +2834,25 @@ and `info.successors`, but `successor->getName()` and
 `info.block->getName()`. To pass a pointed-to block to an API that expects a
 block reference, dereference the pointer with `*successor`.
 
+### Study-session walkthrough — look at what the range yields before choosing star or ampersand
+
+The learner asked why some traversal loops use * while others use &. The answer depended on the range: iterating a Function yields blocks by reference, while LLVM successor/predecessor ranges yield block pointers.
+
+Question for this replay: Why is &BB needed for one range, but successor already usable as a pointer in the inner range?
+
+```cpp
+for (const llvm::BasicBlock &BB : F) {
+    for (const llvm::BasicBlock *successor : llvm::successors(&BB)) {
+        // successor->getName();
+    }
+}
+```
+
+This traversal fragment uses & in BB’s declaration to avoid copying the block. &BB in the call obtains its address. The inner declaration’s * says successor is a pointer, because that is what the range supplies. Following that pointer uses -> or *successor as an object expression. A declaration symbol and an expression operator can look alike while doing different jobs.
+
+Task: Small writing step: Annotate the static type of BB, &BB, successor, and *successor before changing syntax. Do not add an extra & just because the outer loop used one.
+
+Checkpoint: successors(&BB) reports outgoing edges from the current block. Copying one pointer from that range does not copy its destination. This is why a uniform rule such as “all loops use references” would miss the range’s actual element type.
 
 19. Understand why auto alone tries to copy a basic block
 =========================================================
@@ -2566,6 +2942,24 @@ Taking `&successor` would obtain the address of the local pointer variable,
 not the block's address. The stored block pointers refer to blocks owned by
 the function and must only be used while those blocks remain valid.
 
+### Study-session walkthrough — auto by value can request a forbidden BasicBlock copy
+
+The learner explicitly asked why for (auto bb : F) could not replace for (const llvm::BasicBlock &BB : F). That change asks C++ to initialize a new local object from each block rather than bind a reference to it.
+
+Question for this replay: Why is auto valid in one loop but wrong when it silently removes the reference?
+
+```cpp
+for (const auto &BB : F) {
+    // Read the existing block.
+}
+// Use auto &BB instead when the exercise needs mutable block access.
+```
+
+BasicBlock objects are not ordinary copyable value records. Plain auto deduces a value type here and attempts a copy; const auto& borrows a read-only view, while auto& borrows mutable access. The choice follows what the loop needs to do. This does not mean plain auto is always bad: if a different range yields a pointer, copying that pointer can be correct and inexpensive.
+
+Task: Small writing step: Choose const references for inspection and mutable references where later helpers modify IR. Identify the element type before applying the same change elsewhere.
+
+Checkpoint: Explain which expression would copy an object, which would bind an alias, and which would copy only an address. A copied BlockInfo is allowed even though copying the BasicBlock it points to is not.
 
 20. Explain exception-handling pads and personality checks
 ==========================================================
@@ -2687,6 +3081,25 @@ routine before inspecting blocks, the later `isEHPad()` rejection is
 redundant for those valid inputs. It states the block-level restriction
 explicitly rather than providing an independent necessary rejection.
 
+### Study-session walkthrough — function-wide EH information and a block’s pad are different checks
+
+The learner compared bb.isEHPad() with F.hasPersonalityFn() and then asked what a pad means. Both relate to exception handling, but they inspect different objects and protect different assumptions.
+
+Question for this replay: If the function has a personality routine, does that mean every one of its blocks is an EH pad?
+
+```cpp
+if (F.hasPersonalityFn())
+    return {false, "exception handling is unsupported"};
+for (const auto &BB : F)
+    if (BB.isEHPad())
+        return {false, "EH pad is unsupported"};
+```
+
+This is an eligibility fragment. A personality routine supplies function-level exception-handling behavior. An EH pad is a special entry point into a handler region, represented by particular instructions such as landingpad or funclet pads under LLVM’s rules. Ordinary blocks in that same function are not automatically pads. Rewriting EH edges as ordinary dispatcher edges would require semantics this prototype does not implement.
+
+Task: Small writing step: Keep the function-level question separate from the per-block question, and explain what each rejection protects. Do not turn the pad test into an assumption that every block contains a landingpad instruction.
+
+Checkpoint: An earlier personality rejection can mask whether a later pad-specific condition was reached. Use deliberately focused valid fixtures when testing particular rules; arbitrary malformed EH text is not evidence that the intended guard worked.
 
 21. Relate intrinsics to instructions during coroutine checks
 =============================================================
@@ -2814,6 +3227,26 @@ eligibility policy rejects conservatively. A failed cast returns `nullptr`.
 The statistics pass's `Call` opcode counter also counts intrinsic calls:
 they still have opcode `Call`. Being recognized as an intrinsic does not
 change the instruction's opcode into a separate intrinsic opcode.
+
+### Study-session walkthrough — an intrinsic and its call are related, not identical categories
+
+The learner asked about the relationship between an intrinsic and an instruction. This mattered while recognizing coroutine operations in the eligibility checker: many intrinsics appear as call instructions, but not every instruction is a call or intrinsic.
+
+Question for this replay: What am I checking with IntrinsicInst: the class of an IR operation, or the name of an ordinary source function?
+
+```cpp
+if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(&I)) {
+    const auto *callee = intrinsic->getCalledFunction();
+    if (callee->getName().starts_with("llvm.coro."))
+        return {false, "coroutine intrinsic is unsupported"};
+}
+```
+
+The cast recognizes LLVM’s intrinsic-call representation and returns a borrowed typed pointer. The callee identifies the built-in operation, whose semantics LLVM defines. The starts_with prefix selects the coroutine family for this Day 1 rule. It does not insert a call or execute one in the target program. The later Day 2 policy conservatively rejects other explicit intrinsic calls too.
+
+Task: Small writing step: Write the coroutine-specific inspection first and retain the ordinary supported-call behavior. Read a complete declare/call example in the comparison below.
+
+Checkpoint: A scalar intrinsic result can look like ordinary i32 data while its operation has special semantics. Conversely normal arithmetic such as add is an instruction without being a call. Keep operation identity, result type, and support policy separate.
 
 ### LLVM program before and after this checkpoint
 
@@ -2959,6 +3392,28 @@ The existing fixtures demonstrate:
 
 Rejection reports the first failing check. The required statistics pass still
 inspects `optnone` functions; the optional flattening pass may not run on them.
+
+### Study-session walkthrough — a positive eligibility decision is permission to continue, not a completed transform
+
+The session connected the checker to the flattening stub and printed accepted/rejected reasons. The guard belongs before any later mutation, which became particularly important once Day 2 added PHI and ordinary-value demotion.
+
+Question for this replay: What should happen immediately after the checker says false, and what does true actually establish?
+
+```cpp
+const auto decision = FunctionEligibility::check(F);
+if (!decision.eligible) {
+    llvm::errs() << decision.reason << "
+";
+    return llvm::PreservedAnalyses::all();
+}
+// Only accepted input may proceed to future edits.
+```
+
+The result separates a C++ bool from an explanatory reason string. Returning all() is appropriate on this rejected path because no edits occurred; it is not what makes the function unchanged. A true decision means the configured guard found no unsupported construct. It does not prove a future builder correct, and it does not itself add a dispatcher.
+
+Task: Small writing step: Place the guard after the declaration check and before all transformation helpers. Keep diagnostic text on stderr and LLVM module output separate.
+
+Checkpoint: Check one accepted case and one intentionally unsupported case. In this Day 1 stub both may still emit unchanged IR; the decision/report differs. Later accepted transformations need structural and behavioral checks while rejected input must remain untouched.
 
 ### LLVM program before and after this checkpoint
 
@@ -3132,6 +3587,24 @@ opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
 Expect a coroutine-intrinsic rejection for `coroutine_handle`, and an
 address-taken-block rejection for `address_taken`.
 
+### Study-session walkthrough — one unsupported feature per negative fixture
+
+The session added separate coroutine and address-taken inputs because the existing EH/indirect-branch cases could reject earlier for a different reason. More unsupported constructs in one file do not automatically give better coverage of every condition.
+
+Question for this replay: How could a rejection test pass even after the rule I intended to test was accidentally removed?
+
+```text
+coroutine.ll    → exercise the coroutine-intrinsic restriction
+address_taken.ll → exercise exposed block identity
+EH fixture      → exercise the documented EH rejection
+```
+
+This is a test plan, not output from commands just run. A checker returns at the first failed condition. If an input also has an unsupported terminator or personality function, that earlier rejection may hide a missing later rule. A valid focused module lets the expected reason identify the branch actually exercised. The before/after examples are complete modules, not declarations to paste indiscriminately into another test.
+
+Task: Small writing step: Choose one feature, write a valid minimal fixture, and state the exact intended rejection before running it. Keep a supported fixture as a positive control.
+
+Checkpoint: First verify the input itself. Then inspect the plugin’s reason and unchanged canonical output. A parser/verifier failure in the original input is not a successful eligibility test, and a generic nonzero process exit is not a named rejection.
+
 ### LLVM program before and after this checkpoint
 
 This complete fixture isolates an address-taken block as a rejection reason.
@@ -3247,6 +3720,26 @@ does not prove the function was left unchanged.
 The presplit coroutine marker is a separate rejection path to test next.
 These exercises do not yet establish complete eligibility coverage or prove
 that a future transformation preserves behavior.
+
+### Study-session walkthrough — unchanged output is part of the rejection contract
+
+The final Day 1 review checked that unsupported functions remain intact. A message saying “rejected” is insufficient if the pass has already inserted spills or rewired a branch before deciding to stop.
+
+Question for this replay: What should I compare to prove that the rejected function did not receive partial edits?
+
+```bash
+opt -S tests/ir/coroutine.ll -o build/rejected-baseline.ll
+opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
+  -passes='function(minishield-flatten),verify' \
+  -S tests/ir/coroutine.ll -o build/rejected-checked.ll
+diff -u build/rejected-baseline.ll build/rejected-checked.ll
+```
+
+Both sides start from the same valid input and use LLVM’s printer. The expected empty diff checks representation equality for this rejected case. A verifier-only success is weaker: a partially edited function can still be structurally valid. Confirm the specific reason as well, because another earlier condition may mask the intended guard.
+
+Task: Small writing step: Write/check rejection assertions before moving into transformation work. Keep generated comparison modules under build/, and retain intentional test source fixtures separately.
+
+Checkpoint: State why the pass can return all() on rejection and why that return value cannot undo an edit. Day 2’s rule follows directly: preflight must run before the first demotion or state-machine change, not merely before the last branch rewrite.
 
 ### LLVM program before and after this checkpoint
 

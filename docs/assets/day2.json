@@ -260,6 +260,42 @@
         },
         {
           "type": "heading",
+          "text": "Study-session walkthrough — make one representation change at a time",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The session moved from Day 1 inspection into editing FlatteningPass. The important change was responsibility: printing a fact cannot break its graph, but altering instructions or edges can. The repeated requests to continue were handled as small checkpoints rather than one replacement file to paste.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: What should I change first, and how can I tell whether that change—not a later stage—caused a failure?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "inspect original → collect PHIs → demote PHIs → prepare other values\n                 → map states → construct dispatch → connect transitions",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This is an implementation sequence, not a promise to execute those stages as target-program instructions. Each arrow establishes assumptions for the next step. Keep the existing declaration/eligibility exits before all mutation, and keep generated outputs under build/. A PHI-only checkpoint may legitimately leave the old branch structure intact.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Mark the current checkpoint in your own notes before editing. Identify which existing run() will contain the change; do not add a second definition.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: After the next small edit, can you name the expected IR difference and the relevant input fixture before running opt? The complete before/after section shows reference endpoints, not evidence that your working pass already implements them.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "heading",
           "text": "LLVM program before and after this checkpoint",
           "irComparison": true
         },
@@ -446,7 +482,7 @@
           "irComparison": true
         }
       ],
-      "words": 2323,
+      "words": 2534,
       "quiz": {
         "q": "Why prepare SSA values before adding dispatcher edges?",
         "choices": [
@@ -591,6 +627,42 @@
         {
           "type": "paragraph",
           "text": "Keep PreservedAnalyses::all(): collecting pointers and printing a count leave IR unchanged. The existing function declaration and rejection returns also remain unchanged."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — collect a worklist before calling a mutating helper",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The early Day 2 task was to gather PHI nodes. At this point the pass was still inspecting them; its vector was a plan for later edits. This separated finding the relevant instructions from deleting/replacing them.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why save addresses in a vector instead of immediately changing each PHI as the instruction loop visits it?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "std::vector<llvm::PHINode *> phis;\nfor (auto &BB : F) {\n    for (auto &I : BB) {\n        if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))\n            phis.push_back(phi);\n    }\n}",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "F contains blocks and each block contains instructions. The references BB and I name existing mutable objects. dyn_cast checks the instruction class and returns a typed borrowed pointer, or nullptr. push_back saves that pointer; it does not copy or own a PHI. Keeping mutation outside this traversal avoids invalidating the instruction-list iterator when the later helper erases a PHI.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Write only the collection and count first. Keep the preservation result all() while no IR changes.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Predict one PHI for phi.ll and one for loop.ll. Then run the inspection checkpoint and compare canonical IR: it should be unchanged. Counting the object is not yet lowering its predecessor-dependent choice.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -775,7 +847,7 @@
           "irComparison": true
         }
       ],
-      "words": 1528,
+      "words": 1732,
       "quiz": {
         "q": "Why prepare PHIs before routing incoming paths through one dispatcher?",
         "choices": [
@@ -879,6 +951,42 @@
         {
           "type": "paragraph",
           "text": "Use an if-initializer-style declaration in the condition so the typed pointer is available inside the body. A null pointer skips the body."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — the push_back mismatch is about the static pointer type",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The learner reported an issue with push_back. The reviewed form checked dyn_cast but discarded the typed result, then tried to append the original Instruction* to vector<PHINode*>. The following is that specific type mistake, not a new LLVM transformation.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: If the if-condition proved this instruction is a PHI, why does phis.push_back(&I) still fail?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// I is still declared as Instruction&.\nif (llvm::dyn_cast<llvm::PHINode>(&I)) {\n    // phis.push_back(&I); // Instruction* is too general.\n}\n// Retain the checked, more specific pointer instead:\nif (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))\n    phis.push_back(phi);",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The test does not rewrite I’s C++ declaration. &I still has type Instruction*. A PHINode is an Instruction, so a PHINode* can be used where Instruction* is expected, but an arbitrary Instruction* is not automatically a PHINode*. The pointer returned by dyn_cast carries the successful check in its static type. Both pointers identify the same existing IR object.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Change only the if initializer and the argument passed to push_back; do not cast away the type error with a C-style cast.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Rebuild, then check the same PHI counts as the previous lesson. The emitted IR must still match the input; fixing the host C++ type does not replace a target instruction.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -1074,7 +1182,7 @@
           "irComparison": true
         }
       ],
-      "words": 1281,
+      "words": 1496,
       "quiz": {
         "q": "Does a successful dyn_cast used only as an if condition retype I?",
         "choices": [
@@ -1201,6 +1309,42 @@
         {
           "type": "paragraph",
           "text": "Return PreservedAnalyses::none() after demotion. Return all() if there were no PHIs and nothing changed. This early return is correct for this PHI-only checkpoint; a later lesson removes it when a second transformation stage must run even without PHIs."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — demotion replaces a choice, not merely a line of text",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The conversation asked what demoting PHIs means. This checkpoint turned the collected worklist into the first actual edit: LLVM’s per-PHI helper replaces incoming-edge selection with explicit storage and replaces the former users.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Where does the selected value go after the PHI itself has disappeared?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto *phi : phis)\n    llvm::DemotePHIToStack(phi);\n// Do not dereference a saved phi pointer after this call.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "For the diamond, an entry slot exists before either path. left writes 10, right writes 20, and join reads the value written by the executed path. Both stores appear in the IR, but only the selected path runs. The helper erases the PHI, which is why collection must finish first and why saved pointers become unsafe to use afterward. The vector still exists; its size is not an access to the erased objects.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Add the demotion loop after collection, and return none() after this stage actually changes IR. Do not call a nonexistent DemotePHIToStack::runOnFunction method.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: On phi.ll expect stores and a load with the original branches still present. Trace both conditions. Later preparation must remove the old empty-PHI early return, because it cannot skip all subsequent work.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -1434,7 +1578,7 @@
           "irComparison": true
         }
       ],
-      "words": 1945,
+      "words": 2155,
       "quiz": {
         "q": "What does demoting the PHI in the diamond preserve?",
         "choices": [
@@ -1554,6 +1698,42 @@
         {
           "type": "paragraph",
           "text": "Remove the old PHI-empty early return so this stage is reached even without PHIs; lesson 07 explains the change-tracking detail. LLVM values need not have names, so these names are a learning diagnostic rather than a general test interface."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — a PHI-free graph can still carry values between blocks",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "After PHI preparation, the session moved to ordinary instruction results used in another block. A loop-variable reload introduced by the first helper was a useful example: removing the PHI did not make every remaining use local.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: What exactly am I collecting now: every instruction, every pointer, or only results with a cross-block user?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (I.getType()->isVoidTy() || llvm::isa<llvm::AllocaInst>(I))\n    continue;\nif (I.isUsedOutsideOfBlock(&BB))\n    escapingValues.push_back(&I);",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This code is a fragment inside the existing instruction traversal. First exclude operations with no result and the storage allocations used by our strategy. Then ask whether this result has a user outside its defining block. &BB is the current block’s address; &I is the address of the candidate instruction. “Escaping” here means crossing a block boundary, not heap escape or leaving the function.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Collect and report the candidates before adding their demotion loop. Read the defining block and one consuming block for each candidate.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Find the header-defined reload consumed by the body or exit in the loop example. The original direct use depends on the graph’s dominance relationship, which new dispatcher edges can disrupt. This collection checkpoint itself does not repair that dependency.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -1782,7 +1962,7 @@
           "irComparison": true
         }
       ],
-      "words": 2060,
+      "words": 2266,
       "quiz": {
         "q": "Why can a PHI-free function still need preparation?",
         "choices": [
@@ -1934,6 +2114,42 @@
         {
           "type": "paragraph",
           "text": "In ret i32 %x, i32 is the type of the value returned by the function. The ret instruction itself produces no SSA result. There is no %new = ret ... value for later instructions to consume."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — void describes a result, not whether an operation matters",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The learner asked how to check whether instructions return void. The needed distinction was between an instruction’s effect and its produced value. A store is important but has no SSA result to put into the ordinary-value worklist.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Does skipping a void instruction mean I should delete its memory or control-flow effect?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (I.getType()->isVoidTy())\n    continue;",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "I.getType() asks LLVM for the result type; isVoidTy() tests it. This is compiler-side C++ inspection. continue skips this iteration of the collection loop, leaving the target instruction untouched. A store, branch, or return can remain essential even though its result type is void. Conversely a call might return i32 or might be void, so checking only whether an instruction is a call would not answer the question.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Write the result-type filter before the cross-block-use check. Keep it a collection filter, not a rejection of every function containing a void instruction.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: On the demoted loop, stores and branches must still appear in output, but they must not be reported as values to spill. The new load results do produce i32 values and can still be candidates.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -2138,7 +2354,7 @@
           "irComparison": true
         }
       ],
-      "words": 1736,
+      "words": 1936,
       "quiz": {
         "q": "What is the result type of the instruction ret i32 %x?",
         "choices": [
@@ -2227,6 +2443,42 @@
         {
           "type": "paragraph",
           "text": "The || operator means either condition is sufficient. Short-circuit evaluation stops after a true first condition, though both checks here are read-only."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — an allocation produces an address, not its stored integer",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The next explicit question was how to recognize AllocaInst. The void test had not removed it: alloca produces a pointer. That pointer is deliberately used by loads and stores in other blocks.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why does alloca i32 pass the non-void test, and why do we nevertheless skip it in this worklist?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (I.getType()->isVoidTy() || llvm::isa<llvm::AllocaInst>(I))\n    continue;",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "isa asks only whether the existing instruction belongs to the allocation class; no typed pointer is needed just to skip it. In alloca i32, i32 is the storage element type, while the instruction result has LLVM type ptr. Our memory-transport strategy relies on entry-allocated slot addresses being available everywhere. Re-spilling the address of a slot is not the intended repair for each original scalar value.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Add the allocation filter beside the void filter. Explain both halves before testing them together.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: The allocation must stay in the IR and out of escapingValues. A reload from its slot can still be collected. This skip does not make non-entry or dynamic allocas safe: the later eligibility lesson imposes a separate support rule before full rewriting.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -2459,7 +2711,7 @@
           "irComparison": true
         }
       ],
-      "words": 1709,
+      "words": 1907,
       "quiz": {
         "q": "Why does the ordinary value worklist exclude an entry alloca?",
         "choices": [
@@ -2549,6 +2801,42 @@
         {
           "type": "paragraph",
           "text": "This is the end of a collection-only checkpoint: only PHI demotion has modified IR so far. The next mutation stage will add escapingValues to this decision. Querying phis.empty() is safe even after the instructions were deleted; do not dereference their stored pointers."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — a filter does not append, and an empty first stage is not the end",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The reviewed preparation draft had two distinct issues: an old early exit for phis.empty() could bypass the new work, and creating/filtering escapingValues did not itself add any instructions to that vector. These were collection/control-flow bugs in the pass, not malformed input IR.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why is the second worklist empty even though I can see a value used in another block?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// Do not return merely because phis is empty.\nfor (auto *phi : phis)\n    llvm::DemotePHIToStack(phi);\n// In the separate candidate-discovery loop:\nif (I.isUsedOutsideOfBlock(&BB))\n    escapingValues.push_back(&I);",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "A for-loop over an empty vector naturally performs zero iterations and then continues. That is different from returning from run(), which cancels every later phase. Likewise, continue rejects a candidate; it does not automatically collect whatever remains. push_back is the explicit action that grows the worklist.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Remove the PHI-only early return and make the append visible after the two filters. At this collection-only stage, report mutation only for edits already performed.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Use the complete cross_block example below: it has zero PHIs but sum is defined in entry and consumed in exit. It should reach collection. Write the suggested fixture yourself; the reference in the book does not create a test file.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -2720,7 +3008,7 @@
           "irComparison": true
         }
       ],
-      "words": 1157,
+      "words": 1377,
       "quiz": {
         "q": "At the collection-only checkpoint, does a nonempty escapingValues list itself mean IR changed?",
         "choices": [
@@ -2804,6 +3092,42 @@
         {
           "type": "paragraph",
           "text": "Both helpers return a pointer to the created stack allocation. The current exercise can ignore that pointer. The function’s IR owns the inserted allocation; ignoring the return value does not delete it."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — the argument type tells you whether to pass the pointer or the object",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The session compared the two demotion helpers before integrating the second call. Their first parameter types differ, although both operate on LLVM-owned IR and both can return a pointer to created storage.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why did the PHI helper take phi directly, while the ordinary-value helper needs *value?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::DemotePHIToStack(phi);   // phi: PHINode*\nllvm::DemoteRegToStack(*value); // value: Instruction*; *value: Instruction lvalue",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "These are call fragments, not replacement declarations. The PHI parameter is PHINode*, so its saved pointer already matches. The ordinary helper’s parameter is Instruction&; *value names the existing instruction so the reference can bind to it. Neither expression copies an instruction or executes its runtime arithmetic. &value would instead take the address of the pointer variable, producing Instruction**, which is the wrong object and type.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Read the installed Local.h declaration and write only the correctly typed call inside the saved-pointer loop. Keep optional arguments at their defaults for these fixtures.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Ignoring the returned AllocaInst* does not delete the slot: the function owns inserted IR. Explain separately which helper erases its original PHI and which retains the original ordinary calculation.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -3019,7 +3343,7 @@
           "irComparison": true
         }
       ],
-      "words": 1493,
+      "words": 1694,
       "quiz": {
         "q": "escapingValues stores Instruction*. What does the first DemoteRegToStack parameter require?",
         "choices": [
@@ -3106,6 +3430,42 @@
         {
           "type": "paragraph",
           "text": "A function with zero PHIs can still be transformed by the second loop. Preserving analyses in that case would leave stale cached results available to later passes."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — demote the collected result, then track the actual edit",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The learner asked what demoting collected values does. The important answer was that ordinary calculations remain: the helper changes how their results reach users. The second worklist becomes useful only when its helper calls actually run.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: If the add still exists, what has DemoteRegToStack accomplished?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "for (auto *value : escapingValues)\n    llvm::DemoteRegToStack(*value);\nbool changed = !phis.empty() || !escapingValues.empty();",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The loop is placed after candidate discovery. Each saved pointer names an instruction whose result needs transport. The helper adds a slot, a store of the calculated value, and reloads at uses. bool changed summarizes either preparation stage; a PHI-free function may still change here. Returning all() after that change would make a false promise about cached analyses.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Add only this second mutation stage after collection, then use the combined changed decision for the preservation return. Do not append duplicate copies of the earlier loops.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: In the cross_block example, sum = x + 1 must remain in entry and exit must return a loaded result. In the loop, inspect the extra slot carrying the header reload to other blocks. Memory transport does not permit arbitrary state execution order.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -3327,7 +3687,7 @@
           "irComparison": true
         }
       ],
-      "words": 1856,
+      "words": 2062,
       "quiz": {
         "q": "After ordinary-value demotion, what must the final rewrite still preserve?",
         "choices": [
@@ -3425,6 +3785,42 @@
         {
           "type": "paragraph",
           "text": "The return now uses a value defined by a load in its own block. The allocation pointer still crosses blocks, so keep its allocation in the true entry block that dominates these accesses."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — trace one number through an ordinary spill",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This part of the teaching answered the demotion question by following a tiny calculation, rather than by reading helper names alone. The example is an illustrative exercise; it is not another demotion loop to insert into run().",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: For x = 4, where does the number 5 exist before and after preparation?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "// Target-program story, not C++ pass code:\nentry: sum = 4 + 1; write 5 to the result slot\nexit:  read 5 from the result slot; return 5",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Before preparation, exit directly refers to the SSA sum defined in entry. After preparation, the defining add still computes the same result, but a store/load pair makes transport explicit. The slot address and the integer stored there are different values. Each load has a new SSA name, so the new name does not mean a different mathematical answer. Generated suffixes such as reload are descriptive, not correctness guarantees.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Annotate the complete before/after modules below with “calculate,” “write,” “read,” and “return.” Do not add a second helper call just because you are studying its output.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Check the path with x = 4 and x = 0. The expected results are 5 and 1 on this bounded domain. An actual runtime check needs a caller; the shown module defines a function, not a complete command-line main.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -3652,7 +4048,7 @@
           "irComparison": true
         }
       ],
-      "words": 1651,
+      "words": 1883,
       "quiz": {
         "q": "Does the alloca result contain the saved integer directly?",
         "choices": [
@@ -3755,6 +4151,42 @@
         {
           "type": "paragraph",
           "text": "join loads the slot. The utility replaces the old PHI’s uses and deletes the PHI. Do not access the deleted PHI through a pointer saved in the C++ vector."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — trace a choice through PHI demotion",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The follow-up question about PHI demotion required a different trace from the ordinary add example. A PHI’s value depends on the incoming path, so replacing it must preserve the path/value pairing rather than one fixed calculation.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why are there two stores in the module if only one value should be returned?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "left path:  write 10 → join reads 10\nright path: write 20 → join reads 20",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This is a path sketch, not standalone LLVM syntax. Both possible stores are present statically; execution selects only one incoming path for this diamond. If both stores were executed unconditionally, the last write would win and the original choice would be lost. The PHI helper instead supplies storage and rewires users while preserving the selected incoming value.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Read the complete modules below twice: once with condition true and once with false. Name the writer and reader on each path.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: True must still produce 10 and false 20. Compare this with ordinary demotion: there the original calculation remains; here the PHI is erased. In both cases, loads/stores replace a dependence on the previous value representation, not the need to execute the correct path.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -3994,7 +4426,7 @@
           "irComparison": true
         }
       ],
-      "words": 1851,
+      "words": 2058,
       "quiz": {
         "q": "What replaces the PHI’s incoming-edge selection in the simple diamond?",
         "choices": [
@@ -4110,6 +4542,42 @@
         {
           "type": "paragraph",
           "text": "Iterate stateBlocks to print deterministic output. DenseMap iteration order is not a stable display order. Do not rely on LLVM block names as unique persistent IDs."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — give a next-block decision an integer encoding",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The next construction checkpoint introduced stateBlocks and stateIDs. No dispatcher edges were added while mapping. This kept the list limited to prepared original non-entry blocks rather than accidentally including the machinery created afterward.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Is state 0 a new block, the entry block, or just a number associated with an existing destination?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *entry = &F.getEntryBlock();\nunsigned id = 0;\nfor (auto &BB : F) {\n    if (&BB == entry) continue;\n    stateBlocks.push_back(&BB);\n    stateIDs[&BB] = id++;\n}",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The vector preserves a deterministic list; the map records which unsigned integer represents each block address. The expression id++ uses the current number for this assignment, then increments it. Entry stays one-time setup, so it gets no ordinary state. The map lives in the C++ transformer; it is not itself emitted into the target module.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Print each state/block association after mapping and before creating new blocks. Use the block pointer as the key and a readable name only for the report.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: For the prepared diamond, expect left 0, right 1, join 2. The module stays unchanged at this checkpoint. Later dispatch must decode those same associations; storing zero universally is not a substitute for consulting the intended destination.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -4328,7 +4796,7 @@
           "irComparison": true
         }
       ],
-      "words": 1671,
+      "words": 1883,
       "quiz": {
         "q": "Why preserve the existing entry as setup?",
         "choices": [
@@ -4430,6 +4898,42 @@
         {
           "type": "paragraph",
           "text": "In this loop BB is already a pointer because that is the vector’s element type. lookup receives the pointer key, while -> accesses a block member."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — object, address, and key/value pair are separate C++ ideas",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The state-mapping draft exposed three related syntax/type mistakes: comparing a pointer to a block object, appending an object to a pointer vector, and writing angle-bracket notation as though it constructed a pair. The fix was to follow the declared types.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Where do I need BB, where do I need &BB, and what does DenseMap insertion actually receive?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (&BB == entry) continue;\nstateBlocks.push_back(&BB);\nstateIDs[&BB] = id;\n// Alternative pair insertion, when insertion is intended:\n// stateIDs.insert({&BB, id});",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "BB is a reference alias for an existing block, not already a pointer. &BB obtains its address. Both the vector element and the DenseMap key are BasicBlock*. Braces can form the key/value pair expected by insert; angle brackets normally introduce template arguments, not runtime pair values. operator[] assigns through the mapped value but also inserts a missing key, so later destination validation needs care.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Correct one expression at a time, rebuild, and keep mapping separate from IR construction. Do not fix a mismatch by trying to copy a BasicBlock.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: The state table should now print the intended associations, while canonical IR remains identical. Explain why a missing lookup must not silently mean a legitimate state 0; the checked find-based reference later makes that invariant explicit.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -4648,7 +5152,7 @@
           "irComparison": true
         }
       ],
-      "words": 1662,
+      "words": 1885,
       "quiz": {
         "q": "Which value belongs in a DenseMap<BasicBlock*, unsigned> key?",
         "choices": [
@@ -4792,6 +5296,42 @@
         {
           "type": "paragraph",
           "text": "getInt32(ID) creates an i32 integer constant, unlike getInt32Ty(), which supplies a Type*. Keep changed declared before construction so the final preservation result includes the new instructions and blocks."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — construct valid machinery before making it live",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The session next built a state slot, dispatcher, and invalid block while preserving old branches. This intermediate module could verify without yet executing the new machinery; that distinction prevents a successful verifier from being mistaken for complete flattening.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: What do CreateLoad and CreateSwitch add, and why does an unreachable new block still need a terminator?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::IRBuilder<> dispatchBuilder(dispatcher);\nauto *current = dispatchBuilder.CreateLoad(\n    dispatchBuilder.getInt32Ty(), stateSlot, \"ms.current\");\nauto *dispatchSwitch = dispatchBuilder.CreateSwitch(\n    current, invalidBlock, stateBlocks.size());\nllvm::IRBuilder<> invalidBuilder(invalidBlock);\ninvalidBuilder.CreateUnreachable();",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This is a construction fragment after block creation. CreateLoad needs the integer value type and slot address. CreateSwitch sets a default and reserves case capacity; separate addCase calls create the mappings. The invalid block needs its own ending even while unreachable. unreachable is an assertion that no defined execution gets there, not a recovery return. Append both blocks after the original entry.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Build and terminate the two blocks, then add one case per previously mapped state. Leave the original edges alone for this checkpoint.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: In the resulting dump dispatch should have no predecessors yet. Its slot has no initialization store because that load is not executed. The next lesson must arrange a valid store before adding a live edge.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -5020,7 +5560,7 @@
           "irComparison": true
         }
       ],
-      "words": 2210,
+      "words": 2422,
       "quiz": {
         "q": "Why is a valid but disconnected dispatcher only an intermediate checkpoint?",
         "choices": [
@@ -5112,6 +5652,42 @@
         {
           "type": "paragraph",
           "text": "After the declaration errors are fixed, an empty invalid block would still fail LLVM verification. Compilation checks C++ syntax and types; verify checks the IR your C++ creates."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — the C++ handle is not the IR label",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The reviewed draft tried to use ms.dispatch as a C++ variable, treated BasicBlock::Create as returning an object value, and left the invalid block empty. These belong to different checking layers: C++ parsing/types versus LLVM IR verification.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why is \"ms.dispatch\" a legal displayed block name when ms.dispatch is not a legal single C++ identifier?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *dispatcher = llvm::BasicBlock::Create(\n    F.getContext(), \"ms.dispatch\", &F);\nllvm::IRBuilder<> invalidBuilder(invalidBlock);\ninvalidBuilder.CreateUnreachable();",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The quoted string is an argument naming an LLVM block; a dot inside it is ordinary text. The unquoted C++ dot is member access. Create returns BasicBlock*, so dispatcher is a pointer to an object attached to F, not a local block copy. Finishing that declaration does not automatically fill another block’s terminator. A previous .so can still load after a failed build, but it cannot prove the revised draft compiled.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Fix the declarations first, then ensure every new block has a terminator. Rebuild successfully before testing.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Read the first compiler error rather than treating a later opt run on a stale plugin as confirmation. Once compilation succeeds, verify the emitted module separately. State which error is a C++ issue and which would be an IR issue.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -5316,7 +5892,7 @@
           "irComparison": true
         }
       ],
-      "words": 1701,
+      "words": 1911,
       "quiz": {
         "q": "What is \"ms.dispatch\" in BasicBlock::Create(..., \"ms.dispatch\", &F)?",
         "choices": [
@@ -5419,6 +5995,42 @@
         {
           "type": "paragraph",
           "text": "default: break leaves conditional, switch, return, and unreachable entries untouched at this checkpoint. Do not invent a universal store of zero for them. Later lessons must select the state corresponding to the actual path."
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — initialize the state before the first dispatcher read",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The resumed lesson connected the original unconditional entry branch as the first live dispatcher hop. This was still partial: header/body branches in loop.ll remained direct. The existing branch identifies the intended first destination and anchors the insertion point.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Question for this replay: Why must I read the old successor and emit the replacement before erasing the old branch?",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "auto *term = entry_ptr->getTerminator();\nllvm::IRBuilder<> b(term);\nauto *destination = term->getSuccessor(0); // UncondBr case only\nauto *initial = b.getInt32(stateIDs.lookup(destination));\nb.CreateStore(initial, stateSlot);\nb.CreateBr(dispatcher);\nterm->eraseFromParent();",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Place this fragment inside the UncondBr case and construction scope. The builder inserts before term. The store must execute before dispatch loads the slot; its integer comes from the actual destination’s map entry, not from the entry block itself. Erasing too early destroys information and invalidates the insertion anchor. Do not access term afterward.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: Write the unconditional case with the source’s existing variable names. Leave conditional/switch entries untouched until their choices are translated deliberately.",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Run loop.ll with verify. Entry should store header’s ID 0 and branch to ms.dispatch; dispatch should now list entry as a predecessor. A conditional phi.ll entry is still unchanged at this stage, and the remaining loop transitions are not yet flattened.",
+          "sessionWalkthrough": true
         },
         {
           "type": "heading",
@@ -5674,7 +6286,7 @@
           "irComparison": true
         }
       ],
-      "words": 2632,
+      "words": 2843,
       "quiz": {
         "q": "At this checkpoint, which original branches have been redirected?",
         "choices": [
@@ -5990,6 +6602,75 @@
         },
         {
           "type": "heading",
+          "text": "Study-session update — musttail checked, inline assembly next",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "paragraph",
+          "text": "At this resumed session checkpoint, the learner had implemented the musttail guard. The current build was up to date; the plugin rejected the focused musttail fixture with “musttail calls are unsupported,” and canonical before/after IR was identical. This records the observed result for that fixture, rather than converting every future support rule into a completed task.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The next assigned guard is inline assembly. Its fixture syntax was verified, but the learner had not yet implemented this guard or demonstrated its plugin rejection when this note was written. The code and expected check below remain the next writing exercise.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {\n    if (call->isInlineAsm())\n        return {false, \"inline assembly is unsupported\"};\n}",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "paragraph",
+          "text": "Place this fragment in the existing instruction loop before any transformation. CallBase is the common LLVM base for CallInst, InvokeInst, and CallBrInst; it lets this guard inspect the shared call-like interface. The earlier musttail check used CallInst because that marker belongs to ordinary call instructions. dyn_cast returns a borrowed pointer to the existing instruction when it matches; isInlineAsm asks whether the callee is embedded assembly rather than a normal function target.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define void @inline_assembly() {\nentry:\n  call void asm sideeffect \"\", \"\"()\n  ret void\n}",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "paragraph",
+          "text": "This is a complete input module. define void starts a function with no returned value; its empty parentheses mean no arguments. entry names its first block. call void has no result to bind to an SSA name, but still executes an operation. asm embeds target assembly text, and sideeffect says it can have effects even without a used output. The first quoted string is the assembly text; the second is the operand-constraint string. Both are empty here, and the final () supplies no operands. ret void ends the function without returning a value.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "paragraph",
+          "text": "The prototype rejects this call form conservatively even for an empty assembly string: accepting one visually harmless spelling would not establish correct handling of arbitrary target assembly, constraints, or hidden effects. This is a support-policy choice, not a claim that the input is invalid LLVM IR. Its void result also does not make the call irrelevant; skipping void results in the spill worklist and rejecting an unsupported operation answer different questions.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "task",
+          "text": "Task: Small writing step: add the CallBase/isInlineAsm guard yourself and save the complete module as a separate fixture, for example tests/ir/inline_assembly.ll. Keep the existing intrinsic and musttail checks; do not replace the entire checker with this one rule.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -passes=verify -disable-output tests/ir/inline_assembly.ll\nopt -load-pass-plugin=\"$PWD/build/libMiniShield.so\" \\\n  -passes='function(minishield-flatten),verify' \\\n  -S tests/ir/inline_assembly.ll -o build/inline_assembly-checked.ll",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: After implementing the guard, expect “inline assembly is unsupported” and unchanged canonical output for this valid input. That plugin result is an expectation here, not a recorded success. Explain why call void can matter even though it produces no value, and why CallBase is broader than CallInst.",
+          "eligibilityWalkthrough": true,
+          "sessionProgressUpdate": true
+        },
+        {
+          "type": "heading",
           "text": "Verify these guards independently",
           "eligibilityWalkthrough": true
         },
@@ -6243,7 +6924,7 @@
           "irComparison": true
         }
       ],
-      "words": 3071,
+      "words": 3544,
       "quiz": {
         "q": "Can you safely hoist every non-entry alloca into entry?",
         "choices": [
