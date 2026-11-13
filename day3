@@ -50,3 +50,170 @@ Checkpoint: MiniShield’s flattening raises the cost of reverse engineering. Of
 2. It leaves the other rows open: a corrupted indirect call or vtable pointer (the CFI threat), a corrupted return address (the canary threat), and the memory bugs themselves all still work against the flattened program, because flattening rearranges control flow instead of changing what the program executes or where its data lives.
 
 3. Its failure mode is optimization, not bypass: the final optimizer can prove the state machine’s behavior and simplify it back toward the original CFG (the Volume 2 exit evidence reduces the whole dispatcher to one select), so the shipped artifact can be structurally unhardened. CFI checks and canaries change what the program does at runtime, so they survive optimization; obfuscation’s quality must be judged on the final artifact, not on the pass output.
+
+3.2.1 The indirect call check
+=============================
+
+Forward CFI (CFI-ICALL) answers the first concrete threat in the landscape: an attacker overwrites a function pointer — via a buffer overflow, a corrupted pointer table, a data race — and the program calls whatever the pointer now says. The pointer is data, and the call site trusts it unconditionally. Forward CFI inserts a guard before every indirect call: verify that the target has the expected function type before dispatching. In LLVM 23.1.5 the guard is the `llvm.type.test` intrinsic paired with `llvm.ubsantrap`, not the legacy `llvm.cfi_icheck` intrinsic that older material describes.
+
+### The check in IR
+
+Minimal case: a program obtains a function pointer from an extern function — outside this translation unit, so the compiler can never know where it points. This is what clang 23.1.5 emits with `-fsanitize=cfi-icall -flto -O2` (trimmed from the real capture; `opt -passes=verify` accepts it):
+
+```llvm
+target triple = "x86_64-conda-linux-gnu"
+
+declare ptr @lookup(i32)
+
+declare i1 @llvm.type.test(ptr, metadata)
+declare void @llvm.ubsantrap(i8 immarg)
+
+define i32 @run_op(i32 %id, i32 %x) {
+  %fp = tail call ptr @lookup(i32 %id)
+  %ok = tail call i1 @llvm.type.test(ptr %fp, metadata !"_ZTSFiiE")
+  br i1 %ok, label %do_call, label %trap
+
+trap:
+  tail call void @llvm.ubsantrap(i8 2)
+  unreachable
+
+do_call:
+  %r = tail call i32 %fp(i32 %x)
+  ret i32 %r
+}
+```
+
+Read it top to bottom. `%fp` is the attacker-controlled pointer: it comes from `lookup`, which lives in another translation unit, so even full LTO cannot resolve it. `%ok` is the guard: `llvm.type.test` asks whether the memory at `%fp` carries a CFI type descriptor matching `_ZTSFiiE` — the mangled type-info name of the function type `int(int)`. The descriptor is attached by the compiler to every function compiled with CFI; a target without one, or with a different one, fails the test. The branch then goes to `do_call`, where the real indirect call happens, or to `trap`, where `llvm.ubsantrap` lowers to an undefined instruction and the process dies with SIGILL (exit 132).
+
+Two things this is not. First, it is not an address check: nothing compares `%fp` against a list of allowed addresses, so a target of the right type but the wrong function still passes. Second, the guard exists only where the target is unknown. Without the flag, the same source compiles to an unconditional indirect call:
+
+```llvm
+target triple = "x86_64-conda-linux-gnu"
+
+declare ptr @lookup(i32)
+
+define i32 @run_op(i32 %id, i32 %x) {
+  %fp = tail call ptr @lookup(i32 %id)
+  %r = tail call i32 %fp(i32 %x)
+  ret i32 %r
+}
+```
+
+### Where LTO can see the target, the check changes shape
+
+CFI-ICALL is an LTO feature — the flag refuses to work without `-flto`. LTO's job is to resolve indirect calls, so most guards the front end would emit disappear at link time: when the target is provably unique the call is devirtualized or inlined, and there is nothing to guard. Where the target set is small but not fully resolvable, the generic type test degenerates into a comparison against known addresses. In the single-translation-unit demo below, LTO rewrote the guard as:
+
+```asm
+2017d7: 48 3d 30 18 20 00             	cmpq	$0x201830, %rax
+2017dd: 75 4a                         	jne	0x201829
+2017df: bf 15 00 00 00                	movl	$0x15, %edi
+2017e4: ff d0                         	callq	*%rax
+...
+201829: 67 0f b9 40 02                	ud1l	0x2(%eax), %eax
+20182e: cc                            	int3
+```
+
+The parsed address is compared against `0x201830` — the address of `op_right`, the only target of the right type — and a mismatch jumps to the `ud1` trap. Note that `op_right` itself is now a one-instruction thunk that jumps to `op_right.cfi`, the body LTO rebuilt with its CFI type descriptor attached. The shape to take away: the guard appears exactly where the pointer is genuinely unknown at link time — external, data-dependent, attacker-writable — in whatever form is cheapest there.
+
+### Proof at runtime
+
+The demo program reads a pointer address from standard input and calls through it; a `self` flag prints the addresses of the two candidate targets (a legal `int(int)` function and a wrong-type `int()` function). It is linked with `-no-pie` so the printed addresses are stable across runs — under ASLR each launch would print different ones (the PIE chapter returns to exactly that point).
+
+```bash
+$ clang-23 -fsanitize=cfi-icall -flto -O2 -no-pie -fuse-ld=lld cfi_pipe.c -o cfi_pipe
+$ clang-23 -flto -O2 -no-pie -fuse-ld=lld cfi_pipe.c -o cfi_pipe_nocfi
+$ ./cfi_pipe self
+0x201830 0x201790
+$ echo 0x201830 | ./cfi_pipe
+result -> 42
+$ echo 0x201790 | ./cfi_pipe
+Illegal instruction (core dumped)
+$ ./cfi_pipe_nocfi self
+0x201778 0x201780
+$ echo 0x201780 | ./cfi_pipe_nocfi
+result -> 99
+```
+
+The legal target dispatches and returns 42. The wrong-type target dies with an illegal instruction — that is the CFI trap, a hard abort, not a report. And in the binary built without CFI, the same wrong-type input does not crash at all: the call goes through, `op_wrong` returns 99, and the program prints it as a normal result. That silent success is the threat CFI removes — a corrupted pointer that lands on a function with a matching calling convention but the wrong behavior; the only observable difference is the wrong answer. CFI turns that into a visible abort.
+
+- `-fsanitize=cfi-icall` works only with `-flto`, and every object in the link must be CFI-instrumented: a non-CFI target has no type descriptor to match, so even a legal call aborts.
+- LTO removes every guard whose target it can resolve and folds the rest to the cheapest correct form; a program whose indirect calls all have known targets contains no CFI checks at all, and that is not a misconfiguration.
+- The check is on the target's type, not its address: a wrong function of the matching signature is still a legal target.
+- `llvm.ubsantrap` lowers to an undefined instruction (SIGILL, exit 132), not a message; without a debugger the failure looks like a random illegal instruction, not a CFI violation.
+
+Checkpoint: In the demo the wrong-type target aborts and the legal target completes. (a) What does the guard test, and where does the value it matches come from? (b) Why does the guard appear in this program at all? (c) Why is the no-CFI run a more dangerous failure than the CFI run?
+
+### Model answer
+
+1. (a) It tests the target's function-type descriptor: `llvm.type.test` compares what the compiler attached to each CFI-compiled function definition against `_ZTSFiiE`, the mangled type-info name of the function type `int(int)`. It is not an address — a wrong function of the right type still passes.
+
+2. (b) Because the callee pointer is genuinely unknown at link time: in the minimal module it comes from the extern `lookup`, and in the demo it is parsed from standard input at runtime. LTO can only remove or fold the guard when it can resolve the target, and it cannot here.
+
+3. (c) Without CFI the wrong-type call silently succeeds — it prints `result -> 99` and exits 0: the corruption achieved its goal and nobody knows. With CFI the process aborts with SIGILL: the hijack is blocked and visible. A check that fails silently is worse than no check, because it hides the attack; CFI's value is in making the failure a crash.
+
+3.2.2 The vtable check
+======================
+
+CFI-ICALL guards the callee pointer. The more common C++ threat is one level up: the object's vtable pointer. A corrupted vptr — a type-confusion write, a buffer overflow that reaches the first word of an object, a stale pointer into a reused allocation — makes `b->apply(x)` dispatch to a completely unrelated class. CFI-VCALL inserts a guard before every virtual call: the vtable pointer must point into the type-info hierarchy of the call site's static base class.
+
+### The check is on the vtable pointer
+
+Captured with clang++ 23.1.5 and `-fsanitize=cfi-vcall -fvisibility=hidden -flto -O2` (hidden visibility is required; the flag is refused without it). Trimmed from the real capture, `opt -passes=verify` accepts it:
+
+```llvm
+target triple = "x86_64-conda-linux-gnu"
+
+declare i1 @llvm.type.test(ptr, metadata)
+declare void @llvm.ubsantrap(i8 immarg)
+
+define i32 @run_op(i64 %obj, i32 %x) {
+  %objptr = inttoptr i64 %obj to ptr
+  %vtable = load ptr, ptr %objptr, align 8
+  %ok = call i1 @llvm.type.test(ptr %vtable, metadata !"_ZTS4Base")
+  br i1 %ok, label %do_call, label %trap
+
+trap:
+  call void @llvm.ubsantrap(i8 2)
+  unreachable
+
+do_call:
+  %slot = load ptr, ptr %vtable, align 8
+  %r = call i32 %slot(ptr %objptr, i32 %x)
+  ret i32 %r
+}
+```
+
+Two differences from the ICALL guard. The pointer under test is not a function address but the vtable pointer loaded from the object's first word — `%vtable = load ptr, ptr %objptr`. And the descriptor is not a function-type name but the mangled class name of the call site's static type: `_ZTS4Base` is the type-info name of `Base`. `llvm.type.test` succeeds when the vtable belongs to `Base` or to a class derived from it — C++'s dynamic-type rule, enforced at every dispatch. If it passes, dispatch proceeds exactly as usual: load slot 0 of the vtable and call through it.
+
+Together the pair covers the two indirect dispatches a C++ program performs: ICALL tests a function pointer against the function's type; VCALL tests a vtable pointer against the class's type. Same intrinsic, same trap, different operand and different descriptor.
+
+### Proof at runtime
+
+```bash
+$ clang++-23 -fsanitize=cfi-vcall -fvisibility=hidden -flto -O2 -no-pie -fuse-ld=lld vcall_pipe.cpp -o vcall_pipe
+$ ./vcall_pipe self
+0x203df8 0x203e00
+$ echo 0x203df8 | ./vcall_pipe
+result -> 42
+$ echo 0x203e00 | ./vcall_pipe
+Illegal instruction (core dumped)
+```
+
+The program prints the addresses of two static objects — a `Derived` (which derives from `Base`) and an `Evil` (which does not) — and then dispatches through the address read from standard input. `Derived` passes: its vtable is in `Base`'s hierarchy, and the call returns 42. `Evil` fails: it does not derive from `Base`, so its vtable is not registered under `Base`'s type-info, and the type test aborts the process before any vtable slot is loaded.
+
+The boundary matters. CFI-VCALL catches the vtable being the wrong class, not the right class with the wrong slots: an attacker who overwrites slot 0 of a legitimate `Derived` vtable to point at their own function still passes the check, because the vtable pointer is in the right hierarchy, and the hijack goes through. That is the same type-versus-address distinction as the previous lesson, one level up.
+
+- `-fsanitize=cfi-vcall` requires `-fvisibility=hidden`; the compiler rejects the flag without it.
+- The check is on the vtable pointer (the object's first word), not on the method pointer loaded from the vtable: a corrupted slot in a legitimate class's vtable is not caught.
+- Like CFI-ICALL this is an LTO feature: calls LTO can devirtualize — the common case once it has proved the dynamic type — carry no guard at all.
+- The descriptor is the static type at the call site (here `Base`); a call through a pointer of a more-derived type is checked against that more-derived type, so the check composes up the derivation chain.
+
+Checkpoint: In the demo the `Derived` dispatch succeeds and the `Evil` dispatch aborts. (a) Which pointer does the guard test, and against which descriptor? (b) Why does clang require `-fvisibility=hidden` for this flag? (c) What corruption of a legitimate vtable would this check not stop?
+
+### Model answer
+
+1. (a) The vtable pointer loaded from the object's first word, tested against `_ZTS4Base` — the type-info name of the call site's static base class — not against the address of the method that will be called.
+
+2. (b) The guard compares the object's vtable pointer against a local, compile-time-known vtable/type-info address. With default-visibility type-info symbols the dynamic linker can interpose a different copy from another shared object, and the check would silently test against the wrong address; `-fvisibility=hidden` pins the type-info symbols to the local copies, which is why clang accepts the flag only with it.
+
+3. (c) A corrupted slot inside a legitimate vtable: overwrite slot 0 of a real `Derived` vtable to point at attacker code and the vtable pointer still points into the right hierarchy, the check passes, and the dispatch is hijacked. CFI-VCALL verifies which class an object claims to be, not what that class's vtable points to.
