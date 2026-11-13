@@ -4874,6 +4874,10 @@
           ]
         },
         {
+          "type": "diagram",
+          "kind": "llvmObjects"
+        },
+        {
           "type": "paragraph",
           "text": "The containment chain is Module → Function → BasicBlock → Instruction. It is a useful starting point, but not every object is stored in that chain: arguments belong to a Function, constants are shared/uniqued through an LLVMContext, and types describe values rather than being executable objects."
         },
@@ -4978,8 +4982,7 @@
           ]
         }
       ],
-      "words": 952,
-      "widget": "llvm-objects"
+      "words": 952
     },
     {
       "id": 76,
@@ -5044,6 +5047,10 @@
         {
           "type": "paragraph",
           "text": "LLVM integer types are not signed or unsigned by themselves. i32 is 32 bits; signedness comes from an operation or predicate such as icmp slt versus icmp ult. The same bit pattern can be interpreted according to the operation using it."
+        },
+        {
+          "type": "diagram",
+          "kind": "llvmTypes"
         },
         {
           "type": "heading",
@@ -5133,8 +5140,7 @@
           ]
         }
       ],
-      "words": 760,
-      "widget": "llvm-types"
+      "words": 760
     },
     {
       "id": 77,
@@ -5244,6 +5250,10 @@
           ]
         },
         {
+          "type": "diagram",
+          "kind": "cfg"
+        },
+        {
           "type": "heading",
           "text": "Inspect graph edges in C++"
         },
@@ -5293,8 +5303,7 @@
           ]
         }
       ],
-      "words": 819,
-      "widget": "graph"
+      "words": 819
     },
     {
       "id": 73,
