@@ -2725,9 +2725,37 @@ PB.registerPipelineParsingCallback(
 | Opaque predicates | Insert always-true `if` branches to plant bogus paths | `CFGAnalyzer` (chooses insertion points at joins and loops), `IRBuilder`, value demotion | The predicate expression plus a dead branch |
 | Function splitting / cloning | Divide one function into several, or clone it with wrapper entries | Per-sub-function eligibility, `CFGAnalyzer`, `CloneFunction`/`SplitFunction` utilities | Slicing logic — the inverse of flattening |
 | Instruction / data substitution | Rewrite `a+b` as `a+1+(b-1)`, or encrypt a string and decode it at run time | `IRBuilder` | Rewrite rules; the guard must loosen its scalar-only restriction |
+| String encryption | Hide C-string constants behind a runtime decode | `IRBuilder`; a module/function pass walking the constant pool | The decode routine; the guard must accept the new call |
 | Bogus control flow / junk code | Add dead blocks reachable only through an opaque predicate | `StateMachineBuilder` (already synthesizes the dispatcher and invalid blocks), `CFGAnalyzer` | Block synthesis under a provably-dead condition |
 | Forward CFI | Restrict `indirectbr` and indirect calls to a valid target set | `CFGAnalyzer` (successor sets are the CFI target sets) | Target-set checks; conflicts with flattening's guard |
 | Symbol / name obfuscation | Rename functions, globals, and labels to opaque names | A `ModulePass` / `FunctionPass` walking the symbol tables | A different pass-manager level |
+
+### Which level each technique lives at
+
+Not every hardening technique is an `opt` pass. Some are built into the
+compiler as flags, some are linker or load-time decisions, some need the
+operating system or the hardware, and some are separate tools that run on
+the final binary or on your test inputs. The level a technique lives at
+decides whether the MiniShield registry can host it at all — and it is the
+reason the framework has a hard edge.
+
+| Technique family | Typical members | Level | Can the MiniShield registry host it? |
+| --- | --- | --- | --- |
+| Obfuscation | flattening, opaque predicates, substitution, function splitting, name and string obfuscation | LLVM IR pass | Yes — this is the registry's home turf |
+| Control-flow integrity | forward/backward CFI checks, shadow stacks, CET | Compiler flag + runtime library | Partly — the check is pass-shaped, but the target-set policy and the runtime library are toolchain-level |
+| Control-data protection | stack canaries | Compiler built-in pass (`-fstack-protector`) | No — it is already a built-in pass, not something the plugin adds |
+| Platform hardening | PIC/PIE, ASLR, RELRO, NX/DEP | Compiler + linker + operating system | No — fixed at link and load time, after the IR passes have run |
+| Anti-debug / anti-tamper | debugger detection, integrity checks, packers, VMProtect-style VM | Separate binary tool | No — it operates on the shipped binary or at runtime, not on the IR |
+| Fuzzing | coverage-guided fuzzing (libFuzzer, AFL) | Separate test tool | No — it finds bugs in your passes; it never ships in the hardened binary |
+
+Only the top row — IR-level structural rewrites — lives inside the
+registry. Everything else sits at the compiler, the linker, the operating
+system, or in a separate tool. That is the framework's hard edge, made
+concrete: MiniShield can compose passes into a pipeline, but it cannot turn
+a linker flag, an OS feature, or a packer into a named pass. Volume 3's
+crash course teaches those toolchain-level techniques by reading and
+verifying what the compiler already emits, rather than by adding them to
+the registry.
 
 ### The glue you add to make it a framework
 

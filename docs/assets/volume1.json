@@ -4926,6 +4926,12 @@
               "Rewrite rules; the guard must loosen its scalar-only restriction"
             ],
             [
+              "String encryption",
+              "Hide C-string constants behind a runtime decode",
+              "`IRBuilder`; a module/function pass walking the constant pool",
+              "The decode routine; the guard must accept the new call"
+            ],
+            [
               "Bogus control flow / junk code",
               "Add dead blocks reachable only through an opaque predicate",
               "`StateMachineBuilder` (already synthesizes the dispatcher and invalid blocks), `CFGAnalyzer`",
@@ -4944,6 +4950,65 @@
               "A different pass-manager level"
             ]
           ]
+        },
+        {
+          "type": "heading",
+          "text": "Which level each technique lives at"
+        },
+        {
+          "type": "paragraph",
+          "text": "Not every hardening technique is an `opt` pass. Some are built into the compiler as flags, some are linker or load-time decisions, some need the operating system or the hardware, and some are separate tools that run on the final binary or on your test inputs. The level a technique lives at decides whether the MiniShield registry can host it at all — and it is the reason the framework has a hard edge."
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Technique family",
+              "Typical members",
+              "Level",
+              "Can the MiniShield registry host it?"
+            ],
+            [
+              "Obfuscation",
+              "flattening, opaque predicates, substitution, function splitting, name and string obfuscation",
+              "LLVM IR pass",
+              "Yes — this is the registry's home turf"
+            ],
+            [
+              "Control-flow integrity",
+              "forward/backward CFI checks, shadow stacks, CET",
+              "Compiler flag + runtime library",
+              "Partly — the check is pass-shaped, but the target-set policy and the runtime library are toolchain-level"
+            ],
+            [
+              "Control-data protection",
+              "stack canaries",
+              "Compiler built-in pass (`-fstack-protector`)",
+              "No — it is already a built-in pass, not something the plugin adds"
+            ],
+            [
+              "Platform hardening",
+              "PIC/PIE, ASLR, RELRO, NX/DEP",
+              "Compiler + linker + operating system",
+              "No — fixed at link and load time, after the IR passes have run"
+            ],
+            [
+              "Anti-debug / anti-tamper",
+              "debugger detection, integrity checks, packers, VMProtect-style VM",
+              "Separate binary tool",
+              "No — it operates on the shipped binary or at runtime, not on the IR"
+            ],
+            [
+              "Fuzzing",
+              "coverage-guided fuzzing (libFuzzer, AFL)",
+              "Separate test tool",
+              "No — it finds bugs in your passes; it never ships in the hardened binary"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Only the top row — IR-level structural rewrites — lives inside the registry. Everything else sits at the compiler, the linker, the operating system, or in a separate tool. That is the framework's hard edge, made concrete: MiniShield can compose passes into a pipeline, but it cannot turn a linker flag, an OS feature, or a packer into a named pass. Volume 3's crash course teaches those toolchain-level techniques by reading and verifying what the compiler already emits, rather than by adding them to the registry."
         },
         {
           "type": "heading",
@@ -4994,7 +5059,7 @@
           ]
         }
       ],
-      "words": 1050,
+      "words": 1403,
       "quiz": {
         "q": "A new hardening technique is being added to MiniShield. Which existing piece is the keystone that lets one plugin host many techniques?",
         "choices": [
