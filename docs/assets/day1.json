@@ -4978,7 +4978,8 @@
           ]
         }
       ],
-      "words": 952
+      "words": 952,
+      "widget": "llvm-objects"
     },
     {
       "id": 76,
@@ -5132,7 +5133,8 @@
           ]
         }
       ],
-      "words": 760
+      "words": 760,
+      "widget": "llvm-types"
     },
     {
       "id": 77,
@@ -5291,7 +5293,8 @@
           ]
         }
       ],
-      "words": 819
+      "words": 819,
+      "widget": "graph"
     },
     {
       "id": 73,
