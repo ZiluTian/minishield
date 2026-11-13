@@ -348,3 +348,635 @@ Checkpoint: In the demo the no-canary build reaches `sink` and the canary build 
 2. (b) `sspstrong` in the function's attribute bundle (with `"stack-protector-buffer-size"`). The frontend only records which frames are eligible; the backend materializes the load/store/compare from that attribute, so an IR-only reader sees no canary instructions at all — the protection is a property of the generated machine code, not of the IR.
 
 3. (c) For example, overwriting a global function pointer: the canary guards only the saved return address of protected frames. A corrupted dispatch pointer in `.data` never touches any frame's guard, the program dispatches through it, and no canary is ever consulted — the check exists only at the exit of instrumented functions, and only for their own return path.
+
+3.4.1 Bogus control flow
+========================
+
+This part treats three OLLVM-family obfuscations as MiniShield passes, added one at a time with the Volume 1 capstone recipe: register the name in `lib/Plugin.cpp`, encode the support contract in a guard, write the builder, orchestrate eligibility, build, verify, and close with a fixture pair whose before and after pass `opt -passes=verify` and run identically. OLLVM is the 2015 project that collected these transforms for LLVM: each changes the program's structure without changing its behavior, on the assumption that a static reader — a person or an analysis tool — spends time on the added structure. That assumption is the one the landscape lesson put at risk: the final optimizer does not read the program, it proves things about it, and anything it can prove away it removes. The standard for this part is the one set in the landscape lesson: judge each transform on the final artifact, not on the pass output.
+
+### The recipe, instantiated for bcfl
+
+- Register the branch in `lib/Plugin.cpp`: `Name == "minishield-bcfl"` → `FPM.addPass(minishield::BogusControlFlowPass())`, next to `minishield-flatten` and `minishield-stats`.
+- Write the guard `BcflEligibility::check(F)`: the function has at least one conditional branch; no `unreachable`, no `musttail`, no inline assembly — the shared negative fixtures in `tests/ir/` already cover those shapes. Rejection prints a named diagnostic and leaves the function untouched.
+- Write the builder: for each conditional branch, insert a gate block that evaluates an opaque predicate over a seed, with the original target on the true side and a new dead block on the false side.
+- Orchestrate in `BogusControlFlowPass::run` exactly like `FlatteningPass::run`: guard, build, verify.
+- Close with the fixture pair plus the differential: both modules verify, both binaries run identically.
+
+The fixture is `grade`, a function with one conditional branch — three blocks at `-O0`. The opaque predicate is a product of two consecutive integers: given a seed `s`, compute `s² − s`, which is `s·(s−1)`, and test whether it is even. One of `s` and `s−1` is always even, so the product is always even, so the predicate is always true — but that is a number-theoretic fact about the seed, not something the optimizer is given.
+
+### The transformed module
+
+```llvm
+source_filename = "bcfl_fixture.c"
+target triple = "x86_64-conda-linux-gnu"
+
+declare i32 @printf(ptr noundef, ...)
+
+@.fmt = private unnamed_addr constant [16 x i8] c"grades sum: %d\0A\00"
+
+; bcfl: 4 new blocks. Each side's real target is now reached through a gate
+; guarded by an opaque predicate (product of consecutive integers is even).
+; The seeds are constants chosen at transform time; the redundant blocks are dead.
+define i32 @grade(i32 noundef %score) {
+entry:
+  %seed_pass = alloca i32, align 4
+  %seed_fail = alloca i32, align 4
+  store i32 987654, ptr %seed_pass, align 4
+  store i32 135791, ptr %seed_fail, align 4
+  %cmp = icmp sge i32 %score, 60
+  br i1 %cmp, label %gate_pass, label %gate_fail
+gate_pass:
+  %sp = load i32, ptr %seed_pass, align 4
+  %t = mul i32 %sp, %sp
+  %d = sub i32 %t, %sp
+  %p = urem i32 %d, 2
+  %g = icmp eq i32 %p, 0
+  br i1 %g, label %pass, label %bogus_pass
+pass:
+  ret i32 1
+bogus_pass:
+  store i32 0, ptr %seed_pass, align 4
+  br label %pass
+gate_fail:
+  %sf = load i32, ptr %seed_fail, align 4
+  %t2 = mul i32 %sf, %sf
+  %d2 = sub i32 %t2, %sf
+  %p2 = urem i32 %d2, 2
+  %g2 = icmp eq i32 %p2, 0
+  br i1 %g2, label %fail, label %bogus_fail
+fail:
+  ret i32 0
+bogus_fail:
+  store i32 0, ptr %seed_fail, align 4
+  br label %fail
+}
+
+define i32 @main() {
+  %r1 = call i32 @grade(i32 70)
+  %r2 = call i32 @grade(i32 30)
+  %sum = add i32 %r1, %r2
+  %p = call i32 @printf(ptr @.fmt, i32 %sum)
+  ret i32 0
+}
+```
+
+Read it against the original. Entry now stores two seeds — `987654` and `135791`, chosen at transform time — into allocas. The original branch no longer reaches its real targets: `br i1 %cmp` goes to `gate_pass` and `gate_fail`. Each gate loads its seed, computes `mul` → `sub` → `urem 2` → `icmp eq 0`, and branches: the true side (the only side that ever runs) reaches the unchanged `pass`/`fail` blocks; the false side goes to a new `bogus_pass`/`bogus_fail` block that stores to the seed and falls through to the real target. The function goes from 3 blocks to 7, and the module from 517 to 1444 bytes. The redundant blocks are dead by construction — the gate always takes the true edge — and that is the point: they exist to be read, not to be executed.
+
+### Differential proof at -O0
+
+```bash
+$ opt-23 -passes=verify -disable-output bcfl_before.ll
+$ opt-23 -passes=verify -disable-output bcfl_after.ll
+$ clang-23 -O0 bcfl_before.ll -o bcfl_before_bin
+$ clang-23 -O0 bcfl_after.ll -o bcfl_after_bin
+$ ./bcfl_before_bin
+grades sum: 1
+$ ./bcfl_after_bin
+grades sum: 1
+$ diff <(./bcfl_before_bin) <(./bcfl_after_bin)
+(identical)
+```
+
+Both modules verify; both binaries print the same line — `grade(70)` returns 1, `grade(30)` returns 0, sum 1 either way. Note what is not evidence here: the `-O0` ELF size does not move (16624 bytes for both binaries), because section alignment swallows the difference — the module's byte count, 517 → 1444, is the honest measure of what the transform added.
+
+### What -O2 does to it
+
+Now run the final optimizer over the obfuscated module. The seeds are constants, so the gate's arithmetic is a compile-time constant: the predicate folds to true, the false edges die, the redundant blocks (whose only instruction is a store to a seed nothing reads afterward) are eliminated, and the gates merge away. Seven blocks become one:
+
+```llvm
+target triple = "x86_64-conda-linux-gnu"
+
+declare i32 @printf(ptr noundef, ...)
+
+@.fmt = private unnamed_addr constant [16 x i8] c"grades sum: %d\0A\00"
+
+; -O2 on the bcfl module: the seeds are constants, so the gate predicates
+; fold, the dead blocks are removed, and the original branch linearizes.
+define i32 @grade(i32 noundef %score) {
+entry:
+  %cmp = icmp sgt i32 %score, 59
+  %. = zext i1 %cmp to i32
+  ret i32 %.
+}
+
+define i32 @main() {
+  %p = call i32 @printf(ptr @.fmt, i32 1)
+  ret i32 0
+}
+```
+
+`grade` is back to a single block — `icmp sgt i32 %score, 59` (the optimizer's own rewrite of `score >= 60`), a `zext`, a `ret` — and `main` has folded the two `grade` calls into the constant `1`. The transform is entirely gone. Keep two mechanisms separate. First, the constant seed: the predicate *computes* to a constant, so everything above it folds. Second, what happens when the seed is not a constant — replace both stores with `store i32 %score`: the predicate is now over runtime data, and the optimizer still does not dissolve the gate by proving it. A minimal probe (a bare branch on `s·(s−1) % 2 == 0` over an argument) shows LLVM 23's `-O2` normalizing the predicate to `x·(x−1)` with `and 1` and turning the branch into a `select` — but keeping it: the evenness of a product of consecutive integers is not proven in this context. The runtime-seed module dissolves anyway, 7 → 1 blocks, by a different route: the redundant blocks' stores are dead (nothing reads the seeds after the gates), DCE empties the blocks, and the empty fallthroughs merge. The predicate was never proven; the structure was simply emptied.
+
+The one content the optimizer cannot delete is a side effect. Put an opaque call in each redundant block (`call void @record_trace(i32 7)` and `(i32 9)`) and the dead blocks no longer empty: the calls must be kept. `-O2`'s answer is to merge the two dead blocks into a single sink on the false side of a still-live gate branch — `br i1 %g, label %common.ret, label %common.ret.sink.split` — with one hoisted call and a `select` choosing which argument to pass. Seven blocks become three; runtime behavior is still identical, because the predicate really is always true and the sink really is never executed. What survives of the transform is a hoisted call behind a live-looking branch, not the four added blocks the pass emitted.
+
+- Constant seed: the predicate computes to a constant; fold → dead-edge elimination → dead-block DCE → merge. 7 blocks → 1.
+- Runtime seed, no side effect: the redundant blocks' stores are eliminated, the blocks become empty fallthroughs, and block merging removes the gates. 7 blocks → 1. The predicate is never proven.
+- Runtime seed + opaque call: the call must survive; both dead blocks merge into one sink on the live gate's false side, with a selected argument. 7 blocks → 3.
+
+The three routes share a law, and the law recurs in this part: obfuscation adds structure without behavior, and the optimizer's job is exactly to remove structure without behavior. Opaque side effects are the only content the optimizer may not delete, and even those get hoisted and shrunk. The pass output (1444 bytes, 7 blocks) and the final artifact (1 block) are different programs to read; the one that ships is the second.
+
+Checkpoint: In the transformed module the gates are always taken one way, yet -O2 does not dissolve them by proving that. (a) State the predicate and why it is always true, and name the rewrite the optimizer applies to it without finishing the job. (b) The constant-seed build dissolves 7 → 1 blocks and the runtime-seed build dissolves 7 → 1 blocks. Name the different mechanism that dissolves each. (c) In the survivor variant, where does the `record_trace` call end up after -O2, and why is that placement the strongest form the transform can take?
+
+### Model answer
+
+1. (a) A product of two consecutive integers: the gate computes `s·(s−1) % 2 == 0`. One of `s` and `s−1` is even, so the product is always even, so the predicate is always true. `instcombine` rewrites `s² − s` to `s·(s−1)` and `urem 2` to `and 1` — it normalizes the predicate's shape but does not prove its truth in branch context.
+
+2. (b) Constant seed: the predicate computes to the constant true, the false edge is eliminated, the redundant blocks (whose only store targets a dead seed) are DCE'd, and the gates merge away — the function linearizes. Runtime seed, no side effect: the optimizer never proves the predicate; DCE removes the redundant blocks' dead stores, the blocks become empty fallthroughs, and block merging removes the gates themselves.
+
+3. (c) Into a single sink block on the false side of a still-live gate branch (`common.ret.sink.split`), hoisted out of both dead blocks, with a `select` choosing which argument (7 or 9) to pass. The call is an opaque side effect, so DCE cannot delete it; the two dead blocks merge into one shared sink, collapsing the obfuscated pair of calls to one — and because the gate's predicate really is always true, the sink never runs, so behavior stays identical.
+
+3.4.2 String encryption
+=======================
+
+The first move in any static reading of a binary is its strings: the URLs, keys, magic words, and format literals the program uses. OLLVM's string encryption attacks exactly that: each plaintext constant becomes an encrypted blob plus a per-byte key, and each use becomes a decrypt loop that reconstructs the plaintext into a stack buffer at runtime. The program still computes the plaintext — the transform changes where the bytes sit, not what they are.
+
+As a MiniShield pass this follows the same five seams as the previous lesson: `minishield-strenc` in the registry; a guard for functions whose string constants are reachable (no `musttail`, no inline assembly, the shared `tests/ir/` fixtures); a builder that replaces each `c"..."` global with an `@enc`/`@key` pair and inserts a per-byte XOR loop at the use; the same orchestration; and the fixture pair below, differentially verified.
+
+### The transformed module
+
+The fixture is `banner`, which `puts` the constant `"minishield\0"` — one global, one call, a 305-byte module. After the transform:
+
+```llvm
+source_filename = "strenc_fixture.c"
+target triple = "x86_64-conda-linux-gnu"
+
+declare i32 @puts(ptr noundef)
+
+; The plaintext is out of the module: only the encrypted blob and the key remain.
+@enc = private unnamed_addr constant [11 x i8] c"\37\76\ad\e2\04\6c\b7\f4\47\94\68"
+@key = private unnamed_addr constant [11 x i8] c"\5a\1f\c3\8b\77\04\de\91\2b\f0\68"
+
+define void @banner() {
+entry:
+  %buf = alloca [11 x i8], align 1
+  %i = alloca i64, align 8
+  store i64 0, ptr %i, align 8
+  br label %loop
+loop:
+  %iv = load i64, ptr %i, align 8
+  %c = icmp slt i64 %iv, 11
+  br i1 %c, label %body, label %after
+body:
+  %gep_e = getelementptr inbounds [11 x i8], ptr @enc, i64 0, i64 %iv
+  %e = load i8, ptr %gep_e
+  %gep_k = getelementptr inbounds [11 x i8], ptr @key, i64 0, i64 %iv
+  %k = load i8, ptr %gep_k
+  %x = xor i8 %e, %k
+  %gep_b = getelementptr inbounds [11 x i8], ptr %buf, i64 0, i64 %iv
+  store i8 %x, ptr %gep_b
+  %inc = add i64 %iv, 1
+  store i64 %inc, ptr %i, align 8
+  br label %loop
+after:
+  %b0 = getelementptr inbounds [11 x i8], ptr %buf, i64 0, i64 0
+  %p = call i32 @puts(ptr %b0)
+  ret void
+}
+
+define i32 @main() {
+  call void @banner()
+  ret i32 0
+}
+```
+
+`@.str` is gone. In its place: `@enc`, the ciphertext, and `@key`, the per-byte key, both chosen at transform time — byte `i` of the plaintext is `@enc[i] xor @key[i]`, and the last byte is the encrypted NUL terminator (`0x00 xor 0x68`). `banner` allocates a stack buffer and runs an `i64`-indexed loop: load a ciphertext byte, load a key byte, XOR, store. The index is `i64` because `getelementptr` into an array takes `i64` indices — widening a 32-bit counter is the detail that breaks a hand-written version, which `opt` rejects with `expected 'i64'`. The plaintext now exists at runtime only in `%buf`, between the loop's exit and the `puts` call.
+
+### Differential proof
+
+```bash
+$ opt-23 -passes=verify -disable-output strenc_before.ll
+$ opt-23 -passes=verify -disable-output strenc_after.ll
+$ clang-23 -O0 strenc_before.ll -o strenc_before_bin
+$ clang-23 -O0 strenc_after.ll -o strenc_after_bin
+$ diff <(./strenc_before_bin) <(./strenc_after_bin)
+(identical)
+$ strings strenc_before_bin | grep -x minishield
+minishield
+$ strings strenc_after_bin | grep -x minishield
+(no match — exit status 1)
+```
+
+Two annotations. First, why `grep -x`: binaries built under the conda toolchain carry the toolchain's own path in their note sections — `/home/.../minishield/...` — so a bare `grep minishield` hits that path noise in *both* binaries. `-x` anchors on the whole line, so only a real string line matches. Second, the cost: the module grows from 305 to 1175 bytes to move an 11-byte literal behind a loop.
+
+### What -O2 does to it
+
+```llvm
+target triple = "x86_64-conda-linux-gnu"
+
+declare i32 @puts(ptr noundef)
+
+; -O2 on the strenc module: the decrypt loop over constants is itself
+; a constant. The result is emitted as immediates; @enc and @key are gone.
+define void @banner() {
+entry:
+  %buf = alloca [11 x i8], align 8
+  store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>, ptr %buf, align 8
+  %gep_b.8 = getelementptr inbounds nuw i8, ptr %buf, i64 8
+  store i8 108, ptr %gep_b.8, align 8
+  %gep_b.9 = getelementptr inbounds nuw i8, ptr %buf, i64 9
+  store i8 100, ptr %gep_b.9, align 1
+  %gep_b.10 = getelementptr inbounds nuw i8, ptr %buf, i64 10
+  store i8 0, ptr %gep_b.10, align 2
+  %p = call i32 @puts(ptr nonnull dereferenceable(1) %buf)
+  ret void
+}
+
+define noundef i32 @main() {
+  %buf.i = alloca [11 x i8], align 8
+  call void @llvm.lifetime.start.p0(ptr nonnull %buf.i)
+  store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>, ptr %buf.i, align 8
+  %gep_b.8.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 8
+  store i8 108, ptr %gep_b.8.i, align 8
+  %gep_b.9.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 9
+  store i8 100, ptr %gep_b.9.i, align 1
+  %gep_b.10.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 10
+  store i8 0, ptr %gep_b.10.i, align 2
+  %p.i = call i32 @puts(ptr nonnull dereferenceable(1) %buf.i)
+  call void @llvm.lifetime.end.p0(ptr nonnull %buf.i)
+  ret i32 0
+}
+```
+
+The decrypt loop's operands are two constant arrays, so the whole loop is a compile-time constant. `-O2` replaces it with immediate stores — `store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>` is `minishie`, plus `l`, `d`, and NUL as separate stores — and deletes `@enc` and `@key` entirely. The trap is in the test: `grep minishield` on the -O2 module finds nothing, so a reader who probes the artifact with the same `strings`-style check concludes the plaintext is still hidden. It is not: it is back, as immediate values in the stores, not as a string literal — a disassembler reading the store's immediates sees the bytes directly. The property the transform provided was never “the optimizer cannot reconstruct the plaintext”; it was “the plaintext is not a contiguous literal in the artifact at the shipped optimization level.”
+
+- Before the transform, any level: the literal sits in `.rodata`; `strings` finds it.
+- After the transform, -O0: blob + key + runtime loop; `strings` finds nothing; the cost is a stack buffer and a byte loop at every call.
+- After the transform, -O2: the loop constant-folds to immediates, the globals are deleted, and the bytes are visible in the disassembly's immediate fields. The artifact is no harder to read than the unencrypted one.
+
+Checkpoint: (a) In the transformed module, where does the plaintext exist at runtime, and which two globals hold its material? (b) `strings` on the -O0 binary finds nothing, and `grep minishield` on the -O2 module finds nothing. What actually returns at -O2, in what form, and why does that make the -O0 `strings` test a misleading probe of the final artifact? (c) State the condition on the final pipeline under which string encryption's property actually holds in a shipped binary.
+
+### Model answer
+
+1. (a) In a stack buffer (`%buf`), reconstructed byte by byte by the XOR loop and present only between the loop's exit and the `puts` call. Its material lives in two globals, `@enc` (the ciphertext) and `@key` (the per-byte key); the plaintext itself is present in no global.
+
+2. (b) At -O2 the decrypt loop over two constant arrays is constant-folded: the plaintext returns as immediate values (`store <8 x i8> <i8 109, ...>`), not as a string literal — so `grep minishield` finds nothing even though a disassembler reading the stores sees the bytes. The -O0 `strings` test measured “no contiguous literal in this -O0 binary”; it says nothing about the final artifact, where the same transform is folded back into plain stores.
+
+3. (c) The transform must be the last step of the pipeline — applied after the final optimization, so that no later optimizer pass (a second `opt -O2`, LTO at link) can fold the decrypt loop. That is the deployment rule the part closes with in the next lesson.
+
+3.4.3 Subroutine splitting
+==========================
+
+Subroutine splitting (OLLVM's `subdiv`) takes a function with a tangled CFG and moves each of its non-entry blocks into its own `internal` function. The original keeps its entry and becomes a dispatcher over a state variable: a `switch` that calls the right part and loops back. Each part looks like an unrelated helper, and the shape of the CFG — the thing static analysis keys on — is no longer visible inside any single function.
+
+The five seams again, with the pattern from the previous lesson: `minishield-subdivide` in the registry; a guard for functions whose blocks are movable (no PHI nodes whose incoming edges would need a home in the split — the fixture below is PHI-free at -O0, with all state in allocas; no `musttail`, no inline assembly); a builder that cuts each non-entry block into an `internal` function taking the needed allocas as pointer arguments, converts each conditional branch into a `select` that writes the next state, converts each unconditional branch into a constant store, and turns `ret` into the part's return; the same orchestration; and the fixture pair, differentially verified.
+
+### The transformed module
+
+The fixture is `total`, a loop accumulating `a·b`, in its -O0 shape: five blocks (`entry`, `cond`, `body`, `inc`, `exit`), four allocas, no PHIs. After the transform — 2 → 6 functions, module 1123 → 2232 bytes:
+
+```llvm
+source_filename = "subdivide_fixture.c"
+target triple = "x86_64-conda-linux-gnu"
+
+declare i32 @printf(ptr noundef, ...)
+
+@.fmt = private unnamed_addr constant [15 x i8] c"total(6,4)=%d\0A\00"
+
+; subdivide: each non-entry block becomes an internal subroutine. The original
+; function keeps only the entry setup and becomes the state dispatcher.
+; State numbering follows block order: 1=cond, 2=body, 3=inc, 4=exit.
+
+define internal void @total.1(ptr %p_i, ptr %p_b, ptr %p_state) {
+  %i = load i32, ptr %p_i, align 4
+  %b2 = load i32, ptr %p_b, align 4
+  %c = icmp slt i32 %i, %b2
+  %ns = select i1 %c, i32 2, i32 4
+  store i32 %ns, ptr %p_state, align 4
+  ret void
+}
+
+define internal void @total.2(ptr %p_a, ptr %p_sum, ptr %p_state) {
+  %a2 = load i32, ptr %p_a, align 4
+  %s = load i32, ptr %p_sum, align 4
+  %ns = add nsw i32 %s, %a2
+  store i32 %ns, ptr %p_sum, align 4
+  store i32 3, ptr %p_state, align 4
+  ret void
+}
+
+define internal void @total.3(ptr %p_i, ptr %p_state) {
+  %i2 = load i32, ptr %p_i, align 4
+  %inc2 = add nsw i32 %i2, 1
+  store i32 %inc2, ptr %p_i, align 4
+  store i32 1, ptr %p_state, align 4
+  ret void
+}
+
+define internal i32 @total.4(ptr %p_sum) {
+  %r = load i32, ptr %p_sum, align 4
+  ret i32 %r
+}
+
+define i32 @total(i32 noundef %a, i32 noundef %b) {
+entry:
+  %p_a = alloca i32, align 4
+  %p_b = alloca i32, align 4
+  %p_sum = alloca i32, align 4
+  %p_i = alloca i32, align 4
+  store i32 %a, ptr %p_a, align 4
+  store i32 %b, ptr %p_b, align 4
+  store i32 0, ptr %p_sum, align 4
+  store i32 0, ptr %p_i, align 4
+  %p_state = alloca i32, align 4
+  store i32 1, ptr %p_state, align 4
+  br label %dispatch
+dispatch:
+  %s = load i32, ptr %p_state, align 4
+  switch i32 %s, label %invalid [
+    i32 1, label %c1
+    i32 2, label %c2
+    i32 3, label %c3
+    i32 4, label %c4
+  ]
+c1:
+  call void @total.1(ptr %p_i, ptr %p_b, ptr %p_state)
+  br label %dispatch
+c2:
+  call void @total.2(ptr %p_a, ptr %p_sum, ptr %p_state)
+  br label %dispatch
+c3:
+  call void @total.3(ptr %p_i, ptr %p_state)
+  br label %dispatch
+c4:
+  %r = call i32 @total.4(ptr %p_sum)
+  ret i32 %r
+invalid:
+  unreachable
+}
+
+define i32 @main() {
+  %r = call i32 @total(i32 6, i32 4)
+  %p = call i32 @printf(ptr @.fmt, i32 %r)
+  ret i32 0
+}
+```
+
+Read the parts first. `total.1` is the old `cond` block: it computes the branch decision, but instead of branching it writes the next state — `%ns = select i1 %c, i32 2, i32 4`: loop again (state 2) or exit (state 4). `total.2` is `body` (accumulate, then write state 3). `total.3` is `inc` (increment, then write state 1, back to the condition). `total.4` is `exit` — the only part that returns a value, the accumulated sum. The conditional branch became a state assignment; the unconditional branch became a constant store; `ret` became the part's return. Now the dispatcher: `total` keeps its entry setup, adds a `%p_state` alloca initialized to 1, and loops over `switch i32 %s`: each case calls the matching part and returns to the dispatch; case 4 returns the part's value; the `invalid` default is `unreachable`, because the state is only ever assigned 1 through 4.
+
+### Differential proof
+
+```bash
+$ opt-23 -passes=verify -disable-output subdivide_before.ll
+$ opt-23 -passes=verify -disable-output subdivide_after.ll
+$ clang-23 -O0 subdivide_before.ll -o subdivide_before_bin
+$ clang-23 -O0 subdivide_after.ll -o subdivide_after_bin
+$ diff <(./subdivide_before_bin) <(./subdivide_after_bin)
+(identical)
+$ ./subdivide_after_bin
+total(6,4)=24
+$ grep -c '^define' subdivide_before.ll
+2
+$ grep -c '^define' subdivide_after.ll
+6
+```
+
+Both modules verify; both binaries print `total(6,4)=24`; the module gains four `internal` functions. The -O0 binary sizes barely move (16624 vs 16632 bytes) — alignment again — so the honest measures are the function count and the module bytes.
+
+### What -O2 does to it
+
+Every `total.N` is `internal` (no definition outside the module can reference it) and has exactly one caller — the dispatcher. That is the inliner's exact target, and -O2 inlines all four parts, recovers the original loop, and then optimizes the recovered loop. The fragment below is the `total` function from the -O2 module (the attribute groups and loop metadata it references sit at the end of the module):
+
+```llvm
+define i32 @total(i32 noundef %a, i32 noundef %b) local_unnamed_addr #1 {
+dispatch.outer4:
+  %c.i.jt129 = icmp sgt i32 %b, 0
+  br i1 %c.i.jt129, label %dispatch.outer4.jt3.lr.ph, label %c4
+
+dispatch.outer4.jt3.lr.ph:                        ; preds = %dispatch.outer4
+  %min.iters.check = icmp ult i32 %b, 8
+  br i1 %min.iters.check, label %dispatch.outer4.jt3.preheader, label %vector.ph
+
+vector.ph:                                        ; preds = %dispatch.outer4.jt3.lr.ph
+  %n.vec = and i32 %b, 2147483640
+  %broadcast.splatinsert = insertelement <4 x i32> poison, i32 %a, i64 0
+  %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> poison, <4 x i32> zeroinitializer
+  br label %vector.body
+
+vector.body:                                      ; preds = %vector.body, %vector.ph
+  %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+  %vec.phi = phi <4 x i32> [ zeroinitializer, %vector.ph ], [ %0, %vector.body ]
+  %vec.phi32 = phi <4 x i32> [ zeroinitializer, %vector.ph ], [ %1, %vector.body ]
+  %0 = add <4 x i32> %vec.phi, %broadcast.splat
+  %1 = add <4 x i32> %vec.phi32, %broadcast.splat
+  %index.next = add nuw i32 %index, 8
+  %2 = icmp eq i32 %index.next, %n.vec
+  br i1 %2, label %middle.block, label %vector.body, !llvm.loop !0
+
+middle.block:                                     ; preds = %vector.body
+  %bin.rdx = add <4 x i32> %1, %0
+  %3 = tail call i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %bin.rdx)
+  %cmp.n = icmp eq i32 %b, %n.vec
+  br i1 %cmp.n, label %c4, label %dispatch.outer4.jt3.preheader
+
+dispatch.outer4.jt3.preheader:                    ; preds = %dispatch.outer4.jt3.lr.ph, %middle.block
+  %p_sum.0.ph2031.ph = phi i32 [ 0, %dispatch.outer4.jt3.lr.ph ], [ %3, %middle.block ]
+  %inc2.i.sink30.ph = phi i32 [ 0, %dispatch.outer4.jt3.lr.ph ], [ %n.vec, %middle.block ]
+  br label %dispatch.outer4.jt3
+
+dispatch.outer4.jt3:                              ; preds = %dispatch.outer4.jt3.preheader, %dispatch.outer4.jt3
+  %p_sum.0.ph2031 = phi i32 [ %ns.i1, %dispatch.outer4.jt3 ], [ %p_sum.0.ph2031.ph, %dispatch.outer4.jt3.preheader ]
+  %inc2.i.sink30 = phi i32 [ %inc2.i, %dispatch.outer4.jt3 ], [ %inc2.i.sink30.ph, %dispatch.outer4.jt3.preheader ]
+  %ns.i1 = add nsw i32 %p_sum.0.ph2031, %a
+  %inc2.i = add nuw nsw i32 %inc2.i.sink30, 1
+  %c.i.jt1 = icmp slt i32 %inc2.i, %b
+  br i1 %c.i.jt1, label %dispatch.outer4.jt3, label %c4, !llvm.loop !3
+
+c4:                                               ; preds = %dispatch.outer4.jt3, %middle.block, %dispatch.outer4
+  %p_sum.0.ph20.lcssa = phi i32 [ 0, %dispatch.outer4 ], [ %3, %middle.block ], [ %ns.i1, %dispatch.outer4.jt3 ]
+  ret i32 %p_sum.0.ph20.lcssa
+}
+```
+
+Note what the optimizer did to the recovered loop: it did not stop at the original — it vectorized it, four additions wide, closing each vector iteration with `llvm.vector.reduce.add.v4i32`. The contrast with the unobfuscated original is the point: `-O2` on the *plain* module strength-reduces the same loop to the closed form `mul i32 %b, %a` plus a select, while `-O2` on the *obfuscated* module recovers the loop and vectorizes it. Both end states compute `a·b`; they are different programs, because the inlined state machine changed how the optimizer saw the loop. The transform itself — six functions, a switch, a state machine — is gone, along with the 2232 bytes.
+
+| Transform | Pass output (-O0) | Final artifact (-O2) |
+| --- | --- | --- |
+| Bogus control flow | 7 blocks, 1444 B | 1 block — seed fold, or dead-block DCE + merge |
+| String encryption | blob + key + loop, 1175 B | immediate stores; the globals deleted |
+| Subroutine splitting | 6 functions, 2232 B | 1 function; the loop vectorized 4-wide |
+
+Subdivide is the most fragile of the three, and the reason is now visible: it adds structure without content. Bogus control flow adds a predicate the optimizer cannot prove (and, with an opaque side effect, content the optimizer may not delete); string encryption moves data behind a loop that at least must be executed at -O0. Subdivide adds nothing but a decomposition of what was already there — and a decomposition is exactly what the inliner removes. A transform whose output is inlining fuel cannot survive an optimizer that inlines.
+
+Checkpoint: (a) In the transformed module, how does the original's conditional branch appear inside the parts, and what is the role of the dispatcher's `invalid` case? (b) Name the two properties of the `total.N` functions that make them guaranteed inlining targets at -O2. (c) Why is subroutine splitting the most fragile of the three OLLVM transforms in this part?
+
+### Model answer
+
+1. (a) As a `select` that writes the next state into the shared state slot: `total.1` ends with `%ns = select i1 %c, i32 2, i32 4; store i32 %ns, ptr %p_state`, and the dispatcher's `switch` re-branches on the stored value. The `invalid` case is the `switch`'s default and is `unreachable`: the state is only ever assigned 1 through 4, so the default encodes the state machine's invariant as dead code.
+
+2. (b) `internal` linkage — no definition outside the module can reference them — and a single caller, the dispatcher. The inliner can see the entire callee and its only use, so both the call and the function disappear.
+
+3. (c) It adds structure without content: no new predicate, no moved data, no side effect — only a decomposition of the existing CFG. The inliner, its exact inverse, undoes the decomposition and then optimizes the recovered loop (here, vectorizing it four-wide). The other two transforms leave something the optimizer cannot simply delete: an unprovable predicate behind a live branch, or bytes behind a loop.
+
+3.4.4 What the final optimizer keeps
+====================================
+
+Lessons 83 through 85 each ended the same way: -O2 over the pass output dissolved the transform. The dissolution was not a defect of the transforms; it was the pipeline order — in every case the transform ran on unoptimized IR, and the final optimizer then ran over it. The deployment rule this lesson proves: obfuscation must be the last transform, applied to the final optimized artifact. The proof uses the plugin the learner has been building — the flattening pass from Volume 2, `build/libMiniShield.so` — not a reference implementation.
+
+### A function that survives -O2
+
+The fixture is `classify`, a branched function over a runtime input:
+
+```c
+#include <stdio.h>
+
+__attribute__((noinline)) int classify(int x) {
+    if (x < 0)
+        return 100 - x;
+    if (x < 50)
+        return x * 2;
+    return x / 2 + 5;
+}
+
+int main(void) {
+    int v;
+    if (scanf("%d", &v) != 1) return 2;
+    printf("classify(%d)=%d\n", v, classify(v));
+    return 0;
+}
+```
+
+Why not reuse `total` from the previous lesson? Because -O2 strength-reduces it to `a·b` before any obfuscation runs: the five-block loop is gone, and there is nothing left to transform. `classify`'s branches depend on a runtime input the optimizer cannot fold, and the call is `noinline`, so the function keeps its shape through the final optimization. At -O2 it is five blocks — labels `3`, `5`, `7`, `9`, `12`, the numeric labels clang gives -O2 IR — with a PHI at the join:
+
+```llvm
+define dso_local range(i32 0, -2147483648) i32 @classify(i32 noundef %0) local_unnamed_addr #0 {
+  %2 = icmp slt i32 %0, 0
+  br i1 %2, label %3, label %5
+
+3:                                                ; preds = %1
+  %4 = sub nsw i32 100, %0
+  br label %12
+
+5:                                                ; preds = %1
+  %6 = icmp samesign ult i32 %0, 50
+  br i1 %6, label %7, label %9
+
+7:                                                ; preds = %5
+  %8 = shl nuw nsw i32 %0, 1
+  br label %12
+
+9:                                                ; preds = %5
+  %10 = lshr i32 %0, 1
+  %11 = add nuw nsw i32 %10, 5
+  br label %12
+
+12:                                               ; preds = %9, %7, %3
+  %13 = phi i32 [ %4, %3 ], [ %8, %7 ], [ %11, %9 ]
+  ret i32 %13
+}
+```
+
+### Flatten after -O2, with the real plugin
+
+```bash
+$ clang-23 -O2 -S -emit-llvm persist_fixture.c -o persist_o2.ll
+$ opt-23 -load-pass-plugin=build/libMiniShield.so \
+    -passes='function(minishield-flatten),verify' \
+    -S persist_o2.ll -o persist_final.ll
+[MiniShield] eligible: classify
+[MiniShield] rejected: main: intrinsic calls are outside this prototype's scope
+```
+
+Two diagnostics, both correct. `classify` is eligible, and it is flattened. `main` is rejected by the learner's own guard: at -O2 it still carries `llvm.lifetime.start`/`llvm.lifetime.end` intrinsic calls, which the support contract established in Volume 2 excludes — the guard prints its named reason and leaves the function untouched. The pipeline is two stages: the final optimizer first (`-O2` to a `.ll`), then the obfuscation (`function(minishield-flatten)`), then `verify`.
+
+### The artifact
+
+```llvm
+define dso_local range(i32 0, -2147483648) i32 @classify(i32 noundef %0) local_unnamed_addr #0 {
+  %ms.state = alloca i32, align 4
+  %.reg2mem = alloca i32, align 4
+  %2 = icmp slt i32 %0, 0
+  br i1 %2, label %3, label %5
+
+3:                                                ; preds = %ms.dispatch, %1
+  %4 = sub nsw i32 100, %0
+  store i32 %4, ptr %.reg2mem, align 4
+  br label %12
+
+5:                                                ; preds = %ms.dispatch, %1
+  %6 = icmp samesign ult i32 %0, 50
+  br i1 %6, label %7, label %9
+
+7:                                                ; preds = %ms.dispatch, %5
+  %8 = shl nuw nsw i32 %0, 1
+  store i32 %8, ptr %.reg2mem, align 4
+  br label %12
+
+9:                                                ; preds = %ms.dispatch, %5
+  %10 = lshr i32 %0, 1
+  %11 = add nuw nsw i32 %10, 5
+  store i32 %11, ptr %.reg2mem, align 4
+  br label %12
+
+12:                                               ; preds = %ms.dispatch, %9, %7, %3
+  %.reload = load i32, ptr %.reg2mem, align 4
+  ret i32 %.reload
+
+ms.dispatch:                                      ; No predecessors!
+  %ms.current = load i32, ptr %ms.state, align 4
+  switch i32 %ms.current, label %ms.invalid [
+    i32 0, label %3
+    i32 1, label %5
+    i32 2, label %7
+    i32 3, label %9
+    i32 4, label %12
+  ]
+
+ms.invalid:                                       ; preds = %ms.dispatch
+  unreachable
+}
+```
+
+This is the Volume 2 flattening output running on -O2's IR: the optimized blocks `3`, `5`, `7`, `9`, `12` are intact — note `shl nuw nsw` where -O2 wrote the `x * 2` — now reached through `ms.dispatch`, whose `switch` over `ms.current` maps the five states onto the five blocks, with the invalid state going to `ms.invalid` → `unreachable`. The `; No predecessors!` comment marks the dispatcher: execution enters it first, and its first dispatch jump reaches the right block. The state machine sits on top of the optimized function; the transform adds the dispatcher and leaves the optimized code alone.
+
+### Behavior identity
+
+```bash
+$ clang-23 persist_final.ll -o persist_final_bin
+$ clang-23 -O2 persist_fixture.c -o persist_orig_bin
+$ echo 42 | ./persist_final_bin  &&  echo 42 | ./persist_orig_bin
+classify(42)=84
+classify(42)=84
+$ echo 7 | ./persist_final_bin  &&  echo 7 | ./persist_orig_bin
+classify(7)=14
+classify(7)=14
+$ echo -7 | ./persist_final_bin  &&  echo -7 | ./persist_orig_bin
+classify(-7)=107
+classify(-7)=107
+```
+
+Three inputs, one per branch: negative (`-7 → 100 − (−7) = 107`), mid (`7 → 2·7 = 14`), high (`42 → 42/2 + 5 = 84`). The obfuscated artifact and the plain -O2 binary agree on all three: the flattened -O2 function is a correct program.
+
+### The control: re-run -O2
+
+```bash
+$ grep -c 'switch i32' persist_final.ll
+1
+$ opt-23 -O2 -S persist_final.ll -o persist_reopt.ll
+$ grep -c 'switch i32' persist_reopt.ll
+0
+```
+
+One more pass of -O2 over the obfuscated artifact and the dispatcher is gone: the `switch` count goes 1 → 0, `ms.state` and `ms.dispatch` are deleted, and `classify` is back to plain branches. Behavior is unchanged — the re-optimized binary still prints the same three lines — but the artifact is structurally unobfuscated again. An artifact is only as obfuscated as the last transform that ran on it; a transform that runs before the final optimizer hands the optimizer a second look, and the optimizer takes it.
+
+### Two pipeline traps
+
+- `O2` is not a pass name. `opt -passes='O2,function(minishield-flatten)'` fails with `unknown pass name 'O2'`: optimization levels are not elements of a pass pipeline. The level inside a pipeline is spelled `default<O2>` (the default O2 pipeline), and `default<O2>,function(minishield-flatten)` parses — the spelling matters when you want the whole rule in one command.
+- `optnone` makes optional passes skip silently. `clang -O0` marks every function `optnone` (three in this fixture's -O0 module; zero in the -O2 module). `minishield-flatten` is an optional pass — registered through the pipeline-parsing callback, not required by the pipeline's shape — and optional passes skip `optnone` functions without a diagnostic: running it on the -O0 IR changes nothing and prints zero `[MiniShield]` lines. Nor does `default<O2>` rescue it: -O2 respects `optnone` and leaves the attribute in place, so the one-shot `default<O2>,function(minishield-flatten)` on -O0 IR also flattens nothing. The rule's input must be real final-optimization IR, not a -O0 draft.
+
+| Step | `classify` | Dispatcher | Behavior |
+| --- | --- | --- | --- |
+| -O2 (plain) | 5 blocks, plain branches | — | — |
+| Flatten after -O2 | optimized blocks + `ms.dispatch` | `switch` present | identical |
+| -O2 over the artifact | plain branches restored | gone (switch 1 → 0) | identical |
+
+Four lessons, one law. The three transforms add structure — gates, blobs, decompositions — and the final optimizer removes structure; each -O2 section showed the removal from the transform's side (constant folding, dead-store elimination, inlining), and this lesson shows the rule from the deployment side: the transform must be last in the pipeline that produces the shipped binary. “Last” is a position, not a property: the control proves that one more optimizer pass after the transform erases it, so an obfuscated IR that is later re-optimized — by a second `opt`, by LTO at link, by a downstream tool — is not an obfuscated artifact. The question every hardening claim in this part must answer is the one from the landscape lesson: what does the final artifact look like?
+
+Checkpoint: (a) Why does the persistence demo use `classify` instead of the previous lesson's `total`? (b) The flatten pass on the -O0 IR prints no diagnostics and changes nothing. Name the attribute responsible, and the class of pass whose behavior it controls. (c) State the deployment rule in one sentence, and say what the re-optimization control (switch count 1 → 0) proves about an artifact that is obfuscated and then optimized again.
+
+### Model answer
+
+1. (a) Because -O2 strength-reduces `total` to the closed form `a·b` (a `mul` plus a select) before any obfuscation runs: the five-block loop is gone and there is nothing left to transform. `classify`'s branches depend on a runtime input the optimizer cannot fold, and the call is `noinline`, so it keeps its five-block structure through the final optimization.
+
+2. (b) `optnone`, which `clang -O0` attaches to every function. It controls optional passes — passes added through the pipeline-parsing callback (like `minishield-flatten`) rather than required by the pipeline's shape: an optional pass skips `optnone` functions entirely, with no diagnostic.
+
+3. (c) Obfuscation must be the last transform in the pipeline that produces the shipped binary, applied to the final optimized IR. The control proves the negative: one more -O2 over the obfuscated artifact removes the dispatcher's `switch` (1 → 0) and the function is back to plain branches — behavior unchanged, structure unobfuscated. “Last” means nothing after it; an artifact that is re-optimized after obfuscation is not an obfuscated artifact.
