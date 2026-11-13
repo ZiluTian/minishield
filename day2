@@ -4503,6 +4503,12 @@ cmake --build build
 
 Checkpoint: A header declaration alone should cause no LLVM program change. Explain why a static method needs no builder object, why Function& is mutable but borrowed, and why the declaration cannot supply a linked implementation by itself.
 
+### Model answer
+
+1. A non-static member is called through an object, and an object exists to hold state. `build` has no state: everything it needs arrives through `F`, and everything it computes (the entry block, the snapshots, the state IDs) is fresh per call and dies with it. A `this` pointing at zero bytes of state would only suggest a per-builder configuration that does not exist. `static` says the class is only the name that owns the function, so callers write `StateMachineBuilder::build(F)` without constructing anything. `FunctionEligibility::check` is static for the same reason; if a design had state to carry between calls, that would be the moment to make it non-static.
+2. The reference copies nothing and owns nothing: it binds to the caller’s existing `Function`, whose lifetime belongs to the caller (ultimately the `Module` and `LLVMContext`). Mutability lives in the reference’s type, not in the object: `Function &` lets the body rewrite the CFG in place, while `check`’s `const Function &` forbids it. The same object can be reached read-only or read-write through different declarations.
+3. A declaration is a promise about a symbol; the definition is the machine code. The compiler type-checks against the promise, but a real program also needs the linker to resolve the call: without the `.cpp` definition, linking fails with `undefined reference to 'minishield::StateMachineBuilder::build(llvm::Function&)'`. The header is the shared contract, included by many translation units that each compile only the promise; the `.cpp` is the single implementation, compiled once and linked into every consumer. A header no `.cpp` includes compiles to nothing, which is why `ninja: no work to do` was the honest report for the declaration-only step.
+
 ### The template to start with
 
 ```cpp
@@ -6788,7 +6794,7 @@ Answer: A. Reading and planning are not execution evidence. Keep those states di
 28. Look up a Day 2 term
 ========================
 
-### Use terms to recover the reason for an operation
+Use terms to recover the reason for an operation
 
 Definitions are most useful when they reconnect a word to the problem it solves. If “PHI” is unclear, revisit lesson 1’s path-dependent choice. If “demotion” is unclear, compare the value transport in lessons 3, 9, and 11. If “state” is unclear, follow the original destination through its encoding in lesson 12 and its decoding in lesson 14.
 
@@ -6796,40 +6802,326 @@ This glossary is a reminder rather than a prerequisite to understanding the main
 
 Task: Use this reference when a term interrupts your progress. The Day 1 glossary remains available under the Day 1 tab.
 
-### SSA and memory, in one picture
+### General CS and compiler concepts
 
-```text
-SSA result → store into an entry-allocated slot → load at a use
+### SSA
+
+Static single assignment: every value has exactly one defining instruction, and a definition must dominate its uses. It is a static, checkable replacement for dynamic assignment discipline: you can prove where a value came from by reading the graph, without simulating the execution.
+
+```llvm
+define i32 @pick(i1 %flag) {
+entry:
+  %a = add i32 1, 2
+  br label %join
+join:
+  ret i32 %a
+}
 ```
 
-| Term | Meaning in these lessons |
-| --- | --- |
-| SSA | Static single assignment: each SSA value has one definition; definitions must satisfy dominance requirements at their uses. |
-| Dominance | A definition’s block lies on every reachable path to a use’s block. New CFG edges can invalidate it. |
-| PHI | An SSA merge selecting an incoming value according to the predecessor edge used to enter a block. |
-| Demotion | Replace selected SSA value flow with stack storage, stores, and loads to prepare for CFG changes. |
-| Stack slot / alloca | Storage allocated in the function’s stack frame; the alloca instruction returns a pointer to it. |
-| load / store | Read a typed value from memory / write a value to memory. A store has no SSA result. |
-| Void result | The instruction produces no value for another instruction to consume, regardless of its operand types. |
-| Cross-block / escaping value | An instruction result used outside the block in which it was defined. “Escaping” here is not a full escape analysis. |
-| Worklist | A C++ collection of pointers to instructions to process after discovery; it does not own those instructions. |
-| isa / dyn_cast | LLVM type check returning bool / checked cast returning a typed pointer or nullptr. |
-| Upcast / downcast | Treat a derived object as its base type / access a base-typed object through a more specific type after a valid check. |
-| Iterator invalidation | A saved traversal position may stop being valid when its underlying instruction list is changed. |
-| PreservedAnalyses | The pass’s report of which cached analysis results remain valid after it runs. |
-| DenseMap | LLVM’s key/value container; here BasicBlock* keys map to unsigned IDs. Iteration order is not presentation order. |
-| State ID | The integer naming a destination block in our dispatcher; not the same as the block’s optional printed name. |
-| Dispatcher | A block loading the next state and switching to the corresponding original block. |
-| Setup / entry | The preserved one-time function entry, holding allocations and initialization outside repeated state dispatch. |
-| LLVMContext | LLVM’s shared context for IR facilities such as uniqued types; obtained here from the function. |
-| IRBuilder | An LLVM helper that inserts instructions at a chosen position or at the end of a block. |
-| Insertion point | The position where the builder will insert the next instruction; a pointer-based constructor can insert before an existing instruction. |
-| getInt32Ty / getInt32 | Get the LLVM i32 Type / get an i32 ConstantInt holding a particular value. |
-| Switch capacity / case | Reserved space is not an edge. addCase associates an integer constant with a destination block. |
-| Terminator | The final instruction in a complete basic block; replacements must leave exactly one valid terminator. |
-| unreachable | A terminator declaring that the path must not execute in a valid run; it is not recovery logic. |
-| eraseFromParent | Remove and delete an instruction from its block. Do not use its pointer afterward. |
-| Prototype checkpoint | A deliberately limited stage that can verify without implementing all supported input cases or full flattening. |
+Day 2 adds dispatcher edges that can reach a use without passing through its definition, which is why value preparation happens before the state machinery exists (lesson 0). The verifier checks the relationship; a passing verify is the evidence that dominance still holds.
+
+See [static single assignment on Wikipedia](https://en.wikipedia.org/wiki/Static_single_assignment_form).
+
+### Dominance
+
+A block D dominates a block B when every path from the entry to B passes through D. The invariant it protects: a use sees a value only if every route to it went through the definition, so the dependency is a property of the graph rather than of one execution.
+
+```llvm
+define i32 @pick(i1 %flag) {
+entry:
+  %a = add i32 1, 2
+  br i1 %flag, label %t, label %f
+t:
+  br label %join
+f:
+  br label %join
+join:
+  ret i32 %a
+}
+```
+
+Lesson 0 states the rule and lesson 23 reads the verifier’s dominance error; the dispatcher’s new edges are exactly the kind of addition that can invalidate an originally satisfied dominance.
+
+See [the dominator tree on Wikipedia](https://en.wikipedia.org/wiki/Dominator_tree).
+
+### Demotion (as a technique)
+
+Replace SSA value transport with explicit stack storage: allocate a slot, store the value, and load it at its uses. The motive is control-flow robustness — a value carried in memory can be read by any block, so new edges that bypass the original definition no longer break the data flow.
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  %value.reg2mem = alloca i32, align 4
+  br i1 %condition, label %left, label %right
+left:
+  store i32 10, ptr %value.reg2mem, align 4
+  br label %join
+right:
+  store i32 20, ptr %value.reg2mem, align 4
+  br label %join
+join:
+  %value.reload = load i32, ptr %value.reg2mem, align 4
+  ret i32 %value.reload
+}
+```
+
+Day 2 performs the demotion mechanically: DemotePHIToStack in lesson 3 and DemoteRegToStack in lessons 8–9. The gotcha: demotion does not remove every dominance requirement, because the alloca’s result is itself an SSA pointer that must dominate its uses.
+
+The technique is implemented by the free functions in the [Local.cpp source](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Transforms/Utils/Local.cpp).
+
+### Cross-block / escaping value
+
+An instruction result used outside the block that defines it. The pass must prepare these values before changing the graph, because a new edge can reach a use without passing through the definition. “Escaping” here means crossing a block boundary, not heap escape or leaving the function.
+
+```llvm
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include <vector>
+
+std::vector<llvm::Instruction *> collect_escaping(llvm::Function &F) {
+    std::vector<llvm::Instruction *> escaping;
+    for (auto &BB : F)
+        for (auto &I : BB)
+            if (!I.getType()->isVoidTy() &&
+                !llvm::isa<llvm::AllocaInst>(I) &&
+                I.isUsedOutsideOfBlock(&BB))
+                escaping.push_back(&I);
+    return escaping;
+}
+```
+
+Collected in lesson 4, demoted in lesson 9. The gotcha: no PHI does not mean no cross-block value — a reload introduced by PHI demotion can still be used outside its defining block.
+
+Introduced in lessons 04–05; see the collection fragment in lesson 04 and the demotion loop in lesson 09.
+
+### Worklist
+
+A C++ collection of pointers to IR instructions, discovered during one traversal and processed later. The motive is ordering: the pass must not use an instruction after mutating the IR, so it collects first and acts second, and the traversal and the mutation never touch the same object at the same time.
+
+```llvm
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Transforms/Utils/Local.h"
+#include <vector>
+
+void demote_phis(llvm::Function &F) {
+    std::vector<llvm::PHINode *> phis;
+    for (auto &BB : F)
+        for (auto &I : BB)
+            if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))
+                phis.push_back(phi);
+    for (auto *phi : phis)
+        llvm::DemotePHIToStack(phi);
+}
+```
+
+Lessons 1–3 build the PHI worklist. The gotcha: the vector owns pointers, not instructions — after DemotePHIToStack the stored pointer dangles (lesson 3).
+
+Worklists are the standard machinery of iterative [dataflow analysis](https://en.wikipedia.org/wiki/Dataflow_analysis).
+
+### Constant folding
+
+Evaluate a constant expression during IR construction or optimization and replace it with the computed constant. In Day 2 it appears through the builder: when a Create* helper can fold, it returns a Constant instead of inserting an Instruction, which is why a builder result is typed llvm::Value*, not Instruction*.
+
+```llvm
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/raw_ostream.h"
+
+void inspect(llvm::IRBuilder<> &B) {
+    llvm::Value *sum = B.CreateAdd(B.getInt32(1), B.getInt32(2));
+    if (llvm::isa<llvm::Constant>(sum))
+        llvm::errs() << "folded to a Constant\n";
+    else
+        llvm::errs() << "inserted an Instruction\n";
+}
+```
+
+Lesson 19 meets this when lowering a switch: a comparison or select over state constants folds to a value unless an operand still depends on runtime input.
+
+See [constant folding on Wikipedia](https://en.wikipedia.org/wiki/Constant_folding).
+
+### Tail call
+
+A call positioned so the caller can hand its frame to the callee. The reason it matters here is the marker: LLVM’s tail and musttail flags promise structural properties, and musttail constrains what may appear between the call and the following return — an inserted spill or dispatcher hop can silently break that promise.
+
+```llvm
+declare i32 @callee(i32)
+
+define i32 @forward(i32 %x) {
+entry:
+  %result = musttail call i32 @callee(i32 %x)
+  ret i32 %result
+}
+```
+
+Lesson 17 rejects musttail calls before any edit, because the prototype does not preserve the constrained region around the call.
+
+See [tail call on Wikipedia](https://en.wikipedia.org/wiki/Tail_call).
+
+### Undefined behavior
+
+A state the language or IR contract leaves undefined. From there anything may happen, which is why one observed successful run is not evidence of correctness and why naive equivalence arguments fail: a program may be valid on paper and still sit on undefined behavior.
+
+```llvm
+define void @naked_example() naked {
+entry:
+  unreachable
+}
+```
+
+In Day 2, unreachable marks the ms.invalid destination: the state-machine invariant keeps execution off it, and reaching it would be undefined behavior, not error recovery (lessons 14–15).
+
+See [undefined behavior on Wikipedia](https://en.wikipedia.org/wiki/Undefined_behavior).
+
+### Differential test
+
+Run the original and the transformed program on the same defined inputs and compare observable results. The motive: structural checks (verify, identical canonical printing) prove form, not meaning; only paired execution catches a rewrite that is well-formed but computes the wrong answer.
+
+```bash
+./original 3 > /tmp/out.orig
+./flattened 3 > /tmp/out.new
+diff /tmp/out.orig /tmp/out.new
+```
+
+Day 2 compares executions in lesson 24 over a defined input domain and records the limits of that comparison in lesson 26.
+
+See [differential testing on Wikipedia](https://en.wikipedia.org/wiki/Differential_testing).
+
+### Project vocabulary
+
+### State ID
+
+An integer naming a destination block in the dispatcher’s switch. The switch needs an integer condition while block identity is a C++ object, so a DenseMap converts the block pointer into a small stable number that can be stored in memory and decoded later. It is not the block’s printed name.
+
+```llvm
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/IR/Function.h"
+#include <vector>
+
+void assign_states(llvm::Function &F,
+                   std::vector<llvm::BasicBlock *> &stateBlocks,
+                   llvm::DenseMap<llvm::BasicBlock *, unsigned> &stateIDs) {
+    auto *entry = &F.getEntryBlock();
+    unsigned id = 0;
+    for (auto &BB : F) {
+        if (&BB == entry) continue;
+        stateBlocks.push_back(&BB);
+        stateIDs[&BB] = id++;
+    }
+}
+```
+
+Assigned in lessons 12–13, decoded by the dispatcher’s switch in lesson 14. The gotcha: DenseMap iteration order is not a display order, so reports iterate the stateBlocks vector instead.
+
+See the assignment in lesson 12 and the decoding in lesson 14.
+
+### Dispatcher
+
+A single block that loads the current state ID and switches to the corresponding original block. Centralizing every transition through one place is what flattens the CFG: an original block no longer names its successor directly; it stores the next state and hops to the dispatcher.
+
+```llvm
+define void @dispatch_example(i32 %start) {
+entry:
+  %ms.state = alloca i32, align 4
+  store i32 %start, ptr %ms.state, align 4
+  br label %ms.dispatch
+ms.dispatch:
+  %ms.current = load i32, ptr %ms.state, align 4
+  switch i32 %ms.current, label %ms.invalid [
+    i32 0, label %a
+    i32 1, label %b
+  ]
+a:
+  ret void
+b:
+  ret void
+ms.invalid:
+  unreachable
+}
+```
+
+Built in lesson 14, its first unconditional entry connection in lesson 16, and the original terminators rewritten into it in lesson 21.
+
+See the construction in lesson 14 and the first hop in lesson 16.
+
+### Setup / entry
+
+The preserved original entry block, which runs exactly once. Its stack allocations and initialization must not re-run on every transition, so the state machine never loops back through it: the entry performs its setup and hands control to the dispatcher instead.
+
+```llvm
+define i32 @setup_once(i1 %condition) {
+entry:
+  %slot = alloca i32, align 4
+  store i32 7, ptr %slot, align 4
+  br label %work
+work:
+  %v = load i32, ptr %slot, align 4
+  ret i32 %v
+}
+```
+
+Lesson 12 excludes entry from state assignment; keeping the one-time work out of the recurring dispatch is the invariant that makes entry setup rather than state 0.
+
+See the exclusion in lesson 12 and the setup block in lesson 14.
+
+### Support contract
+
+The explicitly documented subset of inputs the pass accepts before any mutation. Naming it makes every guard rejection a testable design boundary — the rejected LLVM construct is still valid IR, it is simply outside the documented subset.
+
+```llvm
+#include "llvm/IR/Function.h"
+#include <utility>
+
+std::pair<bool, const char *> check(const llvm::Function &F) {
+    if (F.isDeclaration())
+        return {false, "function has no body"};
+    if (F.isPresplitCoroutine())
+        return {false, "presplit coroutine is unsupported"};
+    return {true, ""};
+}
+```
+
+The full contract — declarations, allocas, result types, intrinsics, special calls, EH/coroutines, block addresses, terminators, and naked functions — is enumerated in lesson 17.
+
+See the contract and its rejections in lesson 17.
+
+### Prototype checkpoint
+
+A deliberately limited stage whose output can be verified without implementing every supported case or the complete flattening. Freezing one invariant per checkpoint (no PHIs, values in memory, first hop connected) makes progress testable before the pipeline is complete.
+
+```text
+checkpoint 1: PHIs collected, IR unchanged
+checkpoint 2: PHIs demoted, values flow through memory
+checkpoint 3: state IDs assigned, dispatcher connected
+```
+
+Lessons 3, 9, and 16 are checkpoints of this kind; each ends with an expected output and a changed-or-unchanged module.
+
+See the checkpoints in lessons 03, 09, and 16.
+
+### Prototype scope
+
+The deliberately limited support domain this pass claims. A rejection such as “intrinsic calls are outside this prototype’s scope” is a scope statement, not a claim that the input is invalid; the distinction keeps a rejected input from being misread as a bug in the IR.
+
+```llvm
+#include "llvm/IR/Instructions.h"
+#include <utility>
+
+std::pair<bool, const char *> check_call(const llvm::CallBase &CB) {
+    if (auto *callee = CB.getCalledFunction())
+        if (callee->isIntrinsic())
+            return {false, "intrinsic calls are outside this prototype's scope"};
+    return {true, ""};
+}
+```
+
+Lesson 17 defines the scope one rejection at a time; lesson 26 records its limits.
+
+See the scope in lesson 17 and the recorded limits in lesson 26.
 
 ### Where to return
 
@@ -6838,48 +7130,873 @@ SSA result → store into an entry-allocated slot → load at a use
 - Before/after memory examples: lessons 10–11.
 - State IDs, block creation, and first-hop connection: lessons 12–16.
 - Guard-rejected LLVM constructs and their predicates: lesson 17.
+- LLVM-specific terms — printed IR, memory, control flow, calls, and the C++ API: lesson 29, the Day 2 LLVM document.
+- C++-specific terms — pointers, references, casts, classes, and translation units: lesson 30, the Day 2 C++ document.
 
 Checkpoint: Choose one unfamiliar term, find its example, and explain it using the actual instruction or C++ expression rather than only repeating the definition.
 
-### Additional terms for the complete rewrite
+### Check your understanding
 
-| Term | Meaning |
-| --- | --- |
-| Support contract | The explicitly documented subset accepted before any mutation. |
-| Convergent call | A call with additional control-flow constraints; conservatively rejected here. |
-| Operand bundle | Extra semantic information attached to a call; not ordinary argument data. |
-| musttail / returns_twice | Special calling/control-flow requirements that ordinary rewriting must not silently violate. |
-| select | An IR instruction/value choosing between alternatives from an i1 condition; not a host C++ branch. |
-| Constant folding | Compute a known result during IR construction or optimization rather than inserting a runtime operation. |
-| Short-circuit evaluation | C++ \|\| and && may skip the right operand; important when it performs a transformation. |
-| Differential test | Run two implementations on the same defined input and compare observable results. |
-| Undefined behavior | Execution outside the language/IR contract; it invalidates naive equivalence arguments. |
-| Prototype scope | A deliberate limited support domain, not a claim to handle every valid LLVM program. |
+A load reads %slot, but nothing in the function ever stored to it. What does the load read?
 
-### LLVM concepts from the guard lessons
+A. Whatever the slot happened to contain
+B. Zero, because LLVM zero-initializes every stack slot
+C. A verifier error, because every load requires a store
 
-The eligibility lessons reject one LLVM construct at a time because each would break the value-prepared, single-dispatch rewrite that the later lessons build. This section collects those constructs with the predicate the guard uses, so a word in a diagnostic names the whole concept. Every entry is valid LLVM; the pass simply does not handle it yet, which is a prototype-scope limit, not a defect in the IR.
+Answer: A. A load is just a memory read: it returns whatever bytes the slot currently holds. The verifier checks types and dominance, not that the slot was written first.
+29. Look up a Day 2 LLVM term
+=============================
 
-| Concept | Meaning | How the guard meets it |
-| --- | --- | --- |
-| Function declaration | A `declare` signature with no body: the callee exists in the module but has no blocks to inspect or rewrite. | `Function::isDeclaration` rejects before any other check. |
-| Function attribute vs call flag | An attribute (naked, convergent, returns_twice) belongs to the function and is read with `hasFnAttribute`; a flag (musttail, tail) belongs to one particular call and is read through `CallInst` predicates. | Each is checked where it lives, so a function-level check never sees a call-level marker and vice versa. |
-| Naked function | The `naked` attribute suppresses the compiler’s prologue and epilogue; the body is responsible for the whole calling convention. | `hasFnAttribute(Attribute::Naked)`; inserting a state slot or dispatcher would silently change what the caller sees. |
-| Presplit coroutine | A coroutine already lowered into an ordinary function plus an explicit state machine; its CFG is not the shape this pass assumes. | `Function::isPresplitCoroutine`. |
-| Personality function | The `personality` attribute naming a language’s exception-handling entry routine; control can flow through EH, not just branches. | `Function::hasPersonalityFn`. |
-| EH pad | A `landingpad` or `cleanuppad` instruction that catches or unwinds an exception, paired with `invoke`/`callbr` terminators. | `BasicBlock::isEHPad`, plus a terminator whitelist that excludes the EH terminators. |
-| Address-taken basic block | A block whose address can be used as a value, so the CFG is no longer the complete description of control flow. | `BasicBlock::hasAddressTaken`. |
-| Terminator whitelist | The only block endings the pass rewrites: `br`, conditional `br`, `switch`, `ret`, `unreachable`. | A `switch` over `getTerminator()->getOpcode()` rejects every other opcode. |
-| Static entry alloca | An `alloca` with a compile-time constant count in the entry block; the only allocation the pass preserves. | `AllocaInst::isStaticAlloca`; non-static or non-entry allocas would change frequency or lifetime under hoisting. |
-| Inline assembly | A call whose “callee” is embedded assembly text rather than a symbol; register and clobber behavior is tied to that exact code. | `CallBase::isInlineAsm`. |
-| Convergent call | The `convergent` attribute promises that threads reaching the call all converge there; the rewrite must not add non-convergent entries. | `CallBase::isConvergent`. |
-| Operand bundle | Extra call metadata in `[bundle ...]` form, such as alignment or aliasing hints; call-level semantics, not argument data. | `CallBase::getNumOperandBundles` nonzero. |
-| returns_twice | A callee that may return to its caller more than once (the `setjmp`/`longjmp` family); a one-terminator-per-block model breaks. | `hasFnAttribute(Attribute::ReturnsTwice)` on the called function. |
-| musttail | A flag requiring tail-call transfer: LLVM constrains the instructions allowed between the call and the following return. | `CallInst::isMustTailCall`. |
-| CallBase / CallInst | `CallBase` is the shared interface of the call-family instructions; `CallInst` is the ordinary call, and call-specific markers live on the derived class. | The guard uses `CallBase` for the shared call checks and `CallInst` for the musttail marker. |
-| Aggregate (struct) result | A composite value type such as `{ i32, i32 }`, built with `insertvalue` and read with `extractvalue`; `zeroinitializer` is its all-zero value. | Result types outside void/integer/float/pointer are rejected, so a struct result fails even when every field is an integer. |
-| Intrinsic | An operation whose semantics LLVM itself defines, written as a call to a `llvm.*` name with no user body; `llvm.ctpop.i32` counts set bits. | The `IntrinsicInst` check rejects explicit intrinsic calls conservatively. |
-| Coroutine intrinsic | The `llvm.coro.begin/end/suspend/resume` family that builds coroutine state machines. | Checked before the general intrinsic rule so the diagnostic names the real cause. |
+Read the term, then find the construct
+
+Each entry names an LLVM construct, the problem it serves in Day 2, and the API that reads or writes it. The groups follow where you meet the terms: the printed IR you read, the memory and control-flow constructs, the call and function properties the guard checks, and the C++ side of the pass.
+
+Task: Use this document when an LLVM term interrupts your progress. General compiler and project vocabulary lives in the Day 2 glossary, and C++ language terms have their own document.
+
+### Printed-IR vocabulary
+
+### define vs declare
+
+define starts a function with a body; declare records the signature of a function without a body. The guard’s first check is exactly this distinction: a declaration has no blocks to inspect or rewrite, so isDeclaration rejects before any other check.
+
+```llvm
+declare i32 @puts(ptr)
+
+define i32 @main() {
+entry:
+  %r = call i32 @puts(ptr null)
+  ret i32 %r
+}
+```
+
+Lesson 17 rejects a declaration before the block traversal; a declared callee can still be called from supported functions.
+
+See [functions in LangRef](https://llvm.org/docs/LangRef.html#functions).
+
+### Block labels
+
+A label at the top of a basic block names it for jumps and for the printed listing; label %join inside a branch is an operand referring to that name. A label is not a value: it has no type, and it performs no operation when execution reaches it.
+
+```llvm
+define void @jump() {
+entry:
+  br label %done
+done:
+  ret void
+}
+```
+
+Lesson 15 separates the C++ variable, the block object, and the printed name: ms.dispatch is legal as an IR name even though it is not a legal C++ identifier.
+
+See [functions in LangRef](https://llvm.org/docs/LangRef.html#functions).
+
+### % values vs labels
+
+The % prefix names both local SSA values (%v = add …) and block labels (entry:). Context is the disambiguator: after = it names a value, before a colon it names a block, and after label it names a jump destination. Confusing the two is the most common reading error in the printed listings.
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  %v = add i32 1, 2
+  br i1 %condition, label %a, label %b
+a:
+  ret i32 %v
+b:
+  ret i32 0
+}
+```
+
+See [functions in LangRef](https://llvm.org/docs/LangRef.html#functions).
+
+### @ symbols
+
+@ names a module-level symbol — a function or a global variable. The name has module scope, so @merge is unaffected by the block it appears in, and the same global can be referenced from any function in the module.
+
+```llvm
+@answer = private global i32 42
+
+define i32 @read_answer() {
+entry:
+  %v = load i32, ptr @answer, align 4
+  ret i32 %v
+}
+```
+
+See [functions](https://llvm.org/docs/LangRef.html#functions) and [global variables](https://llvm.org/docs/LangRef.html#global-variables) in LangRef.
+
+### i1 / i32 and typed constants
+
+iN is an integer type of N bits: i1 is a single bit used for conditions, i32 a 32-bit pattern. Constants are typed at the spelling — i32 0 is a 32-bit zero — and the type is what makes a literal usable in a given position. Signedness is not part of the type; it comes from operations such as icmp slt or sdiv.
+
+```llvm
+define i32 @test(i1 %flag) {
+entry:
+  %c = icmp eq i32 3, 3
+  %v = select i1 %c, i32 10, i32 20
+  ret i32 %v
+}
+```
+
+Lesson 0 introduces i1 and i32; lesson 19 stores typed state constants (i32 0, i32 1, i32 2) into the state slot.
+
+See [the type system](https://llvm.org/docs/LangRef.html#type-system) and [constant expressions](https://llvm.org/docs/LangRef.html#constant-expressions) in LangRef.
+
+### ptr
+
+With opaque pointers every pointer is simply ptr; it no longer spells out the type it points to. That is why load i32, ptr %slot names the loaded value’s type first — the element type is not recoverable from the pointer itself.
+
+```llvm
+define i32 @slot_example() {
+entry:
+  %slot = alloca i32, align 4
+  store i32 5, ptr %slot, align 4
+  %v = load i32, ptr %slot, align 4
+  ret i32 %v
+}
+```
+
+See [opaque pointers](https://llvm.org/docs/OpaquePointers.html).
+
+### align
+
+align N records that an address is guaranteed to be a multiple of N bytes. It is a placement promise, not a value to store: an aligned load or store lets the backend use aligned access, and an aligned alloca asks for suitably aligned storage. It is measured in bytes, never in elements or bits.
+
+```llvm
+define i32 @aligned() {
+entry:
+  %slot = alloca i32, align 4
+  store i32 1, ptr %slot, align 4
+  %v = load i32, ptr %slot, align 4
+  ret i32 %v
+}
+```
+
+Every Day 2 read-from-zero table flags the common misreading of align as a stored value.
+
+See [the store instruction](https://llvm.org/docs/LangRef.html#store-instruction) in LangRef, where the align operand is documented.
+
+### “; preds” comments
+
+; preds = %left, %right is a printer comment listing the block’s incoming edges. It is not an instruction and not an edge definition: the branch and switch operands create the edges, and the comment is a reading aid that updates whenever the graph changes.
+
+```llvm
+define void @diamond(i1 %c) {
+entry:
+  br i1 %c, label %left, label %right
+left:
+  br label %join
+right:
+  br label %join
+join:
+  ret void
+}
+```
+
+Every Day 2 read-from-zero table treats ; preds as comment only; the ms.dispatch block prints “No predecessors!” until the first hop is connected (lesson 16).
+
+See [the syntax section](https://llvm.org/docs/LangRef.html#syntax) in LangRef.
+
+### Memory
+
+### PHI
+
+A PHI node selects an incoming value by the edge used to enter the block: each [ VALUE, %PREDECESSOR ] pair says if you came from this block, the value is this. A CFG merge needs one because each edge can deliver a different value, and SSA needs exactly one definition.
+
+```llvm
+define i32 @merge(i1 %condition) {
+entry:
+  br i1 %condition, label %left, label %right
+left:
+  br label %join
+right:
+  br label %join
+join:
+  %value = phi i32 [ 10, %left ], [ 20, %right ]
+  ret i32 %value
+}
+```
+
+Lessons 1–3 collect and demote PHIs. The gotcha: DemotePHIToStack erases the PHI, so the saved pointer must not be used after the call (lesson 3).
+
+See [the PHI instruction](https://llvm.org/docs/LangRef.html#phi-instruction) in LangRef.
+
+### alloca
+
+alloca reserves storage in the function’s stack frame and returns its address — a pointer, not the stored value. It does not initialize the storage, so a load before a store reads whatever bytes were there.
+
+```llvm
+define i32 @make_slot() {
+entry:
+  %slot = alloca i32, align 4
+  store i32 9, ptr %slot, align 4
+  %v = load i32, ptr %slot, align 4
+  ret i32 %v
+}
+```
+
+Lesson 6 recognizes the allocation itself; the guard accepts only static entry allocas (lesson 17).
+
+See [the alloca instruction](https://llvm.org/docs/LangRef.html#alloca-instruction) in LangRef.
+
+### load / store
+
+store writes a typed value to an address and produces no SSA result; load reads a typed value from an address and defines a new SSA value. The pair is how Day 2 carries values between blocks once PHIs and register-like results are demoted.
+
+```llvm
+define i32 @move(i32 %x) {
+entry:
+  %slot = alloca i32, align 4
+  store i32 %x, ptr %slot, align 4
+  %v = load i32, ptr %slot, align 4
+  ret i32 %v
+}
+```
+
+See [the load](https://llvm.org/docs/LangRef.html#load-instruction) and [store](https://llvm.org/docs/LangRef.html#store-instruction) instructions in LangRef.
+
+### void result
+
+An instruction with a void result produces no value for another instruction to use: store, br, ret, and a void call all qualify. Value collection must skip void results because there is nothing to demote or reload.
+
+```llvm
+declare void @log(i32)
+
+define void @side_effect(i32 %x) {
+entry:
+  call void @log(i32 %x)
+  ret void
+}
+```
+
+Lesson 5 introduces the isVoidTy filter in the collection loop.
+
+See [the void type](https://llvm.org/docs/LangRef.html#void-type) in LangRef.
+
+### select
+
+select i1 C, T A, T B chooses a value: the result is A when C is true and B otherwise. It does not branch and does not conditionally execute the instructions that computed A and B — both operands are available when select runs. That is exactly what lets Day 2 encode the next state as a value.
+
+```llvm
+define i32 @next_state(i32 %value) {
+entry:
+  %c0 = icmp eq i32 %value, 0
+  %n1 = select i1 %c0, i32 0, i32 2
+  %c1 = icmp eq i32 %value, 1
+  %n = select i1 %c1, i32 1, i32 %n1
+  ret i32 %n
+}
+```
+
+Lesson 19 turns conditional branches into chains of comparisons and selects; lesson 20 lowers the original switch into the same shape.
+
+See [the select instruction](https://llvm.org/docs/LangRef.html#select-instruction) in LangRef.
+
+### Aggregates (struct results)
+
+An aggregate is a composite value such as { i32, i32 }, built field by field with insertvalue (starting from zeroinitializer, its all-zero value) and read with extractvalue. The guard rejects aggregate results: a struct result fails the only-scalar-results check even when every field is an integer.
+
+```llvm
+define { i32, i32 } @pair(i32 %a, i32 %b) {
+entry:
+  %s = insertvalue { i32, i32 } zeroinitializer, i32 %a, 0
+  %s2 = insertvalue { i32, i32 } %s, i32 %b, 1
+  %first = extractvalue { i32, i32 } %s2, 0
+  %second = extractvalue { i32, i32 } %s2, 1
+  %r = add i32 %first, %second
+  %out = insertvalue { i32, i32 } zeroinitializer, i32 %r, 0
+  %out2 = insertvalue { i32, i32 } %out, i32 0, 1
+  ret { i32, i32 } %out2
+}
+```
+
+Lesson 17’s aggregate-result.ll fixture is rejected with “only scalar instruction results are supported”.
+
+See [aggregate types](https://llvm.org/docs/LangRef.html#aggregate-types) in LangRef.
+
+### Control flow
+
+### Terminator
+
+The final instruction of a complete basic block; it produces the block’s outgoing control flow. A block must end with exactly one valid terminator, which is why an empty ms.invalid block fails verify until lesson 15 finishes it with unreachable.
+
+```llvm
+define void @endings(i1 %c) {
+entry:
+  br i1 %c, label %a, label %b
+a:
+  ret void
+b:
+  unreachable
+}
+```
+
+The guard’s terminator whitelist names the endings the pass rewrites (lesson 17); lesson 21 rewrites every original terminator.
+
+See [terminator instructions](https://llvm.org/docs/LangRef.html#terminator-instructions) in LangRef.
+
+### br / conditional br
+
+br label %B transfers control unconditionally; br i1 %C, label %A, label %B goes to A when C is true and to B when it is false. A branch is the block’s final instruction and produces no result; it does not execute both destinations.
+
+```llvm
+define void @route(i1 %c) {
+entry:
+  br i1 %c, label %yes, label %no
+yes:
+  br label %end
+no:
+  br label %end
+end:
+  ret void
+}
+```
+
+See [the br instruction](https://llvm.org/docs/LangRef.html#br-instruction) in LangRef.
+
+### switch
+
+switch iN %V, label %DEFAULT [ iN C, label %D … ] chooses a destination from an integer value: the label after the condition is the default taken when no case matches, and each line inside the brackets pairs a typed case constant with a destination. The brackets are a case list, not an array.
+
+```llvm
+define i32 @select_case(i32 %value) {
+entry:
+  switch i32 %value, label %other [
+    i32 0, label %zero
+    i32 1, label %one
+  ]
+zero:
+  ret i32 10
+one:
+  ret i32 20
+other:
+  ret i32 -1
+}
+```
+
+Day 2 carries two switches at once: the original program decision is lowered to comparisons and selects (lesson 20), while the dispatcher’s switch stays in place to decode state IDs (lesson 14).
+
+See [the switch instruction](https://llvm.org/docs/LangRef.html#switch-instruction) in LangRef.
+
+### ret
+
+ret ends this invocation and, when it carries a value, returns that value to the caller. It does not continue to the next printed block, and it does not go back to the dispatcher automatically — the rewritten program must route returns deliberately.
+
+```llvm
+define i32 @answer() {
+entry:
+  ret i32 42
+}
+```
+
+See [the ret instruction](https://llvm.org/docs/LangRef.html#ret-instruction) in LangRef.
+
+### unreachable
+
+A terminator asserting that no defined execution reaches this point; actually executing it is undefined behavior, not recovery, a return, or input validation. In the state machine it is the ms.invalid destination: the invariant that a stored state ID is always one we assigned is what keeps execution off it.
+
+```llvm
+define void @bad_id(i32 %s) {
+entry:
+  switch i32 %s, label %ms.invalid [
+    i32 0, label %ok
+  ]
+ok:
+  ret void
+ms.invalid:
+  unreachable
+}
+```
+
+Lesson 15 finishes the invalid block with it, and the dispatcher’s default case targets it (lesson 14).
+
+See [the unreachable instruction](https://llvm.org/docs/LangRef.html#unreachable-instruction) in LangRef.
+
+### Calls and attributes
+
+### call
+
+call transfers control to a callee with typed arguments and, unless the result is void, binds the result to an SSA value. A call is an ordinary instruction inside a block, but the callee’s properties — attributes, flags, bundles — constrain what a transformation may do around it.
+
+```llvm
+declare i32 @square(i32)
+
+define i32 @twice(i32 %x) {
+entry:
+  %r = call i32 @square(i32 %x)
+  ret i32 %r
+}
+```
+
+See [the call instruction](https://llvm.org/docs/LangRef.html#call-instruction) in LangRef.
+
+### CallBase / CallInst
+
+CallBase is the shared interface of the call-family instructions (call, invoke, callbr); CallInst is the ordinary call. Call-level markers that only the ordinary call carries, such as musttail, live on the derived class — which is why the guard first dyn_casts to CallBase for the shared checks and then to CallInst for musttail.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include <utility>
+
+std::pair<bool, const char *> check_call_like(const llvm::Instruction &I) {
+    if (const auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
+        if (CB->isInlineAsm() || CB->isConvergent())
+            return {false, "special call semantics are unsupported"};
+        if (const auto *call = llvm::dyn_cast<llvm::CallInst>(CB))
+            if (call->isMustTailCall())
+                return {false, "musttail is unsupported"};
+    }
+    return {true, ""};
+}
+```
+
+See the [CallBase doxygen](https://llvm.org/doxygen/classllvm_1_1CallBase.html).
+
+### tail / musttail
+
+tail marks a call that may be turned into a tail-call transfer; musttail requires the transfer and constrains the instructions allowed between the call and the following return. An inserted spill reload or dispatcher hop can violate that structural promise silently, so the guard rejects musttail calls.
+
+```llvm
+declare i32 @callee(i32)
+
+define i32 @forward(i32 %x) {
+entry:
+  %result = musttail call i32 @callee(i32 %x)
+  ret i32 %result
+}
+```
+
+The Day 2 glossary’s tail-call entry carries the general concept; this entry is about the IR marker.
+
+See [the call instruction](https://llvm.org/docs/LangRef.html#call-instruction) in LangRef, where musttail is documented.
+
+### returns_twice
+
+A function attribute (the setjmp/longjmp family) saying the callee may return to its caller more than once. A model with one forward return path cannot represent that, so the guard reads the marker on the called function.
+
+```llvm
+declare i32 @resume_point() returns_twice
+
+define i32 @use_resume_point() {
+entry:
+  %result = call i32 @resume_point() returns_twice
+  ret i32 %result
+}
+```
+
+See [function attributes](https://llvm.org/docs/LangRef.html#function-attributes) in LangRef.
+
+### convergent
+
+A marker, on a function or a call, describing a constraint on how control flow may be transformed around the operation: in grouped execution the set of participating threads can depend on the path taken. Routing through a shared dispatcher changes the graph, so the prototype excludes marked calls until it has a correctness argument for them.
+
+```llvm
+declare i32 @group_operation(i32) convergent
+
+define i32 @use_group(i32 %x) {
+entry:
+  %result = call i32 @group_operation(i32 %x) convergent
+  ret i32 %result
+}
+```
+
+See [convergent operation semantics](https://llvm.org/docs/ConvergentOperations.html).
+
+### operand bundle
+
+Extra semantic information attached to a call in [ "tag"(payload) ] form — deoptimization state, funclet context, aliasing hints — not an ordinary argument. Counting arguments is a different question; the guard rejects any call carrying a bundle.
+
+```llvm
+declare void @observe(i32)
+
+define void @with_bundle(i32 %x) {
+entry:
+  call void @observe(i32 %x) [ "deopt"(i32 %x) ]
+  ret void
+}
+```
+
+See [operand bundles](https://llvm.org/docs/LangRef.html#operand-bundles) in LangRef.
+
+### inline asm
+
+A call whose callee is embedded assembly text rather than a symbol; register usage and clobber behavior are tied to that exact code, so moving the call or surrounding it with new operations is unsafe. The guard rejects isInlineAsm calls.
+
+```llvm
+define void @inline_assembly() {
+entry:
+  call void asm sideeffect "", ""()
+  ret void
+}
+```
+
+See [inline assembler expressions](https://llvm.org/docs/LangRef.html#inline-assembler-expressions) in LangRef.
+
+### naked
+
+A function attribute suppressing the compiler’s prologue and epilogue: the body itself must satisfy the whole calling convention. Inserting a state slot or a dispatcher under that contract would change what the caller sees, so the guard checks hasFnAttribute(Naked) on the function, not on any call.
+
+```llvm
+define void @naked_example() naked {
+entry:
+  unreachable
+}
+```
+
+See [function attributes](https://llvm.org/docs/LangRef.html#function-attributes) in LangRef.
+
+### Function attribute vs call flag
+
+Attributes such as naked or convergent belong to the function and are read with hasFnAttribute; flags such as tail or musttail belong to one particular call and are read through CallInst predicates. Each is checked where it lives, so a function-level check never sees a call-level marker and vice versa.
+
+```cpp
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include <utility>
+
+std::pair<bool, const char *> check_marks(const llvm::Function &F,
+                                          const llvm::Instruction &I) {
+    if (F.hasFnAttribute(llvm::Attribute::Naked))
+        return {false, "naked functions are unsupported"};
+    if (const auto *call = llvm::dyn_cast<llvm::CallInst>(&I))
+        if (call->isMustTailCall())
+            return {false, "musttail calls are unsupported"};
+    return {true, ""};
+}
+```
+
+See [function attributes](https://llvm.org/docs/LangRef.html#function-attributes) and [call site attributes](https://llvm.org/docs/LangRef.html#call-site-attributes) in LangRef.
+
+### Function declaration
+
+A declare signature with no body: the callee exists in the module but has no blocks to inspect or rewrite. Day 2’s guard rejects declarations before any other check because everything after it assumes a body.
+
+```cpp
+#include "llvm/IR/Function.h"
+#include <utility>
+
+std::pair<bool, const char *> check_body(const llvm::Function &F) {
+    if (F.isDeclaration())
+        return {false, "function has no body"};
+    return {true, ""};
+}
+```
+
+See [functions](https://llvm.org/docs/LangRef.html#functions) in LangRef.
+
+### Function and block properties
+
+### Intrinsic
+
+An operation whose semantics LLVM itself defines, written as a call to a llvm.* name with no user body — llvm.ctpop.i32 counts set bits, for example. The guard rejects explicit intrinsic calls conservatively: the prototype does not reason about each intrinsic’s extra semantics.
+
+```llvm
+declare i32 @llvm.ctpop.i32(i32)
+
+define i32 @count_bits(i32 %x) {
+entry:
+  %count = call i32 @llvm.ctpop.i32(i32 %x)
+  ret i32 %count
+}
+```
+
+Lesson 17’s intrinsics.ll fixture is rejected with “intrinsic calls are outside this prototype’s scope”; the check runs through the callee’s isIntrinsic.
+
+See [intrinsic functions](https://llvm.org/docs/LangRef.html#intrinsic-functions) in LangRef.
+
+### Coroutine intrinsic
+
+The llvm.coro.begin / end / suspend / resume family that builds coroutine state machines. The guard does not handle coroutine IR, so the general intrinsic rule rejects these calls; the dedicated entry exists so a diagnostic can name the real cause.
+
+```llvm
+declare ptr @llvm.coro.noop()
+
+define ptr @coroutine_handle() {
+entry:
+  %handle = call ptr @llvm.coro.noop()
+  ret ptr %handle
+}
+```
+
+See [the coroutines document](https://llvm.org/docs/Coroutines.html).
+
+### Presplit coroutine
+
+A coroutine already lowered into an ordinary function plus an explicit state machine — its CFG is not the shape this pass assumes, so Function::isPresplitCoroutine rejects it before any inspection.
+
+```cpp
+#include "llvm/IR/Function.h"
+#include <utility>
+
+std::pair<bool, const char *> check_coroutine(const llvm::Function &F) {
+    if (F.isPresplitCoroutine())
+        return {false, "presplit coroutine is unsupported"};
+    return {true, ""};
+}
+```
+
+See [the coroutines document](https://llvm.org/docs/Coroutines.html).
+
+### Personality function
+
+The personality attribute names a language’s exception-handling entry routine; when it is present, control can flow through exception handling instead of through branches alone. The guard reads hasPersonalityFn and rejects, because the rewrite has no model for EH flow.
+
+```llvm
+declare i32 @llvm_eh_personality(i8*, ...)
+declare void @may_throw(i32)
+
+define void @driver(i32 %x) personality i32 (i8*, ...)* @llvm_eh_personality {
+entry:
+  invoke void @may_throw(i32 %x)
+          to label %ok unwind label %handler
+ok:
+  ret void
+handler:
+  %lp = landingpad { i8*, i32 } cleanup
+  ret void
+}
+```
+
+See [personality function](https://llvm.org/docs/LangRef.html#personality-function) in LangRef.
+
+### EH pad
+
+A landingpad or cleanuppad instruction that catches or unwinds an exception, paired with the invoke and callbr terminators. BasicBlock::isEHPad identifies the block, and the terminator whitelist excludes the EH terminators, so both halves of the mechanism are rejected.
+
+```llvm
+declare i32 @llvm_eh_personality(i8*, ...)
+declare void @may_throw(i32)
+
+define void @driver(i32 %x) personality i32 (i8*, ...)* @llvm_eh_personality {
+entry:
+  invoke void @may_throw(i32 %x)
+          to label %ok unwind label %handler
+ok:
+  ret void
+handler:
+  %lp = landingpad { i8*, i32 } cleanup
+  ret void
+}
+```
+
+Lesson 17 rejects the pad via isEHPad and the EH terminators via the whitelist.
+
+See [exception handling](https://llvm.org/docs/ExceptionHandling.html).
+
+### Address-taken basic block
+
+A block whose address can be used as a value (blockaddress), so the CFG is no longer the complete description of control flow. BasicBlock::hasAddressTaken detects it, and the guard rejects.
+
+```llvm
+define ptr @address_taken() {
+entry:
+  br label %target
+target:
+  ret ptr blockaddress(@address_taken, %target)
+}
+```
+
+See [addresses of basic blocks](https://llvm.org/docs/LangRef.html#addresses-of-basic-blocks) in LangRef.
+
+### Static entry alloca
+
+An alloca with a compile-time constant count in the entry block — the only allocation the pass preserves. A non-static or non-entry alloca would change allocation frequency or lifetime if hoisted into the one-time setup, so AllocaInst::isStaticAlloca gates it.
+
+```llvm
+define i32 @fixed_slot() {
+entry:
+  %slot = alloca i32, align 4
+  store i32 1, ptr %slot, align 4
+  %v = load i32, ptr %slot, align 4
+  ret i32 %v
+}
+```
+
+Lesson 17 rejects the non-entry and variable-size cases; the nonentry-alloca.ll fixture is the focused test.
+
+See [the alloca instruction](https://llvm.org/docs/LangRef.html#alloca-instruction) in LangRef.
+
+### Terminator whitelist
+
+The set of block endings the pass rewrites: br, conditional br, switch, ret, unreachable. A switch over getTerminator()->getOpcode() rejects every other opcode, so an EH terminator or an indirect branch is named precisely rather than failing with a generic error.
+
+```cpp
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Instructions.h"
+#include <utility>
+
+std::pair<bool, const char *> check_terminator(const llvm::BasicBlock &BB) {
+    switch (BB.getTerminator()->getOpcode()) {
+    case llvm::Instruction::UncondBr:
+    case llvm::Instruction::CondBr:
+    case llvm::Instruction::Switch:
+    case llvm::Instruction::Ret:
+    case llvm::Instruction::Unreachable: break;
+    default: return {false, "unsupported terminator"};
+    }
+    return {true, ""};
+}
+```
+
+See [terminator instructions](https://llvm.org/docs/LangRef.html#terminator-instructions) in LangRef; the whitelist itself is this pass’s design, introduced in lesson 17.
+
+### The C++ API side
+
+### isa / cast / dyn_cast
+
+isa<T>(V) is a type check returning a bool; cast<T>(V) asserts and returns a typed pointer; dyn_cast<T>(V) checks and returns nullptr when V is not T. Day 2 uses the if-initializer form so the pointer is typed and scoped to the check: the declaration, the check, and the use happen in one statement.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include <vector>
+
+void collect_phis(llvm::BasicBlock &BB,
+                  std::vector<llvm::PHINode *> &phis) {
+    for (auto &I : BB)
+        if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))
+            phis.push_back(phi);
+}
+```
+
+Lessons 1–2 teach the form, including why a bare isa test discards the typed pointer.
+
+See [LLVM casting](https://llvm.org/docs/ProgrammersManual.html#the-isa-cast-and-dyn-cast-templates).
+
+### LLVMContext
+
+The shared context for IR facilities: uniqued types and metadata live in it, so every query must go through the same context to find the same objects. A pass obtains it from the function it transforms with F.getContext().
+
+```cpp
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+
+llvm::BasicBlock *make_block(llvm::Function &F) {
+    return llvm::BasicBlock::Create(F.getContext(), "ms.work", &F);
+}
+```
+
+See the [LLVMContext doxygen](https://llvm.org/doxygen/classllvm_1_1LLVMContext.html).
+
+### IRBuilder and insertion point
+
+IRBuilder inserts instructions at a chosen position: the insertion point is where the next instruction goes, and a pointer-based constructor can insert before an existing instruction or at the end of a block. Lesson 14 builds new blocks and terminates them with the builder.
+
+```cpp
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/IRBuilder.h"
+
+void finish_block(llvm::BasicBlock &BB) {
+    llvm::IRBuilder<> builder(&BB);
+    builder.CreateUnreachable();
+}
+```
+
+See the [IRBuilder doxygen](https://llvm.org/doxygen/classllvm_1_1IRBuilder.html).
+
+### getInt32Ty / getInt32
+
+getInt32Ty() returns the i32 Type*; getInt32(2) returns the ConstantInt holding a particular value. A builder step often needs both — a type to declare storage, a value to store — and confusing the two is a common type error.
+
+```cpp
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/IRBuilder.h"
+#include <utility>
+
+std::pair<llvm::Type *, llvm::ConstantInt *>
+type_and_value(llvm::IRBuilder<> &B) {
+    return {B.getInt32Ty(), B.getInt32(2)};
+}
+```
+
+See the [IRBuilder doxygen](https://llvm.org/doxygen/classllvm_1_1IRBuilder.html), where both methods live.
+
+### DenseMap
+
+LLVM’s open-addressing key/value container, used here to map BasicBlock* to an unsigned state ID. It is faster than unordered_map in hot pass loops, but its iteration order is not a display order: the vector preserves order, and the map only supports lookup.
+
+```cpp
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/IR/BasicBlock.h"
+
+unsigned state_of(llvm::BasicBlock *BB,
+                  const llvm::DenseMap<llvm::BasicBlock *, unsigned> &ids) {
+    return ids.lookup(BB);
+}
+```
+
+Lesson 13’s fix: lookup does not insert a missing key, while operator[] does.
+
+See the [DenseMap doxygen](https://llvm.org/doxygen/classllvm_1_1DenseMap.html).
+
+### PreservedAnalyses
+
+The pass’s report of which cached analysis results remain valid after it runs. all() promises nothing changed — safe only when nothing changed; none() says recompute everything. A changed CFG returns none() here: all() is a cache-validity promise, not an undo operation.
+
+```cpp
+#include "llvm/IR/PassManager.h"
+
+llvm::PreservedAnalyses preserve_if_changed(bool changed) {
+    return changed ? llvm::PreservedAnalyses::none()
+                   : llvm::PreservedAnalyses::all();
+}
+```
+
+See [the new pass manager document](https://llvm.org/docs/NewPassManager.html).
+
+### eraseFromParent
+
+Removes an instruction from its block and deletes it; the pointer dangles after the call. That is exactly what DemotePHIToStack does to your PHI, and why the pass collects pointers before it mutates.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+
+void replace_and_drop(llvm::Instruction &I, llvm::Value *replacement) {
+    I.replaceAllUsesWith(replacement);
+    I.eraseFromParent();
+}
+```
+
+See the [Instruction doxygen](https://llvm.org/doxygen/classllvm_1_1Instruction.html).
+
+### isUsedOutsideOfBlock
+
+A method on an instruction asking whether its result has a user outside a given block — the cross-block test the value preparation runs. It is called on the defining instruction, with the defining block as the argument.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+
+bool crosses(const llvm::Instruction &I, const llvm::BasicBlock &BB) {
+    return I.isUsedOutsideOfBlock(&BB);
+}
+```
+
+See the [Instruction doxygen](https://llvm.org/doxygen/classllvm_1_1Instruction.html).
+
+### DemotePHIToStack / DemoteRegToStack
+
+Free functions in llvm/Transforms/Utils/Local.h: DemotePHIToStack(phi) replaces a PHI’s value flow with stores and loads and erases the PHI; DemoteRegToStack(*I) keeps the original calculation but routes its result through stack memory. Neither is a class method, and the PHI pointer is unusable after the first call.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Transforms/Utils/Local.h"
+#include <vector>
+
+void prepare(std::vector<llvm::PHINode *> &phis,
+             std::vector<llvm::Instruction *> &escaping) {
+    for (auto *phi : phis)
+        llvm::DemotePHIToStack(phi);
+    for (auto *I : escaping)
+        llvm::DemoteRegToStack(*I);
+}
+```
+
+Lessons 3 and 9 make the calls; lesson 8 reads the installed Local.h signatures first.
+
+See the [Local.cpp source](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Transforms/Utils/Local.cpp).
+
+Checkpoint: Name a construct from this document and the API that reads or writes it. Then state which lesson introduced it and which invariant the construct protects.
 
 ### Check your understanding
 
@@ -6890,3 +8007,311 @@ B. getInt32(2) and getInt32Ty()
 C. eraseFromParent() and continue
 
 Answer: A. An instruction builder often needs both an LLVM Type* and particular constant values. They are different API inputs.
+30. Look up a Day 2 C++ term
+============================
+
+Check the ownership before you write the expression
+
+Each entry names a C++ concept, the problem it solves, and how Day 2 meets it. The groups follow the order the lessons introduce them: pointer and reference mechanics, type and conversion rules, and class and translation-unit structure.
+
+Task: Use this document when a C++ term interrupts your progress. LLVM-specific terms have their own document, and general compiler vocabulary is in the Day 2 glossary.
+
+### Pointers and references
+
+### Pointer vs reference
+
+A pointer stores an address and can be reseated; a reference is an alias that binds to one object for its lifetime. Day 2’s worklists store pointers because they must point at the instruction; pass parameters take references because they borrow it.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+
+llvm::Instruction *address_of(llvm::Instruction &I) {
+    return &I;
+}
+```
+
+See [references on cppreference](https://en.cppreference.com/w/cpp/language/reference.html).
+
+### Borrowed reference parameter (Function &)
+
+static bool build(llvm::Function &F) borrows the caller’s function: the body may read and modify it but never owns or copies it. That is why the pass mutates the IR in place instead of returning a new function.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+bool build(llvm::Function &F) {
+    return F.size() > 1;
+}
+```
+
+Lesson 18 introduces the declaration; the pass’s own run() takes llvm::Function &F for the same reason.
+
+See [references on cppreference](https://en.cppreference.com/w/cpp/language/reference.html).
+
+### Address-of vs reference declaration
+
+The & in a declaration can do two different jobs: next to a name it declares a reference (llvm::Function &F), and as an operator on an expression it takes the address (&BB). Lesson 13’s DenseMap fix is exactly this distinction: BB is a reference alias, and &BB produces the BasicBlock* key.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+llvm::BasicBlock *block_pointer(llvm::BasicBlock &BB) {
+    return &BB;
+}
+```
+
+See [references on cppreference](https://en.cppreference.com/w/cpp/language/reference.html).
+
+### Pointer-to-const vs const pointer
+
+const T *p means the pointee is const: you may not write through p, but p may be reseated. T *const p means p itself is const: it may not be reseated, but the pointee is writable. Reading a function’s name as read-only data maps to the first half: the pass never rewrites the symbol, only its uses.
+
+```cpp
+int stable_view(const int &value, int *const slot) {
+    *slot = 7;
+    return value;
+}
+```
+
+See [cv-qualifiers on cppreference](https://en.cppreference.com/w/cpp/language/cv).
+
+### Iterator invalidation
+
+A saved traversal position can stop being valid the moment the underlying collection changes: erasing an instruction mid-loop can leave the iterator past the end, and rehashing a DenseMap invalidates references into its storage. Day 2’s rule is collect all the pointers first, then mutate.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include <vector>
+
+void remove_phis(llvm::BasicBlock &BB) {
+    std::vector<llvm::PHINode *> phis;
+    for (auto &I : BB)
+        if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))
+            phis.push_back(phi);
+    for (auto *phi : phis)
+        phi->eraseFromParent();
+}
+```
+
+Lessons 1 and 3 make the collect-then-mutate order explicit; the lesson 12 note about DenseMap rehashing is the same rule on the map side.
+
+See [vector::erase on cppreference](https://en.cppreference.com/w/cpp/container/vector/erase.html) for how erasure invalidates positions.
+
+### Types and conversion
+
+### auto deduction
+
+auto lets the compiler deduce the declared type from the initializer: auto *entry = &F.getEntryBlock() is a BasicBlock* without spelling it out. The deduction is fixed at the declaration; the type does not change with later uses.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+llvm::BasicBlock *entry_of(llvm::Function &F) {
+    auto *entry = &F.getEntryBlock();
+    return entry;
+}
+```
+
+See [auto on cppreference](https://en.cppreference.com/w/cpp/language/auto.html).
+
+### Range-for element type
+
+The element type of a range-for is set by the declaration: for (auto &BB : F) binds each BB to a reference to the block, while for (auto *BB : phis) iterates pointer values. Lesson 13’s pointer-key bug came from exactly this choice: the loop element is a reference, and the map wanted a pointer.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+unsigned count_blocks(const llvm::Function &F) {
+    unsigned n = 0;
+    for (auto &BB : F)
+        ++n;
+    return n;
+}
+```
+
+See [range-based for in expressions on cppreference](https://en.cppreference.com/w/cpp/language/expressions.html).
+
+### Upcast / downcast
+
+An upcast treats a derived object as its base type — always safe and automatic, as when &I is accepted where a Value* is expected. A downcast goes through the more specific type and is valid only after a check, which is what dyn_cast exists for.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/raw_ostream.h"
+
+void classify(llvm::Instruction &I) {
+    llvm::Value *base = &I;
+    if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(&I))
+        llvm::errs() << "load of " << load->getType() << "\n";
+    (void)base;
+}
+```
+
+See [casting on Wikipedia](https://en.wikipedia.org/wiki/Casting_(computer_programming)).
+
+### Short-circuit evaluation
+
+a && b does not evaluate b when a is false; a || b does not evaluate b when a is true. That matters when the second operand performs a transformation: changed = changed || build(F) skips build whenever demotion already changed the function. Day 2’s fix evaluates build first and then combines, or uses |= on already-computed results.
+
+```cpp
+bool combine(bool alreadyChanged, bool (*build)()) {
+    if (alreadyChanged || build())
+        return true;
+    return false;
+}
+```
+
+Lesson 22 meets the bug directly: the orchestrator must not skip construction because demotion changed the function.
+
+See [logical operators on cppreference](https://en.cppreference.com/w/cpp/language/operator_other.html), where short-circuit evaluation is documented.
+
+### if-initializers
+
+if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) declares a variable inside the condition and tests it: the pointer exists only inside the if, and the truth test is not null. It is Day 2’s standard checked-cast idiom: one declaration, one check, one scoped pointer.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/Casting.h"
+
+bool is_phi(const llvm::Instruction &I) {
+    if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I))
+        return phi->getNumIncomingValues() > 1;
+    return false;
+}
+```
+
+Lessons 1–2 introduce the form, and lesson 17 uses it throughout the guard.
+
+See [if on cppreference](https://en.cppreference.com/w/cpp/language/if.html).
+
+### Classes and translation units
+
+### namespace
+
+A namespace gives declarations a scoped name — minishield::StateMachineBuilder instead of a bare StateMachineBuilder that could collide with anything else in the translation unit. Day 2’s pass, guard, and builder all live in namespace minishield.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+namespace minishield {
+bool build(llvm::Function &F);
+}
+```
+
+See [namespaces on cppreference](https://en.cppreference.com/w/cpp/language/namespace.html).
+
+### #pragma once
+
+A compiler directive that includes a header at most once per translation unit, no matter how many times the include chain reaches it. Day 2’s builder header (lesson 18) starts with it so the class is declared exactly once even when several files include it.
+
+```cpp
+#pragma once
+#include "llvm/IR/Function.h"
+
+namespace minishield {
+class StateMachineBuilder {
+public:
+    static bool build(llvm::Function &F);
+};
+}
+```
+
+Lesson 18 introduces the header: the pragma prevents repeated inclusion, the include makes llvm::Function known, and the namespace gives the class its minishield:: name.
+
+Introduced in lesson 18; see also [declarations on cppreference](https://en.cppreference.com/w/cpp/language/declarations.html) for how headers declare what a translation unit may use.
+
+### Class vs struct
+
+In C++ the two differ mostly in default access: a class defaults to private, a struct to public. Day 2 declares class StateMachineBuilder with an explicit public: section — the class default is private, so the public specifier is what lets callers use StateMachineBuilder::build(F).
+
+```cpp
+#include "llvm/IR/Function.h"
+
+namespace minishield {
+class StateMachineBuilder {
+public:
+    static bool build(llvm::Function &F);
+};
+}
+```
+
+See [classes on cppreference](https://en.cppreference.com/w/cpp/language/class.html).
+
+### Static member function
+
+A static member function has no object to call it on: it is invoked as StateMachineBuilder::build(F) and has no implicit this. That is why build() takes the function as an explicit parameter — there is no stored member state for it to reach.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+namespace minishield {
+class StateMachineBuilder {
+public:
+    static bool build(llvm::Function &F) {
+        return F.size() > 1;
+    }
+};
+}
+```
+
+See [static on cppreference](https://en.cppreference.com/w/cpp/language/static.html).
+
+### Declaration vs definition
+
+A declaration says what exists (bool build(llvm::Function &F);); a definition gives the body. Lesson 18 teaches the declaration first — a syntax-only step with no CMake change — and the definition comes later, when the body is ready. A translation unit compiles from declarations; linking resolves them to definitions.
+
+```cpp
+#include "llvm/IR/Function.h"
+
+bool build(llvm::Function &F);
+bool build(llvm::Function &F) {
+    return F.size() > 1;
+}
+```
+
+See [declarations on cppreference](https://en.cppreference.com/w/cpp/language/declarations.html).
+
+### Default arguments
+
+A default argument supplies a value when the caller omits one, so the same call can stay minimal or be explicit: DemotePHIToStack(phi) uses its optional insertion-point argument at the default. Reading the installed declaration is what tells you which arguments are optional.
+
+```cpp
+int add(int a, int b = 3) {
+    return a + b;
+}
+```
+
+Lesson 8 reads the Local.h signatures and keeps the optional arguments at their defaults.
+
+See [default arguments on cppreference](https://en.cppreference.com/w/cpp/language/default_arguments.html).
+
+### Ownership and lifetime
+
+Whoever owns an object decides when it dies. LLVM owns the IR objects: the function owns its blocks, and a block owns its instructions. A pass holding raw pointers borrows them — it must not outlive the object, and it must not use a pointer after the owner deletes it. A worklist of pointers is safe only while the underlying instructions still exist.
+
+```cpp
+#include "llvm/IR/Instructions.h"
+#include "llvm/Transforms/Utils/Local.h"
+#include <vector>
+
+void prepare(std::vector<llvm::PHINode *> &phis) {
+    for (auto *phi : phis)
+        llvm::DemotePHIToStack(phi);
+}
+```
+
+See [lifetime on cppreference](https://en.cppreference.com/w/cpp/language/lifetime.html).
+
+Checkpoint: Pick one expression from the Day 2 lessons and say whether each value in it is borrowed, copied, or owned. Then name the lesson that introduced the construct.
+
+### Check your understanding
+
+In the declaration static bool build(llvm::Function &F), what does the & do to F?
+
+A. Borrows the caller's Function: the body may read and modify it but never owns or copies it
+B. Copies the Function onto build's own stack
+C. Declares a pointer that must be dereferenced before use
+
+Answer: A. A reference parameter is an alias for the caller’s object. build() changes the caller’s Function in place, which is why the pass mutates the IR instead of returning a new one.
