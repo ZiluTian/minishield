@@ -4,10 +4,10 @@
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC%20BY--NC%204.0-yellow.svg)](LICENSE)
 
 MiniShield is a C++20 study project for an LLVM 23.1.5 New Pass Manager plugin,
-paired with a browser-based book that teaches the LLVM and C++ concepts behind
-the implementation.
+developed alongside a three-volume web book that teaches the LLVM and C++
+concepts behind the implementation.
 
-**[Open the interactive book](https://zilutian.github.io/minishield/)** ·
+**[Read the book](https://zilutian.github.io/minishield/)** ·
 [Project roadmap](PLAN.md)
 
 The plugin includes `minishield-stats`, CFG analysis, and function eligibility.
