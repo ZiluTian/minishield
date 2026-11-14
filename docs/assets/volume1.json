@@ -212,7 +212,7 @@
         },
         {
           "type": "paragraph",
-          "text": "**Eligibility** is the yes/no decision made before a flattening pass rewrites a function: is this function's shape one the pass can handle? The current policy (lesson 23) rejects, among other things, functions with exception handling, coroutine intrinsics, block addresses used as values, or terminators the pass does not model (only `br`, `switch`, `ret`, `unreachable` are accepted). An accepted function is **eligible**; a rejected one must be left completely unchanged — lesson 25 shows how to prove that with a diff. Eligibility is a conservative \"we can handle this shape\" decision, not a proof that flattening is safe in general."
+          "text": "**Eligibility** is the yes/no decision made before a flattening pass rewrites a function: is this function's shape one the pass can handle? The current policy (lesson 23) rejects, among other things, functions with exception handling, coroutine intrinsics, block addresses used as values, or terminators the pass does not model (only `br`, `switch`, `ret`, `unreachable` are accepted). An accepted function is **eligible**; a rejected one must be left completely unchanged — lesson 23 shows how to prove that with a diff. Eligibility is a conservative \"we can handle this shape\" decision, not a proof that flattening is safe in general."
         },
         {
           "type": "paragraph",
@@ -4896,6 +4896,51 @@
         },
         {
           "type": "heading",
+          "text": "A complete skeleton: adding `minishield-opaque`"
+        },
+        {
+          "type": "paragraph",
+          "text": "The five steps above are abstract. Here is every file a second technique touches, using opaque predicates as the example (the checkpoint at the end reasons about exactly this pass). Opaque predicates plant a branch on a condition that is always true, so a static reader must model a path the program never takes. It reuses the registry, the guard contract, the orchestrator's order, and the differential harness; only the builder is new. The guard and orchestrator below are complete; the builder is marked where the IR edits go, because that is the part that belongs to the technique."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// include/minishield/OpaquePredicatePass.h -- one pass = one\n// header, shaped exactly like FlatteningPass.h\n#pragma once\n#include \"llvm/IR/PassManager.h\"\n\nnamespace minishield {\n    class OpaquePredicatePass\n        : public llvm::OptionalPassInfoMixin<OpaquePredicatePass> {\n        public:\n            llvm::PreservedAnalyses run(\n                    llvm::Function &F,\n                    llvm::FunctionAnalysisManager &AM);\n    };\n} // namespace minishield"
+        },
+        {
+          "type": "paragraph",
+          "text": "The guard keeps the same shape as `FunctionEligibility::check`: a named reason on rejection, and a promise that the function is left untouched when the pass declines. The orchestrator keeps `FlatteningPass::run`'s order: guard first, build second, then the `PreservedAnalyses` decision. The builder is the only new logic; it walks the conditional branches and inserts a gate on each."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// lib/OpaquePredicatePass.cpp\n#include \"minishield/OpaquePredicatePass.h\"\n\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/Instructions.h\"\n#include \"llvm/IR/IRBuilder.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\n#include <utility>\n\nnamespace minishield {\n\n// Seam 2: the support contract. Same shape as FunctionEligibility::check.\nstatic std::pair<bool, const char *> opaqueEligible(const llvm::Function &F) {\n    if (F.isDeclaration())\n        return {false, \"declaration has no body\"};\n    bool hasCondBr = false;\n    for (const auto &BB : F)\n        if (auto *br = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator()))\n            if (!br->isUnconditional())\n                hasCondBr = true;\n    if (!hasCondBr)\n        return {false, \"no conditional branch to gate\"};\n    return {true, \"\"};\n}\n\n// Seam 3: the technique-specific builder. Marked where the IR edits go.\nstatic bool opaqueBuild(llvm::Function &F) {\n    bool changed = false;\n    for (auto &BB : F) {\n        auto *br = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator());\n        if (!br || br->isUnconditional())\n            continue;\n        // --- the technique goes here -------------------------------\n        // 1. Pick a seed value S (an argument, or a fresh constant).\n        // 2. Build the always-true predicate over S. The product of\n        //    two consecutive integers is even, so (S*S - S) % 2 == 0:\n        //       llvm::IRBuilder<> B(br);\n        //       auto *t     = B.CreateMul(S, S);\n        //       auto *d     = B.CreateSub(t, S);\n        //       auto *p     = B.CreateURem(d, B.getInt32(2));\n        //       auto *alive = B.CreateICmpEQ(p, B.getInt32(0)); // true\n        // 3. Insert a gate block: live edge to the original target,\n        //    dead edge to a new block the optimizer may later empty.\n        // 4. Rewire: br jumps to the gate; the gate does the real branch.\n        // ------------------------------------------------------------------\n        (void)br;\n        changed = true;\n    }\n    return changed;\n}\n\n// Seam 4: the orchestrator. Same order as FlatteningPass::run.\nllvm::PreservedAnalyses OpaquePredicatePass::run(\n    llvm::Function &F,\n    llvm::FunctionAnalysisManager &AM) {\n    auto ok = opaqueEligible(F);\n    if (!ok.first) {\n        llvm::errs() << \"[MiniShield] rejected: \" << F.getName()\n                     << \": \" << ok.second << \"\\n\";\n        return llvm::PreservedAnalyses::all();\n    }\n    llvm::errs() << \"[MiniShield] eligible: \" << F.getName() << \"\\n\";\n    bool changed = opaqueBuild(F);\n    return changed ? llvm::PreservedAnalyses::none()\n                   : llvm::PreservedAnalyses::all();\n}\n} // namespace minishield"
+        },
+        {
+          "type": "code",
+          "language": "cmake",
+          "text": "# CMakeLists.txt -- register the new source in the MODULE (one line).\nadd_library(MiniShield MODULE\n\tlib/Plugin.cpp\n\tlib/FlatteningPass.cpp\n\tlib/StatsPass.cpp\n\tlib/CFGAnalyzer.cpp\n\tlib/FunctionEligibility.cpp\n\tlib/StateMachineBuilder.cpp\n\tlib/OpaquePredicatePass.cpp   # the new technique\n)"
+        },
+        {
+          "type": "paragraph",
+          "text": "Seam 1 is the registry branch already shown in the excerpt above: `Name == \"minishield-opaque\"` adds the pass. That one line in `lib/Plugin.cpp`, plus the header, the `.cpp`, and the CMake line, is the entire diff for adding the pass. Seam 5 is the evidence: add one positive fixture that exercises exactly one gated branch, and inherit the negative fixtures unchanged -- they are technique-agnostic, and this pass must reject them for the same reasons the flattener does."
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "; tests/ir/opaque_pos.ll -- one conditional branch to gate\ndefine i32 @pick(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %hi, label %lo\nhi:\n  ret i32 1\nlo:\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Then prove the pass preserves behavior, the way the flattener does: build the original and the hardened module into binaries that share a wrapper `main` printing `pick(x)` for a fixed battery, and require the two outputs to match. An empty diff is the same contract the flattener's rejection test relies on -- behavior held."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "cmake --build build\nopt -load-pass-plugin=build/libMiniShield.so \\\n    -passes='function(minishield-opaque),verify' \\\n    -S tests/ir/opaque_pos.ll -o build/opaque_after.ll\n# driver.c is the wrapper main (as in the Volume 2 differential)\n# that prints pick(x) for a fixed set of x; run both and diff:\nclang -O0 tests/ir/opaque_pos.ll driver.c -o build/pick_orig\nclang -O0 build/opaque_after.ll driver.c -o build/pick_new\ndiff <(./build/pick_orig) <(./build/pick_new)   # must be empty"
+        },
+        {
+          "type": "heading",
           "text": "Other techniques and how each fits"
         },
         {
@@ -5059,7 +5104,7 @@
           ]
         }
       ],
-      "words": 1403,
+      "words": 2153,
       "quiz": {
         "q": "A new hardening technique is being added to MiniShield. Which existing piece is the keystone that lets one plugin host many techniques?",
         "choices": [
@@ -6439,7 +6484,7 @@
             ],
             [
               "Address-taken block.",
-              "A basic block whose address is used as a value in the IR (produced by `blockaddress`). Such a block is a value a program can compute with, not just a control-flow destination, so the flattening policy rejects it (see lesson 24)."
+              "A basic block whose address is used as a value in the IR (produced by `blockaddress`). Such a block is a value a program can compute with, not just a control-flow destination, so the flattening policy rejects it (see lesson 23)."
             ],
             [
               "`add_library`.",
@@ -6459,7 +6504,7 @@
             ],
             [
               "`blockaddress`.",
-              "An LLVM operation that yields the address of a named basic block as a value: `ret ptr blockaddress(@f, %target)`. It is what makes a block \"address-taken\" (see lesson 24)."
+              "An LLVM operation that yields the address of a named basic block as a value: `ret ptr blockaddress(@f, %target)`. It is what makes a block \"address-taken\" (see lesson 23)."
             ],
             [
               "Binary IR.",
@@ -6495,7 +6540,7 @@
             ],
             [
               "Coroutine.",
-              "A function that can be suspended and resumed. In LLVM IR it is expressed through `llvm.coro.*` intrinsics. A **presplit coroutine** is a coroutine function the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()` (see lessons 22, 23, 25)."
+              "A function that can be suspended and resumed. In LLVM IR it is expressed through `llvm.coro.*` intrinsics. A **presplit coroutine** is a coroutine function the front end has already split into continuation blocks, detectable with `F.isPresplitCoroutine()` (see lessons 19, 23)."
             ],
             [
               "C++ standard library headers (for example `<type_traits>`).",
@@ -6503,7 +6548,7 @@
             ],
             [
               "Declaration vs. definition (function).",
-              "A declaration (`declare i32 @foo(i32)`) announces that a function exists, with no body; a definition (`define i32 @foo(i32 %x) { ... }`) provides the body. Passes only run on definitions; `F.isDeclaration()` detects the former (see lessons 9, 22)."
+              "A declaration (`declare i32 @foo(i32)`) announces that a function exists, with no body; a definition (`define i32 @foo(i32 %x) { ... }`) provides the body. Passes only run on definitions; `F.isDeclaration()` detects the former (see lessons 9, 23)."
             ],
             [
               "`dlopen()`.",
@@ -6519,7 +6564,7 @@
             ],
             [
               "EH pad.",
-              "The first instruction of a block that receives exceptional control: `landingpad`, `catchpad`, `cleanuppad`, or `catchswitch`. The name comes from landing pad. `BB.isEHPad()` asks whether the block's first non-PHI instruction is one of these (see lesson 21)."
+              "The first instruction of a block that receives exceptional control: `landingpad`, `catchpad`, `cleanuppad`, or `catchswitch`. The name comes from landing pad. `BB.isEHPad()` asks whether the block's first non-PHI instruction is one of these (see lesson 19)."
             ],
             [
               "`fallthrough`.",
@@ -6543,11 +6588,11 @@
             ],
             [
               "`isa<T>(X)` / `dyn_cast<T>(X)`.",
-              "LLVM's type-testing and type-casting helpers: `isa` answers \"is this value a T?\" and returns a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise (see lessons 11, 22)."
+              "LLVM's type-testing and type-casting helpers: `isa` answers \"is this value a T?\" and returns a boolean; `dyn_cast` returns a `T*` on success and `nullptr` otherwise (see lessons 11, 19)."
             ],
             [
               "Intrinsic.",
-              "A special function declared by LLVM itself, with names in the reserved `llvm.` namespace (for example `llvm.sqrt.f64`, `llvm.coro.noop`), whose semantics LLVM knows and which is lowered directly to target code. In IR it appears as an ordinary `call` instruction with opcode `Call` (see lesson 22)."
+              "A special function declared by LLVM itself, with names in the reserved `llvm.` namespace (for example `llvm.sqrt.f64`, `llvm.coro.noop`), whose semantics LLVM knows and which is lowered directly to target code. In IR it appears as an ordinary `call` instruction with opcode `Call` (see lesson 19)."
             ],
             [
               "IR / LLVM IR.",
@@ -6563,7 +6608,7 @@
             ],
             [
               "Landing pad.",
-              "The block a thrown exception \"lands\" on; see EH pad (lesson 21)."
+              "The block a thrown exception \"lands\" on; see EH pad (lesson 19)."
             ],
             [
               "`LoopAnalysis` / natural loop.",
@@ -6623,7 +6668,7 @@
             ],
             [
               "Personality routine.",
-              "The function a language runtime calls while an exception unwinds, to decide how the exception is handled (in C++ it is `_Unwind_Resume`). A function that can receive exceptions carries one; `F.hasPersonalityFn()` asks whether it does (see lesson 21)."
+              "The function a language runtime calls while an exception unwinds, to decide how the exception is handled (in C++ it is `_Unwind_Resume`). A function that can receive exceptions carries one; `F.hasPersonalityFn()` asks whether it does (see lesson 19)."
             ],
             [
               "PHI node / `phi`.",
@@ -6703,7 +6748,7 @@
             ],
             [
               "Unwind / `invoke`.",
-              "An `invoke` instruction calls with two exits: `to label %normal` and `unwind label %exception`. Unwinding is the exceptional exit; it lands on an EH pad (see lesson 21)."
+              "An `invoke` instruction calls with two exits: `to label %normal` and `unwind label %exception`. Unwinding is the exceptional exit; it lands on an EH pad (see lesson 19)."
             ],
             [
               "Usage requirements (`PRIVATE` / `PUBLIC` / `INTERFACE`).",
@@ -6720,7 +6765,7 @@
           ]
         }
       ],
-      "words": 2507
+      "words": 2506
     }
   ]
 }

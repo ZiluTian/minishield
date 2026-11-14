@@ -15880,7 +15880,7 @@
         },
         {
           "type": "paragraph",
-          "text": "Lesson 19 meets this when lowering a switch: a comparison or select over state constants folds to a value unless an operand still depends on runtime input."
+          "text": "Lesson 20 meets this when lowering a switch: a comparison or select over state constants folds to a value unless an operand still depends on runtime input."
         },
         {
           "type": "paragraph",
@@ -16096,8 +16096,8 @@
             "Before/after memory examples: lessons 10–11.",
             "State IDs, block creation, and first-hop connection: lessons 12–16.",
             "Guard-rejected LLVM constructs and their predicates: lesson 17.",
-            "LLVM-specific terms — printed IR, memory, control flow, calls, and the C++ API: lesson 29, the Volume 2 LLVM document.",
-            "C++-specific terms — pointers, references, casts, classes, and translation units: lesson 30, the Volume 2 C++ document."
+            "LLVM-specific terms — printed IR, memory, control flow, calls, and the C++ API: lesson 43, the Volume 2 LLVM document.",
+            "C++-specific terms — pointers, references, casts, classes, and translation units: lesson 44, the Volume 2 C++ document."
           ]
         },
         {
