@@ -8389,6 +8389,23 @@
           "text": "`CreateStore(value, address)` writes the selected i32 into the alloca named `stateSlot`; its return value is a `StoreInst *`, which can be ignored here. `CreateBr(destination)` creates the terminator whose destination is the `BasicBlock *` named `dispatcher`. Do not use `dispatcher` as the store address or assign the store instruction to that block variable. Erase the old conditional branch only after both replacement instructions have been inserted."
         },
         {
+          "type": "heading",
+          "text": "Follow the state number through memory"
+        },
+        {
+          "type": "paragraph",
+          "text": "Earlier, `setup.CreateAlloca(setup.getInt32Ty(), nullptr, \"ms.state\")` created an `alloca i32`. The C++ variable `stateSlot` holds the LLVM instruction that produces the slot's address. The address has IR type `ptr`; the contents of the slot are an `i32`. `nextState` is that i32 value, so it is the first argument to the store, while `stateSlot` is the address argument."
+        },
+        {
+          "type": "code",
+          "language": "text",
+          "text": "nextState : i32 value\n     │  CreateStore(nextState, stateSlot)\n     ▼\nstateSlot : ptr ── address of ──> [ i32 memory slot ]\n                                      │\n                         CreateLoad(i32, stateSlot)\n                                      ▼\n                              current : i32\n                                      │ switch in ms.dispatch\n                                      ▼\n                               selected block"
+        },
+        {
+          "type": "paragraph",
+          "text": "The dispatcher is a different thing: it is a `BasicBlock *`, not an address to an i32 slot. `CreateBr(dispatcher)` transfers control to that block; its load reads `stateSlot`, and its switch interprets the loaded integer as the next block's state ID."
+        },
+        {
           "type": "paragraph",
           "text": "Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:"
         },
@@ -8662,7 +8679,7 @@
           "irComparison": true
         }
       ],
-      "words": 2912,
+      "words": 3048,
       "quiz": {
         "q": "What does CreateSelect return here?",
         "choices": [
