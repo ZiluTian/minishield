@@ -4831,7 +4831,7 @@ LLVM select is an instruction/value in the generated program. The C++ pass const
 
 Both select alternatives here are state constants. We are not moving the side effects of both original paths into one block; dispatch still executes only the selected destination. This distinction matters because select chooses already available values rather than making arbitrary computations conditional.
 
-Task: Future exercise: replace a conditional original branch with a selected state, a store, and a branch to dispatch. This applies to conditional entries and conditional state blocks.
+Task: In `lib/StateMachineBuilder.cpp`, extend the switch on `entryTerminator->getOpcode()` to handle a conditional entry. Select the ID of successor 0 when the condition is true and successor 1 when it is false; store that selected ID, branch to `dispatcher`, then erase the old branch. Leave other entry forms unchanged for this checkpoint.
 
 ### The template to start with
 
@@ -4882,6 +4882,40 @@ case llvm::Instruction::CondBr: {
 ### Verify
 
 For phi.ll, true must select left’s state and false right’s state. Inspect a select before the entry’s store/dispatch branch. Test both conditions with a wrapper calling merge; a verifier-only check cannot catch swapped destinations.
+
+### Study-session walkthrough — turn the entry branch into a runtime state choice
+
+`entryTerminator` is an LLVM instruction that will be erased, so read its condition and both destinations before removing it. `llvm::CondBrInst` represents the conditional form of `br`; successor index 0 is the true destination and index 1 is the false destination. In `phi.ll`, the builder assigned `left` state 0 and `right` state 1.
+
+The C++ pass runs while `opt` is transforming the module. `entryBuilder.CreateSelect(...)` inserts a new instruction into that module; it does not evaluate `%condition` in the C++ process. Later, when the transformed function runs, the `select` chooses an i32 state number. The dispatcher then reads that number and routes to the matching block. The two possible paths remain mutually exclusive.
+
+Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:
+
+```cpp
+case llvm::Instruction::CondBr: {
+    auto *branch = llvm::cast<llvm::CondBrInst>(entryTerminator);
+    auto *trueDestination = branch->getSuccessor(0);
+    auto *falseDestination = branch->getSuccessor(1);
+
+    // TODO: make i32 constants from ids[trueDestination] and
+    //       ids[falseDestination], using entryBuilder.getInt32(...).
+    // TODO: use CreateSelect(branch->getCondition(), trueState,
+    //       falseState, "ms.next") to create the runtime choice.
+    // TODO: store that result to stateSlot and branch to dispatcher.
+    // TODO: erase entryTerminator only after the replacement exists.
+    break;
+}
+```
+
+For this fixture, both destinations are in the non-entry state map. `DenseMap::lookup` returns zero when a key is absent, so that result alone cannot distinguish state 0 from a missing destination. Before generalizing this code, the support check must guarantee that every routed destination has a state, or the lookup must be checked before any IR is mutated.
+
+Task: Complete the conditional case, rebuild, and run the flatten pass on `tests/ir/phi.ll` with `verify`. Inspect that the entry contains a `select` whose true and false values correspond to `left` and `right`, followed by the state store and branch to dispatch. Then reason through both condition values: `true` must still return 10, and `false` must still return 20. `verify` checks the IR structure; the two return values require a behavior check.
+
+Checkpoint: Why does `CreateSelect` preserve the condition's runtime choice, and why can a valid state-number swap still return the wrong value?
+
+### Model answer
+
+`CreateSelect` inserts a target-program instruction that reads the i1 condition at runtime and yields the first i32 alternative for true or the second for false. The C++ pass only constructs that instruction; it does not decide which path the input takes. Swapping the two state constants keeps all operand types valid, so LLVM's verifier can accept the module, but it routes each condition to the opposite block and changes the returned value.
 
 <details>
 <summary>C++ — Switch scopes, break, and continue</summary>

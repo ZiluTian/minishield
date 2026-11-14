@@ -8341,6 +8341,49 @@
           "text": "For phi.ll, true must select left’s state and false right’s state. Inspect a select before the entry’s store/dispatch branch. Test both conditions with a wrapper calling merge; a verifier-only check cannot catch swapped destinations."
         },
         {
+          "type": "heading",
+          "text": "Study-session walkthrough — turn the entry branch into a runtime state choice",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "`entryTerminator` is an LLVM instruction that will be erased, so read its condition and both destinations before removing it. `llvm::CondBrInst` represents the conditional form of `br`; successor index 0 is the true destination and index 1 is the false destination. In `phi.ll`, the builder assigned `left` state 0 and `right` state 1."
+        },
+        {
+          "type": "paragraph",
+          "text": "The C++ pass runs while `opt` is transforming the module. `entryBuilder.CreateSelect(...)` inserts a new instruction into that module; it does not evaluate `%condition` in the C++ process. Later, when the transformed function runs, the `select` chooses an i32 state number. The dispatcher then reads that number and routes to the matching block. The two possible paths remain mutually exclusive."
+        },
+        {
+          "type": "paragraph",
+          "text": "Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "case llvm::Instruction::CondBr: {\n    auto *branch = llvm::cast<llvm::CondBrInst>(entryTerminator);\n    auto *trueDestination = branch->getSuccessor(0);\n    auto *falseDestination = branch->getSuccessor(1);\n\n    // TODO: make i32 constants from ids[trueDestination] and\n    //       ids[falseDestination], using entryBuilder.getInt32(...).\n    // TODO: use CreateSelect(branch->getCondition(), trueState,\n    //       falseState, \"ms.next\") to create the runtime choice.\n    // TODO: store that result to stateSlot and branch to dispatcher.\n    // TODO: erase entryTerminator only after the replacement exists.\n    break;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "For this fixture, both destinations are in the non-entry state map. `DenseMap::lookup` returns zero when a key is absent, so that result alone cannot distinguish state 0 from a missing destination. Before generalizing this code, the support check must guarantee that every routed destination has a state, or the lookup must be checked before any IR is mutated."
+        },
+        {
+          "type": "task",
+          "text": "Task: Complete the conditional case, rebuild, and run the flatten pass on `tests/ir/phi.ll` with `verify`. Inspect that the entry contains a `select` whose true and false values correspond to `left` and `right`, followed by the state store and branch to dispatch. Then reason through both condition values: `true` must still return 10, and `false` must still return 20. `verify` checks the IR structure; the two return values require a behavior check."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why does `CreateSelect` preserve the condition's runtime choice, and why can a valid state-number swap still return the wrong value?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`CreateSelect` inserts a target-program instruction that reads the i1 condition at runtime and yields the first i32 alternative for true or the second for false. The C++ pass only constructs that instruction; it does not decide which path the input takes. Swapping the two state constants keeps all operand types valid, so LLVM's verifier can accept the module, but it routes each condition to the opposite block and changes the returned value."
+              ]
+            }
+          ]
+        },
+        {
           "type": "deep",
           "lens": "cpp",
           "title": "Switch scopes, break, and continue",
@@ -8584,7 +8627,7 @@
           "irComparison": true
         }
       ],
-      "words": 2276,
+      "words": 2699,
       "quiz": {
         "q": "What does CreateSelect return here?",
         "choices": [
