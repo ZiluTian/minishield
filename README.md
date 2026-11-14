@@ -3,49 +3,26 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC%20BY--NC%204.0-yellow.svg)](LICENSE)
 
-An LLVM pass-plugin study project that is also a **framework for code-hardening
-techniques** — control-flow flattening is its first named pass, and the same plugin
-hosts others (opaque predicates, function splitting, forward CFI, name obfuscation).
-The study covers IR inspection, CFG analysis, eligibility, and control-flow
-rewriting. The learner implementation is in progress; the books include future
-exercises and complete reference examples.
+MiniShield is a C++20 study project for an LLVM 23.1.5 New Pass Manager plugin,
+paired with a browser-based book that teaches the LLVM and C++ concepts behind
+the implementation.
 
-**[Read the Volume 1 book](https://zilutian.github.io/minishield/)** — step-by-step
-lessons, diagrams, code, explanations, and checkpoints. The editable teaching
-source is [volume1](volume1); the roadmap is [PLAN.md](PLAN.md).
+**[Open the interactive book](https://zilutian.github.io/minishield/)** ·
+[Project roadmap](PLAN.md)
 
-**Volume 1 roadmap.** Volume 1 ends with one decision — which functions a
-control-flow-flattening pass may touch. You build a read-only stats pass and a
-CFG analysis first, because you can't safely flatten what you haven't inspected.
-The flattening rewrite itself is Volume 2.
-[Volume 2: transformations](https://zilutian.github.io/minishield/#day2) adds
-PHI and cross-block value demotion, then dispatcher construction, then the
-testing, measurement, and demo chapters that prove it. Its teaching notes are
-in [volume2](volume2).
-[Volume 3: hardening techniques](https://zilutian.github.io/minishield/#day3)
-is a crash course on the techniques flattening leaves out — control-flow
-integrity, stack canaries, OLLVM-style obfuscation, position independence, and
-the fuzzing that proves each one still behaves; its teaching source is
-[volume3](volume3). Both books are complete drafts, with implementation exercises
-and measurements still to be done.
+The plugin includes `minishield-stats`, CFG analysis, and function eligibility.
+`minishield-flatten` is registered, but its transformation is still under
+development; it does not yet rewrite the function control flow.
+LLVM's `verify` pass checks IR structure; it does not prove behavior is
+preserved.
 
-## Beyond flattening: a framework for hardening
+## Quick start
 
-Flattening is the first entry in a larger design. The plugin is built from
-technique-agnostic seams — a named-pass registry, a per-technique eligibility
-guard, a shared CFG analysis, and a differential/stats harness — so other
-code-hardening techniques (opaque predicates, function splitting, instruction
-substitution, forward CFI, name obfuscation) each become one more named pass
-plugged into the same skeleton. Volume 1 closes on this as a capstone lesson:
-[Zoom out: a framework for hardening](https://zilutian.github.io/minishield/#lesson-78).
-It lays out the seams and then works a complete second technique — opaque
-predicates — end to end: the registry branch, the header, the eligibility
-guard, the builder, the CMake line, a fixture, and the differential that proves
-behavior held. That full skeleton is the template for adding any further pass.
+Requires Conda/Miniforge on Linux x86-64. The [environment.yml](environment.yml)
+file defines the `minishield` environment with LLVM/Clang 23.1.5, CMake, Ninja,
+and C++ development headers.
 
-## Set up the environment
-
-Requires Conda/Miniforge on Linux x86-64. Create the named environment once:
+Create the environment once, then activate it in each new shell:
 
 ```bash
 conda env create -f environment.yml
@@ -53,14 +30,7 @@ conda activate minishield
 export LIBRARY_PATH="$CONDA_PREFIX/lib"
 ```
 
-[environment.yml](environment.yml) specifies LLVM/Clang 23.1.5, CMake, Ninja,
-GoogleTest, and C++ development headers. In each new shell, activate the
-environment and export `LIBRARY_PATH` again. Volume 1’s environment chapter explains how the
-original environment was created, what each package does, and how to verify it.
-
-## Configure and build
-
-From the project root:
+Configure and build from the repository root:
 
 ```bash
 cmake -G Ninja -S . -B build \
@@ -70,48 +40,51 @@ cmake -G Ninja -S . -B build \
 cmake --build build
 ```
 
-Output: `build/libMiniShield.so`. Missing `build.ninja` means configuration
-has not completed; `ninja: no work to do` means the build is up to date.
-
-## Run and verify
+This produces `build/libMiniShield.so`. For a read-only inspection pass:
 
 ```bash
-# Inspect instructions and CFG information.
 opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -passes='function(minishield-stats),verify' \
   -disable-output tests/ir/phi.ll
+```
 
-# Run the current flattening checkpoint and verify its output.
+To run the current flattening prototype and save its IR output:
+
+```bash
 opt -load-pass-plugin="$PWD/build/libMiniShield.so" \
   -passes='function(minishield-flatten),verify' \
   -S tests/ir/phi.ll -o build/phi-output.ll
 ```
 
-Fixtures live in [tests/ir](tests/ir). `verify` checks IR structure; it does not
-prove equivalent program behavior. The book explains expected counts,
-rejection cases, and unchanged-IR checks for rejected or read-only passes.
+The examples in [tests/ir](tests/ir) are fixtures for the passes and lessons.
+See the book for expected results and behavior checks.
 
-## Read the book locally
+## Learning path
 
-```bash
-python3 -m http.server 8000 --directory docs
-```
+The web book is split into three volumes:
 
-Open http://localhost:8000. No Node installation or frontend build is needed.
-The book supports chapter search, reading progress, focus mode, copyable code,
-and interactive concept diagrams. Source files are in [docs](docs).
+1. [Volume 1 — foundations](https://zilutian.github.io/minishield/) covers
+   setup, plugin basics, IR, statistics, CFG analysis, eligibility, and an LLVM
+   Crash Course.
+2. [Volume 2 — transformations](https://zilutian.github.io/minishield/#day2)
+   develops value preparation, dispatcher construction, rewriting, and checks.
+3. [Volume 3 — hardening](https://zilutian.github.io/minishield/#day3)
+   studies control-flow integrity, stack canaries, obfuscation, and evaluation.
+
+Editable book sources are [volume1](volume1), [volume2](volume2), and
+[volume3](volume3). To serve the book from this checkout, run
+`python3 -m http.server 8000 --directory docs` and open
+<http://localhost:8000>.
+
+## Repository layout
+
+`include/minishield/` and `lib/` contain the plugin; `tests/ir/` contains LLVM
+fixtures; `volume1`–`volume3` are the teaching sources; `docs/` is the static
+book site.
 
 ## License
 
-This repository uses a split license; see [LICENSE](LICENSE) for the full text.
-
-- **Code** — the pass-plugin source (`include/`, `lib/`), build files, tests,
-  and scripts are licensed under the [MIT License](LICENSE).
-- **Book and teaching content** — the teaching sources ([volume1](volume1),
-  [volume2](volume2), [volume3](volume3)), the rendered book site ([docs](docs)), and the
-  roadmap ([PLAN.md](PLAN.md)) are licensed under
-  [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). You may
-  share and adapt them for non-commercial purposes with attribution, but
-  commercial use requires prior written permission.
-- **Fonts** — `docs/assets/fonts/` remains under the SIL Open Font License,
-  as stated in the accompanying `*-OFL.txt` files.
+See [LICENSE](LICENSE) for full terms. Code, build files, tests, and scripts use
+MIT. The books, book site, and [PLAN.md](PLAN.md) use CC BY-NC 4.0. Fonts in
+`docs/assets/fonts/` use the SIL Open Font License, as stated in their license
+files.
