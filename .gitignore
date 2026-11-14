@@ -1,0 +1,23 @@
+# Local build products and editor configuration.
+/build/
+/.clangd
+*.swp
+*.swo
+
+# Local runner and root-level IR scratch/output files.
+/test_all.sh
+/*.ll
+
+# Local development copy of the teaching skill (kept off the public repo).
+/SKILL.local.md
+
+# Local work-in-progress and reference artifacts (kept off the public repo).
+/.v3ref/
+/.wip-keep-separate.patch
+
+# Local book-consistency checker (hardcoded local paths; not for the public repo).
+/debate/wcheck.py
+
+# Book-review scratch: JSON recovery snapshots and Python caches (kept off the public repo).
+/debate/__pycache__/
+/debate/backup-*.json*

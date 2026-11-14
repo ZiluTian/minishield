@@ -1,0 +1,1611 @@
+{
+  "day": 3,
+  "title": "Volume 3 — Code hardening beyond flattening",
+  "status": "Complete teaching draft. Crash-course exercises on hardening techniques beyond control-flow flattening, through concrete LLVM examples. Write and run the examples after finishing the Volume 2 implementation.",
+  "home": {
+    "headline": "One technique.<br><em>A whole toolkit.</em>",
+    "intro": "MiniShield flattens control flow — one hardening technique among many. The Volume 1 capstone showed the plugin is a framework that hosts techniques as named passes. This crash course fills it: control-flow integrity, stack canaries, OLLVM-style obfuscation, position independence, and the fuzzing that proves each one still behaves.",
+    "coverFoot": "Flattening →<br>hardening.",
+    "aside": {
+      "label": "Roadmap",
+      "text": "Volume 3 is a crash course, not a second implementation: each technique gets its threat, its mechanism, concrete LLVM IR, and its cost. The OLLVM family you implement in the same plugin; CFI, canaries, and PIE are read and verified with the toolchain."
+    }
+  },
+  "groups": [
+    {
+      "name": "The hardening landscape",
+      "label": "LANDSCAPE",
+      "key": "landscape",
+      "ids": [
+        79
+      ],
+      "description": "Frame the threat model, place control-flow flattening in it, and set the standard for claiming a hardening technique works."
+    },
+    {
+      "name": "Control-flow integrity",
+      "label": "CFI",
+      "key": "cfi",
+      "ids": [
+        80,
+        81
+      ],
+      "description": "Guard the two indirect dispatches a program actually performs — the indirect call and the virtual call. Read the IR clang generates and verify it at runtime."
+    },
+    {
+      "name": "Stack canaries",
+      "label": "CANARIES",
+      "key": "canaries",
+      "ids": [
+        82
+      ],
+      "description": "Control-data protection of the return path: how the canary is actually emitted in LLVM 23.1.5 (attribute in the IR, TLS machinery in machine code), which functions each mode protects, and the runtime A/B proof."
+    },
+    {
+      "name": "OLLVM-style obfuscation",
+      "label": "OLLVM",
+      "key": "ollvm",
+      "ids": [
+        83,
+        84,
+        85,
+        86
+      ],
+      "description": "Three OLLVM-family obfuscations added to the MiniShield plugin with the Volume 1 capstone recipe — bogus control flow, string encryption, subroutine splitting — each with its -O0 differential proof and its -O2 dissolution, closing with the deployment rule that makes obfuscation survive: run it last."
+    },
+    {
+      "name": "Position independence",
+      "label": "PIE",
+      "key": "pie",
+      "ids": [
+        87
+      ],
+      "description": "The hardening that lives in the linker and the loader, not the IR: where -pie/-no-pie leave zero trace in the module, what the ELF records instead (EXEC vs DYN, FLAGS_1 PIE, absolute vs load-base-relative relocations), the ASLR proof at runtime, and RELRO's move of .got.plt into the read-only segment."
+    },
+    {
+      "name": "Fuzzing the flattening pass",
+      "label": "FUZZING",
+      "key": "fuzzing",
+      "ids": [
+        88
+      ],
+      "description": "The capstone: the learner's own minishield-flatten plugin under libFuzzer with a behavioral differential - the input contract that makes an IR module runnable in isolation, the subprocess before/after battery, the trap semantics that separate pre-existing undefined behavior from a pass-induced regression, a clean 600-run session against the real plugin, and the one-line off-by-one mutant the harness catches with an exact diff."
+    },
+    {
+      "name": "Reference",
+      "label": "GLOSSARY",
+      "key": "glossary",
+      "ids": [
+        89
+      ],
+      "description": "The Volume 3 glossary: every term the hardening lessons use, with a pointer to the lesson where the term appears; Volume 1-2 terms are cross-referenced, not repeated."
+    }
+  ],
+  "lessons": [
+    {
+      "id": 79,
+      "number": 1,
+      "day": 3,
+      "group": "landscape",
+      "title": "The code-hardening landscape",
+      "originalTitle": "The code-hardening landscape",
+      "summary": "Place control-flow flattening in the threat model, name the hardening families this volume covers, and set the standard for claiming a hardening technique works.",
+      "takeaway": "Flattening is one family — obfuscation. Each technique answers a different threat at a different cost, and obfuscation is the only family whose value the final optimizer can remove.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "How lesson references are numbered"
+        },
+        {
+          "type": "paragraph",
+          "text": "\"Lesson N\" references in this volume use the web book's global ids: 3.1.1 = 79, 3.2.1 = 80, 3.2.2 = 81, 3.3.1 = 82, 3.4.1 through 3.4.3 = 83 through 85 (the three OLLVM lessons), 3.4.4 = 86, 3.5.1 = 87, 3.6.1 = 88, and the glossary (3.7.1) = 89."
+        },
+        {
+          "type": "paragraph",
+          "text": "So far MiniShield has implemented one code-hardening technique: control-flow flattening, which rewrites the control flow of an accepted function through a state-machine dispatcher. The final lesson of Volume 1 zoomed out from there: the plugin’s seams — the named-pass registry, per-technique eligibility guard, shared CFG analysis, and the differential and stats harness — are technique-agnostic, so each hardening technique becomes one more named pass. This volume fills that framework with concrete techniques, organized by the threat each one answers rather than by the seam it plugs into. Every chapter follows the same shape: the threat, the mechanism, concrete LLVM IR from the 23.1.5 toolchain, an exercise, and the cost."
+        },
+        {
+          "type": "heading",
+          "text": "Threats and the families that answer them"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Threat — what the attacker gains",
+              "Family",
+              "Techniques in this volume"
+            ],
+            [
+              "Reads or patches the program’s logic",
+              "Obfuscation",
+              "Control-flow flattening (Volume 2) · bogus control flow · string encryption · subroutine splitting"
+            ],
+            [
+              "Redirects control through a corrupted indirect call, vtable pointer, or function pointer",
+              "Control-flow integrity",
+              "type-based guard (`llvm.type.test` + `llvm.ubsantrap` in 23.1.5)"
+            ],
+            [
+              "Corrupts the saved return address and hijacks a function’s return",
+              "Control-data protection",
+              "Stack canaries — `llvm.stackprotector`"
+            ],
+            [
+              "Predicts where code sits in memory and defeats ASLR",
+              "Platform hardening",
+              "Position-independent code + ASLR + RELRO"
+            ],
+            [
+              "Finds the memory bugs the rest assume are absent",
+              "Memory safety (development-time)",
+              "Sanitizers — used in this volume’s tests and fuzzing, not shipped"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The table is a division of labor, not a ranking. CFI stops a corrupted vtable pointer from dispatching to the wrong type, but it does nothing against an attacker who simply reads the binary to find the hole. Obfuscation makes that reading harder, but it does not make a buffer overflow safe. A hardening program layers the families so that no single compromise gives the attacker what they need; this volume teaches each layer separately so you can see where the seams are."
+        },
+        {
+          "type": "heading",
+          "text": "One attack, end to end"
+        },
+        {
+          "type": "paragraph",
+          "text": "Before the families, one attack walked end to end — the stack-smashing overflow the canary chapter will prove against its own demo. A program reads attacker input and copies it into a 16-byte stack buffer with no bounds check — `memcpy(buf, line, len)` into `buf[16]`, the `process` function of `canary_pipe.c`. The attacker’s input is longer than 16 bytes, and the copy runs past the buffer into the rest of the frame: it crosses the canary slot at `-8(%rbp)` — the random guard the compiler planted there when the canary is on — and keeps going until it overwrites the saved return address at `+8(%rbp)`. The function then executes `ret`: the CPU pops the return address into the instruction pointer and jumps to whatever now sits at `+8(%rbp)` — the attacker’s code. That is the whole attack: one unchecked copy, one overwritten word, one return into foreign code."
+        },
+        {
+          "type": "paragraph",
+          "text": "With the canary on, the overflow is identical and the exit is different: the function’s final compare re-reads the guard from TLS against the planted copy at `-8(%rbp)`, finds it smashed, and aborts in `__stack_chk_fail` (SIGABRT, exit 134) before the corrupted `ret` can fire. The overflow happens either way; what the canary changes is the outcome — a silent hijack becomes a loud crash."
+        },
+        {
+          "type": "paragraph",
+          "text": "The first row of the table is attacked by reading, and the tool chain is short: `strings` for the literals (URLs, magic words, error messages), `objdump` or `llvm-objdump` for the disassembly and the relocations, and a decompiler — IDA or Ghidra — that rebuilds functions and control flow from the disassembly. Analysts hunt for three things: string literals that name the interesting paths, a clean CFG around the sensitive logic (the license branch, the validation jump), and the single branch an exploit must flip. All three are structure — which is why the obfuscation family inflates it, and why inflation buys time without closing the overflow."
+        },
+        {
+          "type": "heading",
+          "text": "Where MiniShield’s flattening sits"
+        },
+        {
+          "type": "paragraph",
+          "text": "Flattening is the obfuscation family’s member in this book. It raises the cost of understanding and changing control flow, and it pays for that at runtime — a state slot, a load, a switch, and the straight-line optimizations the dispatcher destroys — and at the end of the pipeline: a sufficiently aggressive final optimizer can simplify the state machine back toward the original program, and Volume 2’s exit evidence ends with exactly that observation. Obfuscation has a quality problem the other families do not: its value is what survives optimization, not what the pass emits. Every chapter in this volume returns to that question for its technique."
+        },
+        {
+          "type": "heading",
+          "text": "How this volume works"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Each technique gets the same shape: the threat it answers, the mechanism, concrete LLVM IR generated and verified with the isolated LLVM 23.1.5 teaching references, a hands-on exercise, and the cost and limits.",
+            "The OLLVM family — bogus control flow, string encryption, subroutine splitting — you implement as new passes in the MiniShield plugin, using the capstone recipe (register, guard, builder, orchestrator, fixtures), and you prove each one preserves behavior with the differential-testing method from the Volume 2 testing chapters.",
+            "CFI, stack canaries, and position independence are taught by reading and verifying what clang already generates — a from-scratch CFI pass is beyond crash-course scope.",
+            "The final lesson fuzzes one of your own passes, because a differential test over a fixed seed covers less than a fuzzer over the same property."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Two terms before the chapters. A threat model is the explicit statement of which attacker you are defending against and what success means for them. Hardening quality is judged on what that attacker can still do after the technique, at what cost to legitimate users — structural observations like “the block count doubled” or “a canary is present” are not quality claims by themselves."
+        },
+        {
+          "type": "paragraph",
+          "text": "Nine more terms land before they are explained; one line each, with the lesson that carries the explanation:"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "vtable / vptr — the per-class dispatch table and the hidden pointer to it in every object’s first word (3.2.2).",
+            "ASLR / PIE — the kernel’s per-run base randomization, and the position-independent build it acts on (3.5.1).",
+            "GOT / RELRO — the table of imported-function addresses, and the segment that makes it read-only (3.5.1).",
+            "Mangled type-info name — the `_ZTS...` string a CFI check matches against, and how to read the mangling (3.2.1; glossary 3.7.1).",
+            "Calling convention — the agreement on where a function’s arguments and result live; why the no-CFI run’s wrong-type call can still return a value (3.2.1).",
+            "Symbol interposition — how another library’s same-named symbol can bind in place of yours, and what `-fvisibility=hidden` prevents (3.2.2).",
+            "`checksec` — the tool that prints a binary’s RELRO, PIE, and canary status in one line (3.5.1).",
+            "Reverse engineering — reading the shipped binary to find the hole; the primer in this lesson pictures it, and 3.4.1 prices it.",
+            "Exit-code arithmetic — 132 = 128 + SIGILL, 134 = 128 + SIGABRT: how the shell reports a signal-killed process (3.7.1)."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: MiniShield’s flattening raises the cost of reverse engineering. Of the threats in the table, which does it actually answer, which does it leave open, and why is its failure mode different from the failure modes of CFI and canaries?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "It answers the first row — reading or patching the program’s logic: the flattened CFG hides the control structure behind a dispatcher and a state slot, so understanding or modifying behavior requires modeling the state machine.",
+                "It leaves the other rows open: a corrupted indirect call or vtable pointer (the CFI threat), a corrupted return address (the canary threat), and the memory bugs themselves all still work against the flattened program, because flattening rearranges control flow instead of changing what the program executes or where its data lives.",
+                "Its failure mode is optimization, not bypass: the final optimizer can prove the state machine’s behavior and simplify it back toward the original CFG (the Volume 2 exit evidence reduces the whole dispatcher to one select), so the shipped artifact can be structurally unhardened. CFI checks and canaries change what the program does at runtime, so they survive optimization; obfuscation’s quality must be judged on the final artifact, not on the pass output."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1393
+    },
+    {
+      "id": 80,
+      "number": 1,
+      "day": 3,
+      "group": "cfi",
+      "title": "The indirect call check",
+      "originalTitle": "The indirect call check",
+      "summary": "Forward CFI guards indirect calls: read the llvm.type.test + llvm.ubsantrap IR that clang 23.1.5 emits under -fsanitize=cfi-icall -flto, understand why the guard exists only where LTO cannot resolve the target, and verify at runtime that a wrong-type call aborts with SIGILL.",
+      "takeaway": "CFI-ICALL is a type test on the callee pointer, inserted by LTO only where the target is genuinely unknown: it aborts wrong-type targets with SIGILL and says nothing about a wrong function of the right type.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Forward CFI (CFI-ICALL) answers the first concrete threat in the landscape: an attacker overwrites a function pointer — via a buffer overflow, a corrupted pointer table, a data race — and the program calls whatever the pointer now says. The pointer is data, and the call site trusts it unconditionally. Forward CFI inserts a guard before every indirect call: verify that the target has the expected function type before dispatching. In LLVM 23.1.5 the guard is the `llvm.type.test` intrinsic paired with `llvm.ubsantrap`, not the legacy `llvm.cfi_icheck` intrinsic that older material describes."
+        },
+        {
+          "type": "heading",
+          "text": "The check in IR"
+        },
+        {
+          "type": "paragraph",
+          "text": "Minimal case: a program obtains a function pointer from an extern function — outside this translation unit, so the compiler can never know where it points. This is what clang 23.1.5 emits with `-fsanitize=cfi-icall -flto -O2` (trimmed from the real capture; `opt -passes=verify` accepts it):"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare ptr @lookup(i32)\n\ndeclare i1 @llvm.type.test(ptr, metadata)\ndeclare void @llvm.ubsantrap(i8 immarg)\n\ndefine i32 @run_op(i32 %id, i32 %x) {\n  %fp = tail call ptr @lookup(i32 %id)\n  %ok = tail call i1 @llvm.type.test(ptr %fp, metadata !\"_ZTSFiiE\")\n  br i1 %ok, label %do_call, label %trap\n\ntrap:\n  tail call void @llvm.ubsantrap(i8 2)\n  unreachable\n\ndo_call:\n  %r = tail call i32 %fp(i32 %x)\n  ret i32 %r\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Read it top to bottom. `%fp` is the attacker-controlled pointer: it comes from `lookup`, which lives in another translation unit, so even full LTO cannot resolve it. `%ok` is the guard: `llvm.type.test` asks whether the memory at `%fp` carries a CFI type descriptor matching `_ZTSFiiE` — the mangled type-info name of the function type `int(int)`. The descriptor is attached by the compiler to every function compiled with CFI; a target without one, or with a different one, fails the test. The branch then goes to `do_call`, where the real indirect call happens, or to `trap`, where `llvm.ubsantrap` lowers to an undefined instruction and the process dies with SIGILL (exit 132)."
+        },
+        {
+          "type": "paragraph",
+          "text": "Two things this is not. First, it is not an address check: nothing compares `%fp` against a list of allowed addresses, so a target of the right type but the wrong function still passes. Second, the guard exists only where the target is unknown. Without the flag, the same source compiles to an unconditional indirect call:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare ptr @lookup(i32)\n\ndefine i32 @run_op(i32 %id, i32 %x) {\n  %fp = tail call ptr @lookup(i32 %id)\n  %r = tail call i32 %fp(i32 %x)\n  ret i32 %r\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Where LTO can see the target, the check changes shape"
+        },
+        {
+          "type": "paragraph",
+          "text": "CFI-ICALL is an LTO feature — the flag refuses to work without `-flto`. LTO's job is to resolve indirect calls, so most guards the front end would emit disappear at link time: when the target is provably unique the call is devirtualized or inlined, and there is nothing to guard. Where the target set is small but not fully resolvable, the generic type test degenerates into a comparison against known addresses. In the single-translation-unit demo below, LTO rewrote the guard as:"
+        },
+        {
+          "type": "code",
+          "language": "asm",
+          "text": "2017d7: 48 3d 30 18 20 00             \tcmpq\t$0x201830, %rax\n2017dd: 75 4a                         \tjne\t0x201829\n2017df: bf 15 00 00 00                \tmovl\t$0x15, %edi\n2017e4: ff d0                         \tcallq\t*%rax\n...\n201829: 67 0f b9 40 02                \tud1l\t0x2(%eax), %eax\n20182e: cc                            \tint3"
+        },
+        {
+          "type": "paragraph",
+          "text": "The parsed address is compared against `0x201830` — the address of `op_right`, the only target of the right type — and a mismatch jumps to the `ud1` trap. Note that `op_right` itself is now a one-instruction thunk that jumps to `op_right.cfi`, the body LTO rebuilt with its CFI type descriptor attached. The shape to take away: the guard appears exactly where the pointer is genuinely unknown at link time — external, data-dependent, attacker-writable — in whatever form is cheapest there."
+        },
+        {
+          "type": "heading",
+          "text": "What `type.test` is actually testing"
+        },
+        {
+          "type": "paragraph",
+          "text": "The guard's second operand is the expected type as **call-site metadata**: in the minimal module it is the mangled type-info name `_ZTSFiiE` attached directly to the `type.test` call, and LTO's capture of the same check carries the pair `!{i64 0, !\"_ZTSFiiE\"}` — an offset and a name — recorded once per CFI-compiled function in the module's CFI metadata (the module flag `!{i32 4, !\"CFI Canonical Jump Tables\", i32 1}` marks the module as using this scheme; vcall's capture lists one such entry per class and per virtual method, `!{i64 16, !\"_ZTS4Base\"}`, `!{i64 16, !\"_ZTSM4BaseFiiE.virtual\"}`)."
+        },
+        {
+          "type": "paragraph",
+          "text": "This is why the check is an **LTO feature**. Without LTO, each translation unit only sees its own functions and the check has to fall back to a runtime-library lookup of the target's descriptor; with LTO the link step can merge the per-function descriptors into one table and the check becomes a direct resolution of the pointer against that table — no table, no check, hence the flag's hard requirement on `-flto`. The `.cfi` copy of `op_right` exists for the same reason: the rebuilt body carries its descriptor, while the original symbol stays behind as a one-instruction trampoline for callers that are not CFI-compiled."
+        },
+        {
+          "type": "paragraph",
+          "text": "\"Target set\" therefore has a concrete meaning: it is *all functions whose descriptor matches this type* — a type as a coarse stand-in for an address set. That reconciles the landscape lesson's \"target-set checks\" with this lesson's \"not an address check\": the guard does not compare the pointer against a list of allowed addresses; it asks whether the pointed-to function's type descriptor agrees with the call site's."
+        },
+        {
+          "type": "paragraph",
+          "text": "Reading the names: the Itanium mangling here is short on purpose. `_ZTS` marks a **type-info name** (the `__class_type_info` name field, not a function address); `Fii` is a function taking `i32` and returning `i32`; in vcall's `4Base`, the leading `4` is the length of the identifier `Base`."
+        },
+        {
+          "type": "heading",
+          "text": "Proof at runtime"
+        },
+        {
+          "type": "paragraph",
+          "text": "The source is the book's own fixture, `cfi_pipe.c`:"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\ntypedef int (*op)(int);\nint op_right(int x) { return 2 * x; }\nint op_wrong(void) { return 99; }\nint main(int argc, char **argv) {\n  if (argc > 1 && strcmp(argv[1], \"self\") == 0) {\n    printf(\"%p %p\\n\", (void *)op_right, (void *)op_wrong);\n    return 0;\n  }\n  unsigned long long addr;\n  if (scanf(\"%lli\", &addr) != 1) {\n    printf(\"no input\\n\");\n    return 2;\n  }\n  op fp = (op)addr;\n  int r = fp(21);\n  printf(\"result -> %d\\n\", r);\n  return 0;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "The demo program reads a pointer address from standard input and calls through it; a `self` flag prints the addresses of the two candidate targets (a legal `int(int)` function and a wrong-type `int()` function). It is linked with `-no-pie` so the printed addresses are stable across runs — under ASLR each launch would print different ones (the PIE chapter returns to exactly that point)."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -fsanitize=cfi-icall -flto -O2 -no-pie -fuse-ld=lld cfi_pipe.c -o cfi_pipe\n$ clang-23 -flto -O2 -no-pie -fuse-ld=lld cfi_pipe.c -o cfi_pipe_nocfi\n$ ./cfi_pipe self\n0x201830 0x201790\n$ echo 0x201830 | ./cfi_pipe\nresult -> 42\n$ echo 0x201790 | ./cfi_pipe\nIllegal instruction (core dumped)\n$ ./cfi_pipe_nocfi self\n0x201778 0x201780\n$ echo 0x201780 | ./cfi_pipe_nocfi\nresult -> 99"
+        },
+        {
+          "type": "paragraph",
+          "text": "The legal target dispatches and returns 42. The wrong-type target dies with an illegal instruction — that is the CFI trap, a hard abort, not a report. And in the binary built without CFI, the same wrong-type input does not crash at all: the call goes through, `op_wrong` returns 99, and the program prints it as a normal result. That silent success is the threat CFI removes — a corrupted pointer that lands on a function with a matching calling convention but the wrong behavior; the only observable difference is the wrong answer. CFI turns that into a visible abort."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "`-fsanitize=cfi-icall` works only with `-flto`, and every object in the link must be CFI-instrumented: a non-CFI target has no type descriptor to match, so even a legal call aborts.",
+            "LTO removes every guard whose target it can resolve and folds the rest to the cheapest correct form; a program whose indirect calls all have known targets contains no CFI checks at all, and that is not a misconfiguration.",
+            "The check is on the target's type, not its address: a wrong function of the matching signature is still a legal target.",
+            "`llvm.ubsantrap` lowers to an undefined instruction (SIGILL, exit 132), not a message; without a debugger the failure looks like a random illegal instruction, not a CFI violation."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: In the demo the wrong-type target aborts and the legal target completes. (a) What does the guard test, and where does the value it matches come from? (b) Why does the guard appear in this program at all? (c) Why is the no-CFI run a more dangerous failure than the CFI run?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) It tests the target's function-type descriptor: `llvm.type.test` compares what the compiler attached to each CFI-compiled function definition against `_ZTSFiiE`, the mangled type-info name of the function type `int(int)`. It is not an address — a wrong function of the right type still passes.",
+                "(b) Because the callee pointer is genuinely unknown at link time: in the minimal module it comes from the extern `lookup`, and in the demo it is parsed from standard input at runtime. LTO can only remove or fold the guard when it can resolve the target, and it cannot here.",
+                "(c) Without CFI the wrong-type call silently succeeds — it prints `result -> 99` and exits 0: the corruption achieved its goal and nobody knows. With CFI the process aborts with SIGILL: the hijack is blocked and visible. A check that fails silently is worse than no check, because it hides the attack; CFI's value is in making the failure a crash."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1566
+    },
+    {
+      "id": 81,
+      "number": 2,
+      "day": 3,
+      "group": "cfi",
+      "title": "The vtable check",
+      "originalTitle": "The vtable check",
+      "summary": "Backward CFI guards virtual calls: read the vtable-pointer llvm.type.test that clang++ 23.1.5 emits under -fsanitize=cfi-vcall, understand which corruptions it catches and which it misses, and verify at runtime that a wrong-class vtable aborts while a derived-class vtable passes.",
+      "takeaway": "CFI-VCALL tests the vtable pointer against the static base-class descriptor before dispatch: it catches an object with the wrong class's vtable, not a legitimate vtable with corrupted slots.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "CFI-ICALL guards the callee pointer. The more common C++ threat is one level up: the object's vtable pointer. A corrupted vptr — a type-confusion write, a buffer overflow that reaches the first word of an object, a stale pointer into a reused allocation — makes `b->apply(x)` dispatch to a completely unrelated class. CFI-VCALL inserts a guard before every virtual call: the vtable pointer must point into the type-info hierarchy of the call site's static base class."
+        },
+        {
+          "type": "heading",
+          "text": "Virtual dispatch in 30 seconds (for readers of IR, not C++)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The check in this lesson is a statement about the C++ object model, so here is that model in a form an IR reader can hold:"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Every object starts with a hidden pointer, the vptr: the first word of a `Derived` object is not a field you declared; the compiler stored a pointer there, and it points at the class's vtable.",
+            "A vtable is a per-class array of function pointers, one per virtual method in declaration order; slot 0 is the first virtual method (`apply` here), slot 1 the next. It is data — a table of addresses — which is why a corrupted vptr turns dispatch into a pointer-chase hijack.",
+            "`b->apply(x)` is three machine steps: load the vptr from the object's first word, load slot 0 of that vtable, and indirect-call the pointer you got. There is no class-name lookup at runtime; the dispatch is exactly the load-load-call the lesson's IR shows.",
+            "Derived classes get their own vtable with the same leading slots: `Derived`'s table starts with the base's slots, overridden or not, and continues with slots of its own. A `Base *` that points at a `Derived` loads the derived vtable, so the pointer's static type says nothing about which table gets loaded.",
+            "Each class has a `__class_type_info` object, and its vtable points to it at `vtable[-1]` — one slot before the first method. \"The vtable belongs to `Base`'s hierarchy\" means the type-info at that vtable’s `[-1]` is `Base`’s type-info, or the type-info of a class that derives from `Base` (a derived type-info carries the chain back to its bases). `Evil`'s type-info is neither, and that is the entire test.",
+            "`llvm.type.test` consults a table the compiler built, not a single address: one entry per CFI-compiled class, mapping the class's type-info to the vtables of that class and its known derivatives. The guard checks the object's vtable against the call site's static base's entry — that set, not one address, is \"Base's hierarchy\".",
+            "`-fvisibility=hidden` protects that table's address. Type-info symbols are global and named (`_ZTV4Base`, `_ZTI4Base`); with default visibility a same-named symbol from another linked library can bind in place of the local one — symbol interposition — and the guard would then check against someone else's table. Hidden visibility pins the symbols to the local copies, which is why clang refuses `-fsanitize=cfi-vcall` without it."
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "The check is on the vtable pointer"
+        },
+        {
+          "type": "paragraph",
+          "text": "Captured with clang++ 23.1.5 and `-fsanitize=cfi-vcall -fvisibility=hidden -flto -O2` (hidden visibility is required; the flag is refused without it). Trimmed from the real capture, `opt -passes=verify` accepts it:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i1 @llvm.type.test(ptr, metadata)\ndeclare void @llvm.ubsantrap(i8 immarg)\n\ndefine i32 @run_op(i64 %obj, i32 %x) {\n  %objptr = inttoptr i64 %obj to ptr\n  %vtable = load ptr, ptr %objptr, align 8\n  %ok = call i1 @llvm.type.test(ptr %vtable, metadata !\"_ZTS4Base\")\n  br i1 %ok, label %do_call, label %trap\n\ntrap:\n  call void @llvm.ubsantrap(i8 2)\n  unreachable\n\ndo_call:\n  %slot = load ptr, ptr %vtable, align 8\n  %r = call i32 %slot(ptr %objptr, i32 %x)\n  ret i32 %r\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Two differences from the ICALL guard. The pointer under test is not a function address but the vtable pointer loaded from the object's first word — `%vtable = load ptr, ptr %objptr`. And the descriptor is not a function-type name but the mangled class name of the call site's static type: `_ZTS4Base` is the type-info name of `Base`. `llvm.type.test` succeeds when the vtable belongs to `Base` or to a class derived from it — C++'s dynamic-type rule, enforced at every dispatch. If it passes, dispatch proceeds exactly as usual: load slot 0 of the vtable and call through it."
+        },
+        {
+          "type": "paragraph",
+          "text": "Together the pair covers the two indirect dispatches a C++ program performs: ICALL tests a function pointer against the function's type; VCALL tests a vtable pointer against the class's type. Same intrinsic, same trap, different operand and different descriptor."
+        },
+        {
+          "type": "heading",
+          "text": "Proof at runtime"
+        },
+        {
+          "type": "paragraph",
+          "text": "The source is the book's own fixture, `vcall_pipe.cpp`:"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\nstruct Base { virtual int apply(int) = 0; virtual ~Base() {} };\nstruct Derived : Base { int apply(int x) override { return x * 2; } };\nstruct Evil { virtual int evil(int) { return 99; } };\nint main(int argc, char **argv) {\n  if (argc > 1 && strcmp(argv[1], \"self\") == 0) {\n    static Derived d;\n    static Evil e;\n    printf(\"%p %p\\n\", (void *)&d, (void *)&e);\n    return 0;\n  }\n  unsigned long long p;\n  if (scanf(\"%lli\", &p) != 1) return 2;\n  Base *b = (Base *)p;\n  int r = b->apply(21);\n  printf(\"result -> %d\\n\", r);\n  return 0;\n}"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang++-23 -fsanitize=cfi-vcall -fvisibility=hidden -flto -O2 -no-pie -fuse-ld=lld vcall_pipe.cpp -o vcall_pipe\n$ ./vcall_pipe self\n0x203df8 0x203e00\n$ echo 0x203df8 | ./vcall_pipe\nresult -> 42\n$ echo 0x203e00 | ./vcall_pipe\nIllegal instruction (core dumped)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The program prints the addresses of two static objects — a `Derived` (which derives from `Base`) and an `Evil` (which does not) — and then dispatches through the address read from standard input. `Derived` passes: its vtable is in `Base`'s hierarchy, and the call returns 42. `Evil` fails: it does not derive from `Base`, so its vtable is not registered under `Base`'s type-info, and the type test aborts the process before any vtable slot is loaded."
+        },
+        {
+          "type": "paragraph",
+          "text": "The boundary matters. CFI-VCALL catches the vtable being the wrong class, not the right class with the wrong slots: an attacker who overwrites slot 0 of a legitimate `Derived` vtable to point at their own function still passes the check, because the vtable pointer is in the right hierarchy, and the hijack goes through. That is the same type-versus-address distinction as the previous lesson, one level up."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "`-fsanitize=cfi-vcall` requires `-fvisibility=hidden`; the compiler rejects the flag without it.",
+            "The check is on the vtable pointer (the object's first word), not on the method pointer loaded from the vtable: a corrupted slot in a legitimate class's vtable is not caught.",
+            "Like CFI-ICALL this is an LTO feature: calls LTO can devirtualize — the common case once it has proved the dynamic type — carry no guard at all.",
+            "The descriptor is the static type at the call site (here `Base`); a call through a pointer of a more-derived type is checked against that more-derived type, so the check composes up the derivation chain."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: In the demo the `Derived` dispatch succeeds and the `Evil` dispatch aborts. (a) Which pointer does the guard test, and against which descriptor? (b) Why does clang require `-fvisibility=hidden` for this flag? (c) What corruption of a legitimate vtable would this check not stop?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) The vtable pointer loaded from the object's first word, tested against `_ZTS4Base` — the type-info name of the call site's static base class — not against the address of the method that will be called.",
+                "(b) The guard compares the object's vtable pointer against a local, compile-time-known vtable/type-info address. With default-visibility type-info symbols the dynamic linker can interpose a different copy from another shared object, and the check would silently test against the wrong address; `-fvisibility=hidden` pins the type-info symbols to the local copies, which is why clang accepts the flag only with it.",
+                "(c) A corrupted slot inside a legitimate vtable: overwrite slot 0 of a real `Derived` vtable to point at attacker code and the vtable pointer still points into the right hierarchy, the check passes, and the dispatch is hijacked. CFI-VCALL verifies which class an object claims to be, not what that class's vtable points to."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1311
+    },
+    {
+      "id": 82,
+      "number": 1,
+      "day": 3,
+      "group": "canaries",
+      "title": "The stack canary check",
+      "originalTitle": "The stack canary check",
+      "summary": "Read the stack canary the way clang 23.1.5 actually emits it: the sspstrong attribute in the IR, the TLS plant/compare/abort machinery in the machine code, which functions each -fstack-protector mode protects, and the runtime proof that the same overflow is a silent hijack without the canary and a visible abort with it.",
+      "takeaway": "A stack canary is a per-process random value planted between the buffer and the saved return address and checked at function exit: it turns the classic return-address hijack into a visible abort, but it only guards what its own frame guards — not globals, not the heap, not unprotected functions, and not a leaked guard.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Stack canaries answer the control-data row of the threat table: an attacker overwrites the saved return address of a function — the classic buffer overflow — and the function returns into their code instead of its caller. The canary is a random value planted in the frame between the vulnerable buffer and the saved return address, and compared on the way out: if the overflow reached the return address, it crossed the canary, and the comparison aborts the process before the corrupted return executes. Unlike CFI, the canary changes what data the frame holds rather than what the control flow may target."
+        },
+        {
+          "type": "paragraph",
+          "text": "One thing to hold in mind while reading this chapter: you will not find the canary in the IR. This is what clang 23.1.5 actually leaves behind, and where the check really lives."
+        },
+        {
+          "type": "heading",
+          "text": "The canary is not in the IR"
+        },
+        {
+          "type": "paragraph",
+          "text": "The vulnerable function is `process`, an unchecked copy of an attacker-controlled length into a 16-byte buffer. Compiled with `-fstack-protector-strong -O0`, the module is (attribute bundle trimmed; `opt -passes=verify` accepts it):"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i64 @strlen(ptr noundef)\ndeclare void @llvm.memcpy.p0.p0.i64(ptr noalias writeonly, ptr noalias readonly, i64, i1 immarg)\n\n; clang 23.1.5, -fstack-protector-strong -O0; attribute bundle trimmed\ndefine dso_local i32 @process(ptr noundef %line) #0 {\n  %2 = alloca ptr, align 8\n  %3 = alloca [16 x i8], align 16\n  %4 = alloca i32, align 4\n  store ptr %line, ptr %2, align 8\n  store i32 0, ptr %4, align 4\n  %5 = getelementptr inbounds [16 x i8], ptr %3, i64 0, i64 0\n  %6 = load ptr, ptr %2, align 8\n  %8 = call i64 @strlen(ptr noundef %6)\n  call void @llvm.memcpy.p0.p0.i64(ptr align 16 %5, ptr align 1 %6, i64 %8, i1 false)\n  %9 = load i32, ptr %4, align 4\n  %10 = add nsw i32 %9, 1\n  ret i32 %10\n}\n\nattributes #0 = { sspstrong \"stack-protector-buffer-size\"=\"8\" }"
+        },
+        {
+          "type": "paragraph",
+          "text": "Grep this module for a canary and you find nothing: no intrinsic, no call, no store. The entire trace of the protection in the IR is `sspstrong` in the function's attribute bundle, alongside the `\"stack-protector-buffer-size\"` value. The default build of the same source is identical except that `sspstrong` is absent from the bundle — no other IR byte changes. (LLVM 23 does define an `llvm.stackprotector` intrinsic in its Intrinsics.td — it \"writes the stack guard to the correct place on the stack frame\" — but this C pipeline never emits it; the guard is materialized directly in machine code.) The backend, reading the attribute, is what generates the canary."
+        },
+        {
+          "type": "heading",
+          "text": "The machine code where the canary lives"
+        },
+        {
+          "type": "paragraph",
+          "text": "This is the backend's output for the same function (`-fstack-protector-strong -O0`; `.cfi` directives omitted). The frame is `subq $64`: the buffer at `-32(%rbp)`, the canary slot at `-8(%rbp)`, the saved return address at `+8(%rbp)`:"
+        },
+        {
+          "type": "code",
+          "language": "asm",
+          "text": "process:\n\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n\tsubq\t$64, %rsp\n\tmovq\t%fs:40, %rax\n\tmovq\t%rax, -8(%rbp)\n\tmovq\t%rdi, -40(%rbp)\n\tmovl\t$0, -44(%rbp)\n\tmovq\t-40(%rbp), %rdi\n\tmovq\t%rdi, -56(%rbp)\n\tcallq\tstrlen@PLT\n\tmovq\t-56(%rbp), %rsi\n\tmovq\t%rax, %rdx\n\tleaq\t-32(%rbp), %rdi\n\tcallq\tmemcpy@PLT\n\tmovl\t-44(%rbp), %eax\n\tincl\t%eax\n\tmovl\t%eax, -48(%rbp)\n\tmovq\t%fs:40, %rax\n\tmovq\t-8(%rbp), %rcx\n\tcmpq\t%rcx, %rax\n\tjne\t.LBB1_2\n\tmovl\t-48(%rbp), %eax\n\taddq\t$64, %rsp\n\tpopq\t%rbp\n\tretq\n.LBB1_2:\n\tcallq\t__stack_chk_fail@PLT"
+        },
+        {
+          "type": "paragraph",
+          "text": "Read it in three beats. Entry: `movq %fs:40, %rax` loads the guard from per-process TLS, and `movq %rax, -8(%rbp)` plants the copy in the frame between the buffer and the return address — exactly the placement the `--help` text promises: the guard \"must be positioned in the stack frame such that a buffer overflow from a vulnerable variable will overwrite the guard value before overwriting the function's return address.\" Exit: the guard is reloaded from TLS, compared with the planted copy, and a mismatch jumps to `callq __stack_chk_fail@PLT`, which aborts the process. Note the value's origin: one random number in TLS per process — the same value is planted in every protected frame, not one per frame."
+        },
+        {
+          "type": "heading",
+          "text": "Which functions get a canary"
+        },
+        {
+          "type": "paragraph",
+          "text": "The mode flag selects which frames the backend protects. Three function shapes in one TU, compiled four ways (clang 23.1.5, `-O0`):"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Function",
+              "Shape",
+              "`-fstack-protector`",
+              "`-strong`",
+              "`-all`"
+            ],
+            [
+              "`f_array`",
+              "local `char[16]`",
+              "yes",
+              "yes",
+              "yes"
+            ],
+            [
+              "`f_ptr`",
+              "takes the address of a local",
+              "no",
+              "yes",
+              "yes"
+            ],
+            [
+              "`f_math`",
+              "pure arithmetic",
+              "no",
+              "no",
+              "yes"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The `--help` text states the heuristics: plain mode protects functions with char arrays larger than 8 bytes; strong adds arrays of any type, `alloca` calls, and taking the address of a local variable; `-all` protects every function. Note that `f_ptr` trips strong because of `memcpy(&c, ...)` — the address of a local — not because of its pointer parameter. And the default of this toolchain is no canaries at all: many distributions' compilers turn on `-fstack-protector-strong` by default, but the conda clang here does not, which is why every command in this lesson spells the flag out."
+        },
+        {
+          "type": "heading",
+          "text": "Proof at runtime"
+        },
+        {
+          "type": "paragraph",
+          "text": "The source is the book's own fixture, `canary_pipe.c`:"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n#include <string.h>\n#include <stdint.h>\n#include <stdlib.h>\n\n__attribute__((noinline)) void sink(void) {\n  printf(\"HACKED: process returned into sink\\n\");\n  exit(0);\n}\n\n/* The vulnerable function: no bounds check, attacker-controlled length. */\n__attribute__((noinline)) int process(char *line, size_t len) {\n  char buf[16];\n  int auth = 0;\n  memcpy(buf, line, len);   /* overflow when len > 16 */\n  return auth + 1;\n}\n\nint main(int argc, char **argv) {\n  if (argc > 1 && strcmp(argv[1], \"self\") == 0) {\n    printf(\"%p\\n\", (void *)sink);\n    return 0;\n  }\n  unsigned long long addr;\n  if (scanf(\"%lli\", &addr) != 1) return 2;\n  char payload[64];\n  size_t n = 0;\n  for (int i = 0; i < 24; i++) payload[n++] = 'A';\n  for (int i = 0; i < 4; i++) {      /* spray: cover wherever the\n                                        saved return address sits */\n    memcpy(payload + n, &addr, 8);\n    n += 8;\n  }\n  payload[n] = 0;\n  int r = process(payload, n);\n  printf(\"process returned %d\\n\", r);\n  return 0;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "The demo builds a 56-byte payload in `main` — 24 bytes of padding, then the address of `sink` (a function that prints and exits) repeated four times — and passes it to `process` with its explicit length, so no NUL byte in the address can truncate the copy. The spray covers whichever 8-byte slot the saved return address lands in. As in the CFI chapter, `-no-pie` keeps the printed addresses stable across runs."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -O0 -no-pie -fuse-ld=lld canary_pipe.c -o canary\n$ clang-23 -fstack-protector-strong -O0 -no-pie -fuse-ld=lld canary_pipe.c -o canary_strong\n$ ./canary self\n0x201810\n$ echo 0x201810 | ./canary\nHACKED: process returned into sink\n$ echo 0x201810 | ./canary_strong\n*** stack smashing detected ***: terminated\nAborted (core dumped)"
+        },
+        {
+          "type": "paragraph",
+          "text": "Without the canary, the overflow rewrites the saved return address to `sink`: the program prints `HACKED` and the hijack has succeeded silently — exit 0, no error of any kind. With the canary, the same overflow smashes the guard at `-8(%rbp)` on its way to the return address; the exit check finds the mismatch and aborts before the corrupted return executes — exit 134 (SIGABRT), \"stack smashing detected.\" Same overflow, same payload: one build lets the attack land, the other turns it into a crash. That is the canary's value proposition, and it is the same shape as CFI's — a silent compromise becomes a visible abort — aimed at control data instead of control-flow targets."
+        },
+        {
+          "type": "heading",
+          "text": "What the canary does not stop"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Global or heap function pointers: the canary guards the saved return address of one frame. It says nothing about a corrupted pointer in `.data` or on the heap, which never touches the frame.",
+            "Functions the heuristic did not protect: `f_math` above carries no guard and no check, so an overflow in an unprotected frame is invisible to the canary.",
+            "Corrupted locals used before the return: if an overflow stops short of the guard slot — say, clobbering a vtable pointer in a local object — the damage is done while the canary is still intact.",
+            "A known guard: the value is one random number per process, in TLS. An attacker who can read memory can read the canary and write it back around the overflow.",
+            "Buffers the final optimizer erases: at `-O2`, `process` becomes `movl $1, %eax; retq` — the buffer, the overflow, and the canary all disappear together, because the protection only survives as long as the state it protects does."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The cost is small and local: one TLS load at entry, one store, one TLS load plus one compare at exit, per protected function, plus a cold branch to the abort. It is a runtime check in the same class as the CFI trap, not a compile-time property — and like the CFI trap, its whole value is in aborting loudly rather than continuing wrong."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "The canary lives in machine code, not IR: grepping the `.ll` for a guard finds nothing. The evidence is the `sspstrong` attribute in the bundle and the `%fs:` load in the asm.",
+            "The guard is per-process, not per-frame: one TLS value for the whole address space. Leaking that one value defeats every canary in the process.",
+            "The demo is `-O0` on purpose: at `-O2` the optimizer erases the vulnerable buffer and the protection disappears with the state it protects.",
+            "Partial corruption of the guard slot is enough to trip the check: the compare covers all 8 bytes, so any overlap of the overflow with the guard aborts.",
+            "This toolchain's default is no canaries; the flag is explicit in every command in this lesson."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: In the demo the no-canary build reaches `sink` and the canary build aborts. (a) Where does the guard value come from, and where in the frame is it planted? (b) What is the only trace of the protection in the IR, and why does that make the canary invisible to an IR-only reader? (c) Name one overflow that still succeeds against the canary build, and say why the canary cannot see it.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) The guard is a per-process value in TLS (`movq %fs:40, %rax` — the same number for every frame in the process). Entry stores a copy in the frame at `-8(%rbp)`, between the vulnerable buffer at `-32(%rbp)` and the saved return address at `+8(%rbp)`, so an overflow from the buffer must cross the guard to reach the return address.",
+                "(b) `sspstrong` in the function's attribute bundle (with `\"stack-protector-buffer-size\"`). The frontend only records which frames are eligible; the backend materializes the load/store/compare from that attribute, so an IR-only reader sees no canary instructions at all — the protection is a property of the generated machine code, not of the IR.",
+                "(c) For example, overwriting a global function pointer: the canary guards only the saved return address of protected frames. A corrupted dispatch pointer in `.data` never touches any frame's guard, the program dispatches through it, and no canary is ever consulted — the check exists only at the exit of instrumented functions, and only for their own return path."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1791
+    },
+    {
+      "id": 83,
+      "number": 1,
+      "day": 3,
+      "group": "ollvm",
+      "title": "Bogus control flow",
+      "originalTitle": "Bogus control flow",
+      "summary": "OLLVM's bogus control flow transform as a learner pass: an opaque-predicate gate on every conditional branch, dead redundant blocks on the false side, the -O0 differential proof, and the -O2 dissolution — constant seeds fold, runtime seeds die by dead-store elimination, and only opaque side effects survive, hoisted into a single sink.",
+      "takeaway": "Bogus control flow adds dead structure guarded by a predicate the optimizer cannot prove. Its quality is a property of the final artifact, not of the pass output: at -O2 the gates fold or the dead blocks are emptied, and what survives of the transform is only what the optimizer is not allowed to delete — a side effect it cannot see.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "This part treats three OLLVM-family obfuscations as MiniShield passes, added one at a time with the Volume 1 capstone recipe: register the name in `lib/Plugin.cpp`, encode the support contract in a guard, write the builder, orchestrate eligibility, build, verify, and close with a fixture pair whose before and after pass `opt -passes=verify` and run identically. OLLVM is the 2015 project that collected these transforms for LLVM: each changes the program's structure without changing its behavior, on the assumption that a static reader — a person or an analysis tool — spends time on the added structure. That assumption is the one the landscape lesson put at risk: the final optimizer does not read the program, it proves things about it, and anything it can prove away it removes. The standard for this part is the one set in the landscape lesson: judge each transform on the final artifact, not on the pass output."
+        },
+        {
+          "type": "heading",
+          "text": "The recipe, instantiated for bcfl"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Register the branch in `lib/Plugin.cpp`: `Name == \"minishield-bcfl\"` → `FPM.addPass(minishield::BogusControlFlowPass())`, next to `minishield-flatten` and `minishield-stats`.",
+            "Write the guard `BcflEligibility::check(F)`: the function has at least one conditional branch; no `unreachable`, no `musttail`, no inline assembly — the shared negative fixtures in `tests/ir/` already cover those shapes. Rejection prints a named diagnostic and leaves the function untouched.",
+            "Write the builder: for each conditional branch, insert a gate block that evaluates an opaque predicate over a seed, with the original target on the true side and a new dead block on the false side.",
+            "Orchestrate in `BogusControlFlowPass::run` exactly like `FlatteningPass::run`: guard, build, verify.",
+            "Close with the fixture pair plus the differential: both modules verify, both binaries run identically."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The fixture is `grade`, a function with one conditional branch — three blocks at `-O0`. The opaque predicate is a product of two consecutive integers: given a seed `s`, compute `s² − s`, which is `s·(s−1)`, and test whether it is even. One of `s` and `s−1` is always even, so the product is always even, so the predicate is always true — but that is a number-theoretic fact about the seed, not something the optimizer is given."
+        },
+        {
+          "type": "heading",
+          "text": "The transformed module"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"bcfl_fixture.c\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @printf(ptr noundef, ...)\n\n@.fmt = private unnamed_addr constant [16 x i8] c\"grades sum: %d\\0A\\00\"\n\n; bcfl: 4 new blocks. Each side's real target is now reached through a gate\n; guarded by an opaque predicate (product of consecutive integers is even).\n; The seeds are constants chosen at transform time; the redundant blocks are dead.\ndefine i32 @grade(i32 noundef %score) {\nentry:\n  %seed_pass = alloca i32, align 4\n  %seed_fail = alloca i32, align 4\n  store i32 987654, ptr %seed_pass, align 4\n  store i32 135791, ptr %seed_fail, align 4\n  %cmp = icmp sge i32 %score, 60\n  br i1 %cmp, label %gate_pass, label %gate_fail\ngate_pass:\n  %sp = load i32, ptr %seed_pass, align 4\n  %t = mul i32 %sp, %sp\n  %d = sub i32 %t, %sp\n  %p = urem i32 %d, 2\n  %g = icmp eq i32 %p, 0\n  br i1 %g, label %pass, label %bogus_pass\npass:\n  ret i32 1\nbogus_pass:\n  store i32 0, ptr %seed_pass, align 4\n  br label %pass\ngate_fail:\n  %sf = load i32, ptr %seed_fail, align 4\n  %t2 = mul i32 %sf, %sf\n  %d2 = sub i32 %t2, %sf\n  %p2 = urem i32 %d2, 2\n  %g2 = icmp eq i32 %p2, 0\n  br i1 %g2, label %fail, label %bogus_fail\nfail:\n  ret i32 0\nbogus_fail:\n  store i32 0, ptr %seed_fail, align 4\n  br label %fail\n}\n\ndefine i32 @main() {\n  %r1 = call i32 @grade(i32 70)\n  %r2 = call i32 @grade(i32 30)\n  %sum = add i32 %r1, %r2\n  %p = call i32 @printf(ptr @.fmt, i32 %sum)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Read it against the original. Entry now stores two seeds — `987654` and `135791`, chosen at transform time — into allocas. The original branch no longer reaches its real targets: `br i1 %cmp` goes to `gate_pass` and `gate_fail`. Each gate loads its seed, computes `mul` → `sub` → `urem 2` → `icmp eq 0`, and branches: the true side (the only side that ever runs) reaches the unchanged `pass`/`fail` blocks; the false side goes to a new `bogus_pass`/`bogus_fail` block that stores to the seed and falls through to the real target. The function goes from 3 blocks to 7, and the module from 517 to 1444 bytes. The redundant blocks are dead by construction — the gate always takes the true edge — and that is the point: they exist to be read, not to be executed."
+        },
+        {
+          "type": "heading",
+          "text": "Differential proof at -O0"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output bcfl_before.ll\n$ opt-23 -passes=verify -disable-output bcfl_after.ll\n$ clang-23 -O0 bcfl_before.ll -o bcfl_before_bin\n$ clang-23 -O0 bcfl_after.ll -o bcfl_after_bin\n$ ./bcfl_before_bin\ngrades sum: 1\n$ ./bcfl_after_bin\ngrades sum: 1\n$ diff <(./bcfl_before_bin) <(./bcfl_after_bin)\n(identical)"
+        },
+        {
+          "type": "paragraph",
+          "text": "Both modules verify; both binaries print the same line — `grade(70)` returns 1, `grade(30)` returns 0, sum 1 either way. Note what is not evidence here: the `-O0` ELF size does not move (16624 bytes for both binaries), because section alignment swallows the difference — the module's byte count, 517 → 1444, is the honest measure of what the transform added."
+        },
+        {
+          "type": "heading",
+          "text": "What -O2 does to it"
+        },
+        {
+          "type": "paragraph",
+          "text": "Now run the final optimizer over the obfuscated module. The seeds are constants, so the gate's arithmetic is a compile-time constant: the predicate folds to true, the false edges die, the redundant blocks (whose only instruction is a store to a seed nothing reads afterward) are eliminated, and the gates merge away. Seven blocks become one:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @printf(ptr noundef, ...)\n\n@.fmt = private unnamed_addr constant [16 x i8] c\"grades sum: %d\\0A\\00\"\n\n; -O2 on the bcfl module: the seeds are constants, so the gate predicates\n; fold, the dead blocks are removed, and the original branch linearizes.\ndefine i32 @grade(i32 noundef %score) {\nentry:\n  %cmp = icmp sgt i32 %score, 59\n  %. = zext i1 %cmp to i32\n  ret i32 %.\n}\n\ndefine i32 @main() {\n  %p = call i32 @printf(ptr @.fmt, i32 1)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "`grade` is back to a single block — `icmp sgt i32 %score, 59` (the optimizer's own rewrite of `score >= 60`), a `zext`, a `ret` — and `main` has folded the two `grade` calls into the constant `1`. The transform is entirely gone. Keep two mechanisms separate. First, the constant seed: the predicate *computes* to a constant, so everything above it folds. Second, what happens when the seed is not a constant — replace both stores with `store i32 %score`: the predicate is now over runtime data, and the optimizer still does not dissolve the gate by proving it. A minimal probe (a bare branch on `s·(s−1) % 2 == 0` over an argument) shows LLVM 23's `-O2` normalizing the predicate to `x·(x−1)` with `and 1` and turning the branch into a `select` — but keeping it: the evenness of a product of consecutive integers is not proven in this context. The runtime-seed module dissolves anyway, 7 → 1 blocks, by a different route: the redundant blocks' stores are dead (nothing reads the seeds after the gates), DCE empties the blocks, and the empty fallthroughs merge. The predicate was never proven; the structure was simply emptied."
+        },
+        {
+          "type": "paragraph",
+          "text": "The one content the optimizer cannot delete is a side effect. Put an opaque call in each redundant block (`call void @record_trace(i32 7)` and `(i32 9)`) and the dead blocks no longer empty: the calls must be kept. `-O2`'s answer is to merge the two dead blocks into a single sink on the false side of a still-live gate branch — `br i1 %g, label %common.ret, label %common.ret.sink.split` — with one hoisted call and a `select` choosing which argument to pass. Seven blocks become three; runtime behavior is still identical, because the predicate really is always true and the sink really is never executed. What survives of the transform is a hoisted call behind a live-looking branch, not the four added blocks the pass emitted."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Constant seed: the predicate computes to a constant; fold → dead-edge elimination → dead-block DCE → merge. 7 blocks → 1.",
+            "Runtime seed, no side effect: the redundant blocks' stores are eliminated, the blocks become empty fallthroughs, and block merging removes the gates. 7 blocks → 1. The predicate is never proven.",
+            "Runtime seed + opaque call: the call must survive; both dead blocks merge into one sink on the live gate's false side, with a selected argument. 7 blocks → 3."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The three routes share a law, and the law recurs in this part: obfuscation adds structure without behavior, and the optimizer's job is exactly to remove structure without behavior. Opaque side effects are the only content the optimizer may not delete, and even those get hoisted and shrunk. The pass output (1444 bytes, 7 blocks) and the final artifact (1 block) are different programs to read; the one that ships is the second."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: In the transformed module the gates are always taken one way, yet -O2 does not dissolve them by proving that. (a) State the predicate and why it is always true, and name the rewrite the optimizer applies to it without finishing the job. (b) The constant-seed build dissolves 7 → 1 blocks and the runtime-seed build dissolves 7 → 1 blocks. Name the different mechanism that dissolves each. (c) In the survivor variant, where does the `record_trace` call end up after -O2, and why is that placement the strongest form the transform can take?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) A product of two consecutive integers: the gate computes `s·(s−1) % 2 == 0`. One of `s` and `s−1` is even, so the product is always even, so the predicate is always true. `instcombine` rewrites `s² − s` to `s·(s−1)` and `urem 2` to `and 1` — it normalizes the predicate's shape but does not prove its truth in branch context.",
+                "(b) Constant seed: the predicate computes to the constant true, the false edge is eliminated, the redundant blocks (whose only store targets a dead seed) are DCE'd, and the gates merge away — the function linearizes. Runtime seed, no side effect: the optimizer never proves the predicate; DCE removes the redundant blocks' dead stores, the blocks become empty fallthroughs, and block merging removes the gates themselves.",
+                "(c) Into a single sink block on the false side of a still-live gate branch (`common.ret.sink.split`), hoisted out of both dead blocks, with a `select` choosing which argument (7 or 9) to pass. The call is an opaque side effect, so DCE cannot delete it; the two dead blocks merge into one shared sink, collapsing the obfuscated pair of calls to one — and because the gate's predicate really is always true, the sink never runs, so behavior stays identical."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1778
+    },
+    {
+      "id": 84,
+      "number": 2,
+      "day": 3,
+      "group": "ollvm",
+      "title": "String encryption",
+      "originalTitle": "String encryption",
+      "summary": "OLLVM string encryption as a learner pass: the plaintext constant is replaced by an encrypted blob plus a key and a decrypt loop, the -O0 proof that the output is identical and `strings` finds nothing, and the -O2 proof that the decrypt loop over constants is itself a constant — the plaintext returns as immediates and the blobs are deleted.",
+      "takeaway": "String encryption moves the literals out of `.rodata` and behind a runtime XOR, so a static reader of the artifact sees only blobs. Like every transform in this part, its worth is a property of the final artifact: at -O2 the loop constant-folds, the plaintext returns as immediate values, and the encryption exists only at the optimization level where the loop cannot be folded.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "The first move in any static reading of a binary is its strings: the URLs, keys, magic words, and format literals the program uses. OLLVM's string encryption attacks exactly that: each plaintext constant becomes an encrypted blob plus a per-byte key, and each use becomes a decrypt loop that reconstructs the plaintext into a stack buffer at runtime. The program still computes the plaintext — the transform changes where the bytes sit, not what they are."
+        },
+        {
+          "type": "paragraph",
+          "text": "As a MiniShield pass this follows the same five seams as the previous lesson: `minishield-strenc` in the registry; a guard for functions whose string constants are reachable (no `musttail`, no inline assembly, the shared `tests/ir/` fixtures); a builder that replaces each `c\"...\"` global with an `@enc`/`@key` pair and inserts a per-byte XOR loop at the use; the same orchestration; and the fixture pair below, differentially verified."
+        },
+        {
+          "type": "heading",
+          "text": "The transformed module"
+        },
+        {
+          "type": "paragraph",
+          "text": "The fixture is `banner`, which `puts` the constant `\"minishield\\0\"` — one global, one call, a 305-byte module. After the transform:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"strenc_fixture.c\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @puts(ptr noundef)\n\n; The plaintext is out of the module: only the encrypted blob and the key remain.\n@enc = private unnamed_addr constant [11 x i8] c\"\\37\\76\\ad\\e2\\04\\6c\\b7\\f4\\47\\94\\68\"\n@key = private unnamed_addr constant [11 x i8] c\"\\5a\\1f\\c3\\8b\\77\\04\\de\\91\\2b\\f0\\68\"\n\ndefine void @banner() {\nentry:\n  %buf = alloca [11 x i8], align 1\n  %i = alloca i64, align 8\n  store i64 0, ptr %i, align 8\n  br label %loop\nloop:\n  %iv = load i64, ptr %i, align 8\n  %c = icmp slt i64 %iv, 11\n  br i1 %c, label %body, label %after\nbody:\n  %gep_e = getelementptr inbounds [11 x i8], ptr @enc, i64 0, i64 %iv\n  %e = load i8, ptr %gep_e\n  %gep_k = getelementptr inbounds [11 x i8], ptr @key, i64 0, i64 %iv\n  %k = load i8, ptr %gep_k\n  %x = xor i8 %e, %k\n  %gep_b = getelementptr inbounds [11 x i8], ptr %buf, i64 0, i64 %iv\n  store i8 %x, ptr %gep_b\n  %inc = add i64 %iv, 1\n  store i64 %inc, ptr %i, align 8\n  br label %loop\nafter:\n  %b0 = getelementptr inbounds [11 x i8], ptr %buf, i64 0, i64 0\n  %p = call i32 @puts(ptr %b0)\n  ret void\n}\n\ndefine i32 @main() {\n  call void @banner()\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "`@.str` is gone. In its place: `@enc`, the ciphertext, and `@key`, the per-byte key, both chosen at transform time — byte `i` of the plaintext is `@enc[i] xor @key[i]`, and the last byte is the encrypted NUL terminator (`0x00 xor 0x68`). `banner` allocates a stack buffer and runs an `i64`-indexed loop: load a ciphertext byte, load a key byte, XOR, store. The index is `i64` because `getelementptr` into an array takes `i64` indices — widening a 32-bit counter is the detail that breaks a hand-written version, which `opt` rejects with `expected 'i64'`. The plaintext now exists at runtime only in `%buf`, between the loop's exit and the `puts` call."
+        },
+        {
+          "type": "heading",
+          "text": "Differential proof"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output strenc_before.ll\n$ opt-23 -passes=verify -disable-output strenc_after.ll\n$ clang-23 -O0 strenc_before.ll -o strenc_before_bin\n$ clang-23 -O0 strenc_after.ll -o strenc_after_bin\n$ diff <(./strenc_before_bin) <(./strenc_after_bin)\n(identical)\n$ strings strenc_before_bin | grep -x minishield\nminishield\n$ strings strenc_after_bin | grep -x minishield\n(no match — exit status 1)"
+        },
+        {
+          "type": "paragraph",
+          "text": "Two annotations. First, why `grep -x`: binaries built under the conda toolchain carry the toolchain's own path in their note sections — `/home/.../minishield/...` — so a bare `grep minishield` hits that path noise in *both* binaries. `-x` anchors on the whole line, so only a real string line matches. Second, the cost: the module grows from 305 to 1175 bytes to move an 11-byte literal behind a loop."
+        },
+        {
+          "type": "heading",
+          "text": "What -O2 does to it"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @puts(ptr noundef)\n\n; -O2 on the strenc module: the decrypt loop over constants is itself\n; a constant. The result is emitted as immediates; @enc and @key are gone.\ndefine void @banner() {\nentry:\n  %buf = alloca [11 x i8], align 8\n  store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>, ptr %buf, align 8\n  %gep_b.8 = getelementptr inbounds nuw i8, ptr %buf, i64 8\n  store i8 108, ptr %gep_b.8, align 8\n  %gep_b.9 = getelementptr inbounds nuw i8, ptr %buf, i64 9\n  store i8 100, ptr %gep_b.9, align 1\n  %gep_b.10 = getelementptr inbounds nuw i8, ptr %buf, i64 10\n  store i8 0, ptr %gep_b.10, align 2\n  %p = call i32 @puts(ptr nonnull dereferenceable(1) %buf)\n  ret void\n}\n\ndefine noundef i32 @main() {\n  %buf.i = alloca [11 x i8], align 8\n  call void @llvm.lifetime.start.p0(ptr nonnull %buf.i)\n  store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>, ptr %buf.i, align 8\n  %gep_b.8.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 8\n  store i8 108, ptr %gep_b.8.i, align 8\n  %gep_b.9.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 9\n  store i8 100, ptr %gep_b.9.i, align 1\n  %gep_b.10.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 10\n  store i8 0, ptr %gep_b.10.i, align 2\n  %p.i = call i32 @puts(ptr nonnull dereferenceable(1) %buf.i)\n  call void @llvm.lifetime.end.p0(ptr nonnull %buf.i)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "The decrypt loop's operands are two constant arrays, so the whole loop is a compile-time constant. `-O2` replaces it with immediate stores — `store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>` is `minishie`, plus `l`, `d`, and NUL as separate stores — and deletes `@enc` and `@key` entirely. The trap is in the test: `grep minishield` on the -O2 module finds nothing, so a reader who probes the artifact with the same `strings`-style check concludes the plaintext is still hidden. It is not: it is back, as immediate values in the stores, not as a string literal — a disassembler reading the store's immediates sees the bytes directly. The property the transform provided was never “the optimizer cannot reconstruct the plaintext”; it was “the plaintext is not a contiguous literal in the artifact at the shipped optimization level.”"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Before the transform, any level: the literal sits in `.rodata`; `strings` finds it.",
+            "After the transform, -O0: blob + key + runtime loop; `strings` finds nothing; the cost is a stack buffer and a byte loop at every call.",
+            "After the transform, -O2: the loop constant-folds to immediates, the globals are deleted, and the bytes are visible in the disassembly's immediate fields. The artifact is no harder to read than the unencrypted one."
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: (a) In the transformed module, where does the plaintext exist at runtime, and which two globals hold its material? (b) `strings` on the -O0 binary finds nothing, and `grep minishield` on the -O2 module finds nothing. What actually returns at -O2, in what form, and why does that make the -O0 `strings` test a misleading probe of the final artifact? (c) State the condition on the final pipeline under which string encryption's property actually holds in a shipped binary.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) In a stack buffer (`%buf`), reconstructed byte by byte by the XOR loop and present only between the loop's exit and the `puts` call. Its material lives in two globals, `@enc` (the ciphertext) and `@key` (the per-byte key); the plaintext itself is present in no global.",
+                "(b) At -O2 the decrypt loop over two constant arrays is constant-folded: the plaintext returns as immediate values (`store <8 x i8> <i8 109, ...>`), not as a string literal — so `grep minishield` finds nothing even though a disassembler reading the stores sees the bytes. The -O0 `strings` test measured “no contiguous literal in this -O0 binary”; it says nothing about the final artifact, where the same transform is folded back into plain stores.",
+                "(c) The transform must be the last step of the pipeline — applied after the final optimization, so that no later optimizer pass (a second `opt -O2`, LTO at link) can fold the decrypt loop. That is the deployment rule the part closes with in the next lesson."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1324
+    },
+    {
+      "id": 85,
+      "number": 3,
+      "day": 3,
+      "group": "ollvm",
+      "title": "Subroutine splitting",
+      "originalTitle": "Subroutine splitting",
+      "summary": "OLLVM subroutine splitting as a learner pass: each non-entry block becomes an internal subroutine, the original function becomes a state dispatcher, the differential proof that behavior is unchanged, and the -O2 proof that the inliner is the transform's exact inverse — every part inlines back and the recovered loop is vectorized.",
+      "takeaway": "Subroutine splitting is a pure structural decomposition: the CFG's blocks become module-level internal functions driven by a state switch. It is the most fragile of the three transforms, because it adds no predicate, no data, and no side effect — only a decomposition, and the optimizer's inliner reconstructs it exactly.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Subroutine splitting (OLLVM's `subdiv`) takes a function with a tangled CFG and moves each of its non-entry blocks into its own `internal` function. The original keeps its entry and becomes a dispatcher over a state variable: a `switch` that calls the right part and loops back. Each part looks like an unrelated helper, and the shape of the CFG — the thing static analysis keys on — is no longer visible inside any single function."
+        },
+        {
+          "type": "paragraph",
+          "text": "The five seams again, with the pattern from the previous lesson: `minishield-subdivide` in the registry; a guard for functions whose blocks are movable (no PHI nodes whose incoming edges would need a home in the split — the fixture below is PHI-free at -O0, with all state in allocas; no `musttail`, no inline assembly); a builder that cuts each non-entry block into an `internal` function taking the needed allocas as pointer arguments, converts each conditional branch into a `select` that writes the next state, converts each unconditional branch into a constant store, and turns `ret` into the part's return; the same orchestration; and the fixture pair, differentially verified."
+        },
+        {
+          "type": "heading",
+          "text": "The transformed module"
+        },
+        {
+          "type": "paragraph",
+          "text": "The fixture is `total`, a loop accumulating `a·b`, in its -O0 shape: five blocks (`entry`, `cond`, `body`, `inc`, `exit`), four allocas, no PHIs. After the transform — 2 → 6 functions, module 1123 → 2232 bytes:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"subdivide_fixture.c\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @printf(ptr noundef, ...)\n\n@.fmt = private unnamed_addr constant [15 x i8] c\"total(6,4)=%d\\0A\\00\"\n\n; subdivide: each non-entry block becomes an internal subroutine. The original\n; function keeps only the entry setup and becomes the state dispatcher.\n; State numbering follows block order: 1=cond, 2=body, 3=inc, 4=exit.\n\ndefine internal void @total.1(ptr %p_i, ptr %p_b, ptr %p_state) {\n  %i = load i32, ptr %p_i, align 4\n  %b2 = load i32, ptr %p_b, align 4\n  %c = icmp slt i32 %i, %b2\n  %ns = select i1 %c, i32 2, i32 4\n  store i32 %ns, ptr %p_state, align 4\n  ret void\n}\n\ndefine internal void @total.2(ptr %p_a, ptr %p_sum, ptr %p_state) {\n  %a2 = load i32, ptr %p_a, align 4\n  %s = load i32, ptr %p_sum, align 4\n  %ns = add nsw i32 %s, %a2\n  store i32 %ns, ptr %p_sum, align 4\n  store i32 3, ptr %p_state, align 4\n  ret void\n}\n\ndefine internal void @total.3(ptr %p_i, ptr %p_state) {\n  %i2 = load i32, ptr %p_i, align 4\n  %inc2 = add nsw i32 %i2, 1\n  store i32 %inc2, ptr %p_i, align 4\n  store i32 1, ptr %p_state, align 4\n  ret void\n}\n\ndefine internal i32 @total.4(ptr %p_sum) {\n  %r = load i32, ptr %p_sum, align 4\n  ret i32 %r\n}\n\ndefine i32 @total(i32 noundef %a, i32 noundef %b) {\nentry:\n  %p_a = alloca i32, align 4\n  %p_b = alloca i32, align 4\n  %p_sum = alloca i32, align 4\n  %p_i = alloca i32, align 4\n  store i32 %a, ptr %p_a, align 4\n  store i32 %b, ptr %p_b, align 4\n  store i32 0, ptr %p_sum, align 4\n  store i32 0, ptr %p_i, align 4\n  %p_state = alloca i32, align 4\n  store i32 1, ptr %p_state, align 4\n  br label %dispatch\ndispatch:\n  %s = load i32, ptr %p_state, align 4\n  switch i32 %s, label %invalid [\n    i32 1, label %c1\n    i32 2, label %c2\n    i32 3, label %c3\n    i32 4, label %c4\n  ]\nc1:\n  call void @total.1(ptr %p_i, ptr %p_b, ptr %p_state)\n  br label %dispatch\nc2:\n  call void @total.2(ptr %p_a, ptr %p_sum, ptr %p_state)\n  br label %dispatch\nc3:\n  call void @total.3(ptr %p_i, ptr %p_state)\n  br label %dispatch\nc4:\n  %r = call i32 @total.4(ptr %p_sum)\n  ret i32 %r\ninvalid:\n  unreachable\n}\n\ndefine i32 @main() {\n  %r = call i32 @total(i32 6, i32 4)\n  %p = call i32 @printf(ptr @.fmt, i32 %r)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Read the parts first. `total.1` is the old `cond` block: it computes the branch decision, but instead of branching it writes the next state — `%ns = select i1 %c, i32 2, i32 4`: loop again (state 2) or exit (state 4). `total.2` is `body` (accumulate, then write state 3). `total.3` is `inc` (increment, then write state 1, back to the condition). `total.4` is `exit` — the only part that returns a value, the accumulated sum. The conditional branch became a state assignment; the unconditional branch became a constant store; `ret` became the part's return. Now the dispatcher: `total` keeps its entry setup, adds a `%p_state` alloca initialized to 1, and loops over `switch i32 %s`: each case calls the matching part and returns to the dispatch; case 4 returns the part's value; the `invalid` default is `unreachable`, because the state is only ever assigned 1 through 4."
+        },
+        {
+          "type": "heading",
+          "text": "Differential proof"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output subdivide_before.ll\n$ opt-23 -passes=verify -disable-output subdivide_after.ll\n$ clang-23 -O0 subdivide_before.ll -o subdivide_before_bin\n$ clang-23 -O0 subdivide_after.ll -o subdivide_after_bin\n$ diff <(./subdivide_before_bin) <(./subdivide_after_bin)\n(identical)\n$ ./subdivide_after_bin\ntotal(6,4)=24\n$ grep -c '^define' subdivide_before.ll\n2\n$ grep -c '^define' subdivide_after.ll\n6"
+        },
+        {
+          "type": "paragraph",
+          "text": "Both modules verify; both binaries print `total(6,4)=24`; the module gains four `internal` functions. The -O0 binary sizes barely move (16624 vs 16632 bytes) — alignment again — so the honest measures are the function count and the module bytes."
+        },
+        {
+          "type": "heading",
+          "text": "What -O2 does to it"
+        },
+        {
+          "type": "paragraph",
+          "text": "Every `total.N` is `internal` (no definition outside the module can reference it) and has exactly one caller — the dispatcher. That is the inliner's exact target, and -O2 inlines all four parts, recovers the original loop, and then optimizes the recovered loop. The fragment below is the `total` function from the -O2 module (the attribute groups and loop metadata it references sit at the end of the module):"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define i32 @total(i32 noundef %a, i32 noundef %b) local_unnamed_addr #1 {\ndispatch.outer4:\n  %c.i.jt129 = icmp sgt i32 %b, 0\n  br i1 %c.i.jt129, label %dispatch.outer4.jt3.lr.ph, label %c4\n\ndispatch.outer4.jt3.lr.ph:                        ; preds = %dispatch.outer4\n  %min.iters.check = icmp ult i32 %b, 8\n  br i1 %min.iters.check, label %dispatch.outer4.jt3.preheader, label %vector.ph\n\nvector.ph:                                        ; preds = %dispatch.outer4.jt3.lr.ph\n  %n.vec = and i32 %b, 2147483640\n  %broadcast.splatinsert = insertelement <4 x i32> poison, i32 %a, i64 0\n  %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> poison, <4 x i32> zeroinitializer\n  br label %vector.body\n\nvector.body:                                      ; preds = %vector.body, %vector.ph\n  %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]\n  %vec.phi = phi <4 x i32> [ zeroinitializer, %vector.ph ], [ %0, %vector.body ]\n  %vec.phi32 = phi <4 x i32> [ zeroinitializer, %vector.ph ], [ %1, %vector.body ]\n  %0 = add <4 x i32> %vec.phi, %broadcast.splat\n  %1 = add <4 x i32> %vec.phi32, %broadcast.splat\n  %index.next = add nuw i32 %index, 8\n  %2 = icmp eq i32 %index.next, %n.vec\n  br i1 %2, label %middle.block, label %vector.body, !llvm.loop !0\n\nmiddle.block:                                     ; preds = %vector.body\n  %bin.rdx = add <4 x i32> %1, %0\n  %3 = tail call i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %bin.rdx)\n  %cmp.n = icmp eq i32 %b, %n.vec\n  br i1 %cmp.n, label %c4, label %dispatch.outer4.jt3.preheader\n\ndispatch.outer4.jt3.preheader:                    ; preds = %dispatch.outer4.jt3.lr.ph, %middle.block\n  %p_sum.0.ph2031.ph = phi i32 [ 0, %dispatch.outer4.jt3.lr.ph ], [ %3, %middle.block ]\n  %inc2.i.sink30.ph = phi i32 [ 0, %dispatch.outer4.jt3.lr.ph ], [ %n.vec, %middle.block ]\n  br label %dispatch.outer4.jt3\n\ndispatch.outer4.jt3:                              ; preds = %dispatch.outer4.jt3.preheader, %dispatch.outer4.jt3\n  %p_sum.0.ph2031 = phi i32 [ %ns.i1, %dispatch.outer4.jt3 ], [ %p_sum.0.ph2031.ph, %dispatch.outer4.jt3.preheader ]\n  %inc2.i.sink30 = phi i32 [ %inc2.i, %dispatch.outer4.jt3 ], [ %inc2.i.sink30.ph, %dispatch.outer4.jt3.preheader ]\n  %ns.i1 = add nsw i32 %p_sum.0.ph2031, %a\n  %inc2.i = add nuw nsw i32 %inc2.i.sink30, 1\n  %c.i.jt1 = icmp slt i32 %inc2.i, %b\n  br i1 %c.i.jt1, label %dispatch.outer4.jt3, label %c4, !llvm.loop !3\n\nc4:                                               ; preds = %dispatch.outer4.jt3, %middle.block, %dispatch.outer4\n  %p_sum.0.ph20.lcssa = phi i32 [ 0, %dispatch.outer4 ], [ %3, %middle.block ], [ %ns.i1, %dispatch.outer4.jt3 ]\n  ret i32 %p_sum.0.ph20.lcssa\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Note what the optimizer did to the recovered loop: it did not stop at the original — it vectorized it, four additions wide, closing each vector iteration with `llvm.vector.reduce.add.v4i32`. The contrast with the unobfuscated original is the point: `-O2` on the *plain* module strength-reduces the same loop to the closed form `mul i32 %b, %a` plus a select, while `-O2` on the *obfuscated* module recovers the loop and vectorizes it. Both end states compute `a·b`; they are different programs, because the inlined state machine changed how the optimizer saw the loop. The transform itself — six functions, a switch, a state machine — is gone, along with the 2232 bytes."
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Transform",
+              "Pass output (-O0)",
+              "Final artifact (-O2)"
+            ],
+            [
+              "Bogus control flow",
+              "7 blocks, 1444 B",
+              "1 block — seed fold, or dead-block DCE + merge"
+            ],
+            [
+              "String encryption",
+              "blob + key + loop, 1175 B",
+              "immediate stores; the globals deleted"
+            ],
+            [
+              "Subroutine splitting",
+              "6 functions, 2232 B",
+              "1 function; the loop vectorized 4-wide"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Subdivide is the most fragile of the three, and the reason is now visible: it adds structure without content. Bogus control flow adds a predicate the optimizer cannot prove (and, with an opaque side effect, content the optimizer may not delete); string encryption moves data behind a loop that at least must be executed at -O0. Subdivide adds nothing but a decomposition of what was already there — and a decomposition is exactly what the inliner removes. A transform whose output is inlining fuel cannot survive an optimizer that inlines."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: (a) In the transformed module, how does the original's conditional branch appear inside the parts, and what is the role of the dispatcher's `invalid` case? (b) Name the two properties of the `total.N` functions that make them guaranteed inlining targets at -O2. (c) Why is subroutine splitting the most fragile of the three OLLVM transforms in this part?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) As a `select` that writes the next state into the shared state slot: `total.1` ends with `%ns = select i1 %c, i32 2, i32 4; store i32 %ns, ptr %p_state`, and the dispatcher's `switch` re-branches on the stored value. The `invalid` case is the `switch`'s default and is `unreachable`: the state is only ever assigned 1 through 4, so the default encodes the state machine's invariant as dead code.",
+                "(b) `internal` linkage — no definition outside the module can reference them — and a single caller, the dispatcher. The inliner can see the entire callee and its only use, so both the call and the function disappear.",
+                "(c) It adds structure without content: no new predicate, no moved data, no side effect — only a decomposition of the existing CFG. The inliner, its exact inverse, undoes the decomposition and then optimizes the recovered loop (here, vectorizing it four-wide). The other two transforms leave something the optimizer cannot simply delete: an unprovable predicate behind a live branch, or bytes behind a loop."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1729
+    },
+    {
+      "id": 86,
+      "number": 4,
+      "day": 3,
+      "group": "ollvm",
+      "title": "What the final optimizer keeps",
+      "originalTitle": "What the final optimizer keeps",
+      "summary": "The deployment rule that makes OLLVM-style obfuscation survive: the transform must run after the final optimization. Proven with the learner's real plugin — flattening clang -O2's output keeps the dispatcher and runs identically, re-running -O2 on the artifact removes the dispatcher, and two pipeline traps (a pass named `O2` does not exist; `optnone` makes optional passes skip silently) decide which inputs the rule can apply to at all.",
+      "takeaway": "Obfuscation is a pipeline position, not just a pass: apply it last, to the final optimized IR, or the next optimizer pass gets a second look at the artifact and erases it. The proof is the learner's own plugin on a real -O2 module — and the negative proof is one more -O2 over the obfuscated artifact, which removes the dispatcher entirely.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Lessons 83 through 85 each ended the same way: -O2 over the pass output dissolved the transform. The dissolution was not a defect of the transforms; it was the pipeline order — in every case the transform ran on unoptimized IR, and the final optimizer then ran over it. The deployment rule this lesson proves: obfuscation must be the last transform, applied to the final optimized artifact. The proof uses the plugin the learner has been building — the flattening pass from Volume 2, `build/libMiniShield.so` — not a reference implementation."
+        },
+        {
+          "type": "heading",
+          "text": "A function that survives -O2"
+        },
+        {
+          "type": "paragraph",
+          "text": "The fixture is `classify`, a branched function over a runtime input:"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n\n__attribute__((noinline)) int classify(int x) {\n    if (x < 0)\n        return 100 - x;\n    if (x < 50)\n        return x * 2;\n    return x / 2 + 5;\n}\n\nint main(void) {\n    int v;\n    if (scanf(\"%d\", &v) != 1) return 2;\n    printf(\"classify(%d)=%d\\n\", v, classify(v));\n    return 0;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "Why not reuse `total` from the previous lesson? Because -O2 strength-reduces it to `a·b` before any obfuscation runs: the five-block loop is gone, and there is nothing left to transform. `classify`'s branches depend on a runtime input the optimizer cannot fold, and the call is `noinline`, so the function keeps its shape through the final optimization. At -O2 it is five blocks — labels `3`, `5`, `7`, `9`, `12`, the numeric labels clang gives -O2 IR — with a PHI at the join:"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define dso_local range(i32 0, -2147483648) i32 @classify(i32 noundef %0) local_unnamed_addr #0 {\n  %2 = icmp slt i32 %0, 0\n  br i1 %2, label %3, label %5\n\n3:                                                ; preds = %1\n  %4 = sub nsw i32 100, %0\n  br label %12\n\n5:                                                ; preds = %1\n  %6 = icmp samesign ult i32 %0, 50\n  br i1 %6, label %7, label %9\n\n7:                                                ; preds = %5\n  %8 = shl nuw nsw i32 %0, 1\n  br label %12\n\n9:                                                ; preds = %5\n  %10 = lshr i32 %0, 1\n  %11 = add nuw nsw i32 %10, 5\n  br label %12\n\n12:                                               ; preds = %9, %7, %3\n  %13 = phi i32 [ %4, %3 ], [ %8, %7 ], [ %11, %9 ]\n  ret i32 %13\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Flatten after -O2, with the real plugin"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -O2 -S -emit-llvm persist_fixture.c -o persist_o2.ll\n$ opt-23 -load-pass-plugin=build/libMiniShield.so \\\n    -passes='function(minishield-flatten),verify' \\\n    -S persist_o2.ll -o persist_final.ll\n[MiniShield] eligible: classify\nNumber of Phis: 1\n[MiniShield] rejected: main: intrinsic calls are outside this prototype's scope"
+        },
+        {
+          "type": "paragraph",
+          "text": "Three lines, all correct: `classify` is eligible, the pass counts its one PHI (the join block's, which the preparation stage demotes — visible in the artifact below), and `main` is rejected by the learner's own guard: at -O2 it still carries `llvm.lifetime.start`/`llvm.lifetime.end` intrinsic calls, which the support contract established in Volume 2 excludes — the guard prints its named reason and leaves the function untouched. The pipeline is two stages: the final optimizer first (`-O2` to a `.ll`), then the obfuscation (`function(minishield-flatten)`), then `verify`."
+        },
+        {
+          "type": "heading",
+          "text": "The artifact"
+        },
+        {
+          "type": "paragraph",
+          "text": "This listing assumes builder state entry-UncondBr: yes · entry-CondBr: no · non-entry terminators: no — the recorded/book state, the 2.5.5-end build-along state. Check yours: `grep -c 'case llvm::Instruction::CondBr' lib/StateMachineBuilder.cpp` (0 = the recorded/book state; 1 = a tree that has the entry-CondBr case, in which case a conditional entry is rewired too, and this artifact's `ms.dispatch` would carry a predecessor). Artifact-side check: `grep -c 'br label %ms.dispatch' persist_final.ll` (0 = as printed, entry not rewired; 1 = your tree rewired it)."
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define dso_local range(i32 0, -2147483648) i32 @classify(i32 noundef %0) local_unnamed_addr #0 {\n  %ms.state = alloca i32, align 4\n  %.reg2mem = alloca i32, align 4\n  %2 = icmp slt i32 %0, 0\n  br i1 %2, label %3, label %5\n\n3:                                                ; preds = %ms.dispatch, %1\n  %4 = sub nsw i32 100, %0\n  store i32 %4, ptr %.reg2mem, align 4\n  br label %12\n\n5:                                                ; preds = %ms.dispatch, %1\n  %6 = icmp samesign ult i32 %0, 50\n  br i1 %6, label %7, label %9\n\n7:                                                ; preds = %ms.dispatch, %5\n  %8 = shl nuw nsw i32 %0, 1\n  store i32 %8, ptr %.reg2mem, align 4\n  br label %12\n\n9:                                                ; preds = %ms.dispatch, %5\n  %10 = lshr i32 %0, 1\n  %11 = add nuw nsw i32 %10, 5\n  store i32 %11, ptr %.reg2mem, align 4\n  br label %12\n\n12:                                               ; preds = %ms.dispatch, %9, %7, %3\n  %.reload = load i32, ptr %.reg2mem, align 4\n  ret i32 %.reload\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %3\n    i32 1, label %5\n    i32 2, label %7\n    i32 3, label %9\n    i32 4, label %12\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "This is the learner's flattening output on -O2's IR, and it is worth reading block by block. First the preparation: the values the optimized blocks share have moved to the stack — the `phi` at join block `12` (which picked among the three branch results) is gone, replaced by a `%.reg2mem` slot each producing branch stores into and the join loads from — while the optimized blocks themselves are intact, including the `shl nuw nsw` where -O2 wrote the `x * 2`. Demoting PHIs and escaping values preserves behavior by itself. Then the state machine: an `ms.state` slot, an `ms.dispatch` block whose `switch` over `ms.current` maps the five states onto the five optimized blocks, and `ms.invalid` → `unreachable` as the switch's default. The transform lays the scaffolding on top of the optimized function; whether the scaffolding is wired to the entry is a separate question, and the artifact answers it plainly."
+        },
+        {
+          "type": "heading",
+          "text": "The entry the pass does — and does not — rewire"
+        },
+        {
+          "type": "paragraph",
+          "text": "`ms.dispatch` carries the `; No predecessors!` comment: in this build the entry's conditional branch is not yet rewired — `entry` still reaches `3` and `5` directly, so the dispatcher is scaffolding that has been added but not connected. The build is not idle, though: it does rewire an unconditional entry. The fixture below is the Volume 2 exit-evidence shape — an unconditional jump into a loop header with a PHI — written by hand rather than produced by clang, because `clang -O0` marks every function `optnone` and the optional pass skips `optnone` functions silently (the second of this lesson's pipeline traps), and it carries a second function with a conditional entry, so one module shows both cases:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output wire_fixture.ll\n$ opt-23 -load-pass-plugin=build/libMiniShield.so \\\n    -passes='function(minishield-flatten),verify' \\\n    -S wire_fixture.ll -o wire_flat.ll\n[MiniShield] eligible: count_to\nNumber of Phis: 1\n[MiniShield] eligible: main\nNumber of Phis: 0\n$ grep -A1 'store i32 0, ptr %ms.state' wire_flat.ll\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n$ grep '^ms.dispatch:' wire_flat.ll\nms.dispatch:                                      ; preds = %entry\nms.dispatch:                                      ; No predecessors!\n$ clang-23 wire_fixture.ll -o wire_orig\n$ clang-23 wire_flat.ll -o wire_flat_bin\n$ echo 5 | ./wire_orig  &&  echo 5 | ./wire_flat_bin\ncount_to(5)=5\ncount_to(5)=5"
+        },
+        {
+          "type": "paragraph",
+          "text": "In `count_to` the entry's branch is replaced by a store of the successor's state (`0`, the id of the first block) and a jump to the dispatcher, and its `ms.dispatch` now has a real predecessor. In `main` — as in `classify` — the entry's conditional branch is untouched, and its `ms.dispatch` has none. The conditional-entry case is what the CondBr lesson builds: every original terminator stores its destination state and jumps to the dispatcher, which is what the Volume 2 exit evidence's fully wired listing shows. The persistence rule does not depend on that gap: the artifact is exactly what the final optimizer sees, and the control below measures what the final optimizer does to it."
+        },
+        {
+          "type": "heading",
+          "text": "Behavior identity"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 persist_final.ll -o persist_final_bin\n$ clang-23 -O2 persist_fixture.c -o persist_orig_bin\n$ echo 42 | ./persist_final_bin  &&  echo 42 | ./persist_orig_bin\nclassify(42)=84\nclassify(42)=84\n$ echo 7 | ./persist_final_bin  &&  echo 7 | ./persist_orig_bin\nclassify(7)=14\nclassify(7)=14\n$ echo -7 | ./persist_final_bin  &&  echo -7 | ./persist_orig_bin\nclassify(-7)=107\nclassify(-7)=107"
+        },
+        {
+          "type": "paragraph",
+          "text": "Three inputs, one per branch: negative (`-7 → 100 − (−7) = 107`), mid (`7 → 2·7 = 14`), high (`42 → 42/2 + 5 = 84`). The obfuscated artifact and the plain -O2 binary agree on all three: the flattened -O2 function is a correct program."
+        },
+        {
+          "type": "heading",
+          "text": "The control: re-run -O2"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ grep -c 'switch i32' persist_final.ll\n1\n$ opt-23 -O2 -S persist_final.ll -o persist_reopt.ll\n$ grep -c 'switch i32' persist_reopt.ll\n0"
+        },
+        {
+          "type": "paragraph",
+          "text": "One more pass of -O2 over the obfuscated artifact and the dispatcher is gone: the `switch` count goes 1 → 0, `ms.state` and `ms.dispatch` are deleted, and `classify` is back to plain branches. Behavior is unchanged — the re-optimized binary still prints the same three lines — but the artifact is structurally unobfuscated again. An artifact is only as obfuscated as the last transform that ran on it; a transform that runs before the final optimizer hands the optimizer a second look, and the optimizer takes it."
+        },
+        {
+          "type": "paragraph",
+          "text": "In the printed (partially-wired) artifact `ms.dispatch` has no predecessors, so the removal is mechanical: **DCE** deletes the unreachable block and its `switch`, and **mem2reg** re-promotes the demoted slot values back to registers. In a fully-wired build the same endpoint is reached by a different mechanism — **proving the state machine**, the merge route of Volume 2 §2.7.4, where each path's state is a known constant and the dispatch collapses. Same observable, different mechanism."
+        },
+        {
+          "type": "heading",
+          "text": "Two pipeline traps"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "`O2` is not a pass name. `opt -passes='O2,function(minishield-flatten)'` fails with `unknown pass name 'O2'`: optimization levels are not elements of a pass pipeline. The level inside a pipeline is spelled `default<O2>` (the default O2 pipeline), and `default<O2>,function(minishield-flatten)` parses — the spelling matters when you want the whole rule in one command.",
+            "`optnone` makes optional passes skip silently. `clang -O0` marks every function `optnone` (three in this fixture's -O0 module; zero in the -O2 module). `minishield-flatten` is an optional pass — registered through the pipeline-parsing callback, not required by the pipeline's shape — and optional passes skip `optnone` functions without a diagnostic: running it on the -O0 IR changes nothing and prints zero `[MiniShield]` lines. Nor does `default<O2>` rescue it: -O2 respects `optnone` and leaves the attribute in place, so the one-shot `default<O2>,function(minishield-flatten)` on -O0 IR also flattens nothing. The rule's input must be real final-optimization IR, not a -O0 draft."
+          ]
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Step",
+              "`classify`",
+              "Dispatcher",
+              "Behavior"
+            ],
+            [
+              "-O2 (plain)",
+              "5 blocks, plain branches",
+              "—",
+              "—"
+            ],
+            [
+              "Flatten after -O2",
+              "optimized blocks + `ms.dispatch`",
+              "`switch` present",
+              "identical"
+            ],
+            [
+              "-O2 over the artifact",
+              "plain branches restored",
+              "gone (switch 1 → 0)",
+              "identical"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Four lessons, one law. The three transforms add structure — gates, blobs, decompositions — and the final optimizer removes structure; each -O2 section showed the removal from the transform's side (constant folding, dead-store elimination, inlining), and this lesson shows the rule from the deployment side: the transform must be last in the pipeline that produces the shipped binary. “Last” is a position, not a property: the control proves that one more optimizer pass after the transform erases it, so an obfuscated IR that is later re-optimized — by a second `opt`, by LTO at link, by a downstream tool — is not an obfuscated artifact. The question every hardening claim in this part must answer is the one from the landscape lesson: what does the final artifact look like?"
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: (a) Why does the persistence demo use `classify` instead of the previous lesson's `total`? (b) The flatten pass on the -O0 IR prints no diagnostics and changes nothing. Name the attribute responsible, and the class of pass whose behavior it controls. (c) State the deployment rule in one sentence, and say what the re-optimization control (switch count 1 → 0) proves about an artifact that is obfuscated and then optimized again.",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) Because -O2 strength-reduces `total` to the closed form `a·b` (a `mul` plus a select) before any obfuscation runs: the five-block loop is gone and there is nothing left to transform. `classify`'s branches depend on a runtime input the optimizer cannot fold, and the call is `noinline`, so it keeps its five-block structure through the final optimization.",
+                "(b) `optnone`, which `clang -O0` attaches to every function. It controls optional passes — passes added through the pipeline-parsing callback (like `minishield-flatten`) rather than required by the pipeline's shape: an optional pass skips `optnone` functions entirely, with no diagnostic.",
+                "(c) Obfuscation must be the last transform in the pipeline that produces the shipped binary, applied to the final optimized IR. The control proves the negative: one more -O2 over the obfuscated artifact removes the dispatcher's `switch` (1 → 0) and the function is back to plain branches — behavior unchanged, structure unobfuscated. “Last” means nothing after it; an artifact that is re-optimized after obfuscation is not an obfuscated artifact."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 2087
+    },
+    {
+      "id": 87,
+      "number": 1,
+      "day": 3,
+      "group": "pie",
+      "title": "Position independence",
+      "originalTitle": "Position independence",
+      "summary": "Read PIE, ASLR, and RELRO the way the toolchain actually implements them: zero trace in the IR (the -pie and -no-pie modules are byte-identical), everything in the ELF (EXEC vs DYN, FLAGS_1 PIE, absolute vs load-base-relative relocations, the RELRO segment), and the runtime proof — the fixed-address build prints the same pointers on every run, the PIE build prints a new base on every run.",
+      "takeaway": "Position independence is hardening that lives in the linker and the loader, not the IR: the position model leaves no mark in the module, the decision is recorded in the ELF header and the relocation table, ASLR randomizes the load base, and full RELRO closes the last writable GOT by moving .got.plt inside the read-only segment. A pass plugin can express none of it — it is a build-flag and load-time decision, verified with readelf, not opt.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "The first three parts of this volume left traces you can read: CFI left checks in the IR (`llvm.type.test` + `llvm.ubsantrap`), the canary left an attribute in the IR (`sspstrong`), the OLLVM transforms changed the IR's structure. This chapter asks where position independence lives, and the answer is: not in the IR at all. The threat it answers is the predictable-layout row of the landscape's threat table: ASLR randomizes the stack, heap, and library bases, but an executable that is not position independent is mapped at its fixed file addresses on every run, so every address an attacker would need — a function, a GOT slot, a return target — is stable in advance. PIE makes the program itself a load-time value."
+        },
+        {
+          "type": "heading",
+          "text": "The IR says nothing"
+        },
+        {
+          "type": "paragraph",
+          "text": "The fixture prints the address of a global and the address of `main` — the two kinds of self-address an attacker computes:"
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n\nint global = 42;\n\nint main(void) {\n    printf(\"global at %p, main at %p\\n\", (void *)&global, (void *)main);\n    return 0;\n}"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -no-pie -O0 -S -emit-llvm pie_fixture.c -o pie_nopie.ll\nclang-23: warning: argument unused during compilation: '-no-pie'\n$ clang-23 -pie -O0 -S -emit-llvm pie_fixture.c -o pie_pie.ll\nclang-23: warning: argument unused during compilation: '-pie'\n$ cmp pie_nopie.ll pie_pie.ll\n(identical — and again at -O2)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The two position models produce byte-identical modules — at `-O0` and at `-O2` — and the compiler even warns that the flag is unused on the IR path. Where the canary chapter found a hint in the IR that the backend acted on, here the IR carries nothing: an IR reader cannot tell the two builds apart, and an IR pass cannot express or detect the position model. The decision is made and recorded below the IR."
+        },
+        {
+          "type": "heading",
+          "text": "The executable says it"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-readelf-23 -h pie_nopie | grep Type\n  Type:                              EXEC (Executable file)\n$ llvm-readelf-23 -h pie_pie | grep Type\n  Type:                              DYN (Shared object file)\n$ llvm-readelf-23 -d pie_pie | grep FLAGS\n  0x000000006ffffffb (FLAGS_1)      PIE"
+        },
+        {
+          "type": "paragraph",
+          "text": "The `-no-pie` executable is `EXEC`: the loader maps it at the fixed addresses recorded in the file — the `0x201xxx` range the demo prints. The PIE executable is a `DYN`: a position-independent object the loader treats exactly like a shared library — it chooses a base, and every address in the image is computed from it. The `(FLAGS_1) PIE` tag in the dynamic section is the loader's marker. (This toolchain defaults to PIE — an unflagged build is `DYN` with the tag and randomized addresses — which is why every command below spells the flag out.)"
+        },
+        {
+          "type": "paragraph",
+          "text": "The relocation table shows how \"computed from the base\" works:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-objdump-23 -R pie_nopie\nDYNAMIC RELOCATION RECORDS\nOFFSET           TYPE                     VALUE\n00000000002028a0 R_X86_64_GLOB_DAT        __libc_start_main\n00000000002028a8 R_X86_64_GLOB_DAT        __gmon_start__\n00000000002038e0 R_X86_64_JUMP_SLOT       printf\n$ llvm-objdump-23 -R pie_pie\nDYNAMIC RELOCATION RECORDS\nOFFSET           TYPE                     VALUE\n00000000000027c0 R_X86_64_RELATIVE        *ABS*+0x16e0\n00000000000027c8 R_X86_64_RELATIVE        *ABS*+0x1720\n00000000000039b0 R_X86_64_RELATIVE        *ABS*+0x39b0\n0000000000002980 R_X86_64_GLOB_DAT        __libc_start_main\n..."
+        },
+        {
+          "type": "paragraph",
+          "text": "The `-no-pie` executable's relocations are all library relocations: the loader writes the final addresses of the imported functions into its GOT slots. The PIE executable carries those same entries *plus* `R_X86_64_RELATIVE` records — `*ABS*+0x16e0` and so on — which the loader resolves as `load_base + offset`, filling the executable's own writable slots — here, the `.fini_array` and `.init_array` entries and a `.data` slot; the `.got` is not among them, its library slots still coming from the `GLOB_DAT` records both builds carry. The program's self-addresses are load-time values: `&global` is not a constant baked into the file, it is the randomized base plus an offset."
+        },
+        {
+          "type": "heading",
+          "text": "ASLR at runtime"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ for i in 1 2 3; do ./pie_nopie; done\nglobal at 0x2038c0, main at 0x201680\nglobal at 0x2038c0, main at 0x201680\nglobal at 0x2038c0, main at 0x201680\n$ for i in 1 2 3; do ./pie_pie; done\nglobal at 0x603bc21939b8, main at 0x603bc2191730\nglobal at 0x65386ac319b8, main at 0x65386ac2f730\nglobal at 0x6072bb9f79b8, main at 0x6072bb9f5730"
+        },
+        {
+          "type": "paragraph",
+          "text": "Three runs of the `-no-pie` build: identical addresses. The executable maps at its fixed file addresses on every run, on every machine, so an attacker who ships the binary ships every target address with it. Three runs of the PIE build: a new base each time, with the offset between `global` and `main` (`0x2288`) invariant — ASLR randomizes the base, not the layout. This is the runtime face of the `EXEC` vs `DYN` distinction the header made. And it names a choice this book has made quietly for two chapters: the CFI and canary demos all built with `-no-pie` \"to keep printed addresses stable across runs\" — non-PIE is exactly a binary whose base the kernel does not randomize."
+        },
+        {
+          "type": "heading",
+          "text": "RELRO: making the GOT read-only"
+        },
+        {
+          "type": "paragraph",
+          "text": "The region PIE leaves writable is the GOT. In a PIE executable, calls to imported functions go through `.got.plt`, whose slots the loader writes — eagerly, or lazily on first call. A writable GOT is a standing target for the GOT-overwrite class of attack. RELRO (relocation read-only) is the linker/loader's answer: a `PT_GNU_RELRO` segment lists the ranges the loader flips to read-only after relocation is done."
+        },
+        {
+          "type": "paragraph",
+          "text": "The attack it answers, in one write: an overflow in some reachable buffer rewrites a `.got.plt` jump slot to an address the attacker controls; the next call to that import — `printf` in the fixture — jumps there instead of the function. After relocation is done the `PT_GNU_RELRO` range is read-only, so the write faults instead of landing. The two layers police different links of the same chain: CFI-ICALL polices the *call* through a corrupted pointer; RELRO polices the *table* the pointer came from — complementary layers, same threat shape. `checksec`, the common tool that prints a binary's RELRO, PIE, and canary status in one line, is the one-line version of exactly this evidence."
+        },
+        {
+          "type": "paragraph",
+          "text": "Read the two PIE builds the way `checksec` does — the RELRO segment, the section offsets, the dynamic flags:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-readelf-23 -lW pie_pie | grep GNU_RELRO\n  GNU_RELRO      0x0007c0 0x00000000000027c0 0x00000000000027c0 0x0001e8 0x000840 R   0x1\n$ llvm-readelf-23 -SW pie_pie | grep -E '\\.got|\\.data'\n  [20] .got              PROGBITS        0000000000002980 000980 000028 00  WA  0   0  8\n  [22] .data             PROGBITS        00000000000039a8 0009a8 000014 00  WA  0   0  8\n  [24] .got.plt          PROGBITS        00000000000039c0 0009c0 000028 00  WA  0   0  8\n$ llvm-readelf-23 -lW pie_fullrelro | grep GNU_RELRO\n  GNU_RELRO      0x0007c0 0x00000000000027c0 0x00000000000027c0 0x000220 0x000840 R   0x1\n$ llvm-readelf-23 -SW pie_fullrelro | grep -E '\\.got|\\.data'\n  [20] .got              PROGBITS        0000000000002990 000990 000028 00  WA  0   0  8\n  [21] .got.plt          PROGBITS        00000000000029b8 0009b8 000028 00  WA  0   0  8\n  [23] .data             PROGBITS        00000000000039e0 0009e0 000014 00  WA  0   0  8\n$ llvm-readelf-23 -d pie_fullrelro | grep FLAGS\n  0x000000000000001e (FLAGS)        BIND_NOW\n  0x000000006ffffffb (FLAGS_1)      NOW PIE"
+        },
+        {
+          "type": "paragraph",
+          "text": "In the default PIE build the RELRO segment covers `[0x27c0, 0x27c0 + 0x1e8)` = `[0x27c0, 0x29a8)`: `.init_array`, `.dynamic`, and `.got` — but not `.got.plt`, which sits at `0x39c0` next to `.data`, outside the segment. There is no `BIND_NOW`: the jump slots bind lazily on first call, and the table stays writable. That is the surface partial RELRO leaves open. Add `-Wl,-z,relro,-z,now` (full RELRO) and two things happen at once: the dynamic section gains `BIND_NOW`, so every jump slot is resolved at load time, and the linker physically moves `.got.plt` — from `0x39c0` to `0x29b8`, right after `.got`, inside the widened segment, whose end (`0x27c0 + 0x220 = 0x29e0`) is exactly `.got.plt`'s end. After the loader finishes, both GOT tables are read-only; a write to a jump slot faults."
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "IR: nothing. `-pie` and `-no-pie` produce byte-identical modules (at -O0 and -O2), and the flag warns as unused on the IR path. An IR pass can neither express nor detect the position model.",
+            "ELF: everything. `Type` (`EXEC` vs `DYN`), `(FLAGS_1) PIE`, and the relocation set (library-only vs library + `R_X86_64_RELATIVE` self-relocations) fully determine the load behavior.",
+            "Loader: the base. With ASLR on (`randomize_va_space = 2` here), the PIE base changes on every `exec`; the `-no-pie` base is the fixed file address. The in-image layout — offsets like `0x2288` — is invariant either way.",
+            "Linker: the RELRO boundary. Full RELRO (`-z now`) moves `.got.plt` inside the `PT_GNU_RELRO` segment and binds the jump slots eagerly, so both GOT tables are read-only after load; the default PIE build leaves `.got.plt` writable for lazy binding."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Now the level map from the Volume 1 capstone reads as a measurement, not a claim: the \"platform hardening\" row — PIC/PIE, ASLR, RELRO, at the compiler + linker + operating system level, not hostable by the MiniShield registry — is exactly what the evidence above shows. The compiler chooses the relocation model, the linker writes the `Type`, the `FLAGS_1` tag, and the RELRO segment, and the loader picks the base and binds the GOT, after every IR pass has run. The right tool for this hardening is a build flag, and the right verification is `readelf` plus a runtime address probe. The part's standard — judge the final artifact — lands here in its most literal form: the artifact is the executable, and the hardening lives in its header."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: (a) The -no-pie and -pie builds of the fixture have byte-identical IR. What records the position decision in the two executables instead — name the header field and the dynamic-section tag. (b) The PIE executable's relocations include a type the -no-pie executable lacks, used for the executable's own writable slots. Name the type, state the value the loader writes, and name the slots it fills in this fixture. (c) Full RELRO closes the one region the default PIE build leaves writable. Which section is it, what does the linker do to it in the full-RELRO build, and which dynamic-section flag comes with the change?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) The ELF header's `Type` field: `EXEC` (the fixed-address executable, mapped at its recorded file addresses) versus `DYN` (the position-independent object the loader maps like a shared library), plus the dynamic section's `(FLAGS_1) PIE` tag on the PIE executable. Nothing in the IR marks the decision — the two modules are byte-identical.",
+                "(b) `R_X86_64_RELATIVE`: the loader writes `load_base + offset` (the records read `*ABS*+0x16e0` and so on) into the executable's own writable slots — here the `.fini_array` entry at `0x27c0`, the `.init_array` entry at `0x27c8`, and a `.data` slot at `0x39b0`; the `.got` is not among them, its library slots still coming from the `GLOB_DAT` records both builds carry. The self-relocations exist only in the PIE executable, because its own base — and therefore its own addresses — is randomized at load time.",
+                "(c) `.got.plt`, the jump table lazy binding fills: in the default build it sits at `0x39c0` next to `.data`, outside the RELRO segment, so it stays writable. The full-RELRO linker moves it to `0x29b8`, inside the widened `PT_GNU_RELRO` segment (whose end is exactly `.got.plt`'s end), and the dynamic section gains `BIND_NOW`, so every jump slot is resolved eagerly at load. After load, the whole RELRO range — both GOT tables — is read-only, and a write to a jump slot faults."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1794
+    },
+    {
+      "id": 88,
+      "number": 1,
+      "day": 3,
+      "group": "fuzzing",
+      "title": "Fuzzing the flattening pass",
+      "originalTitle": "Fuzzing the flattening pass",
+      "summary": "A libFuzzer capstone on the learner's own artifact: the input contract that makes an IR module runnable in isolation (a self-contained pure i32 @f(i32)), the harness (parse and verify, the contract gate, the real plugin's pipeline through PassBuilder, verify after, and a subprocess differential on a fixed 16-argument battery), the trap semantics that separate pre-existing undefined behavior from a pass-induced regression, a clean 600-run session against build/libMiniShield.so, and the negative control - a one-line off-by-one mutant the harness catches with an exact before/after diff and the wrong ms.state store.",
+      "takeaway": "A fuzzer proves a region, not a point: the behavioral differential (the same input battery, before and after the pass) turns 'the pass preserves behavior' into a measurement, and the negative control - the planted one-line bug the harness catches - is what makes the clean run's silence mean anything.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Every lesson so far has proved its point with a fixture: a chosen input that exercises exactly one behavior, and a diff that shows exactly one difference. A fixture proves a point. A fuzzer proves a region: it starts from a handful of seeds, mutates them, and explores the space around them - so 'this pass preserves behavior' becomes a measurement over the explored region, not a claim about a chosen example. This lesson builds that fuzzer for the artifact you have been producing all week: the `minishield-flatten` pass in `build/libMiniShield.so`. The test it runs is the one the pass contract states: flatten the function, then check that the function still computes the same thing."
+        },
+        {
+          "type": "heading",
+          "text": "The input contract"
+        },
+        {
+          "type": "paragraph",
+          "text": "The fuzzer's input is not a C program; it is the text of an LLVM IR module. That module has to be runnable in isolation, or the comparison is not of the pass but of everything around it. The contract the harness enforces before it touches the pass: `@f` is defined, returns `i32`, and takes exactly one `i32` - the value space the battery probes is known; there is no defined `@main` - the harness links its own wrapper `main` that reads one argument and prints `f(x)`; and there are no non-intrinsic declares - a call to a function whose body the harness does not have either would not link or would make the output depend on code the pass never touches. Intrinsic declares are allowed. Everything else - a wrong signature, an external call, a defined `main` - is rejected at the gate and counts as a clean run: not a bug, just outside the region."
+        },
+        {
+          "type": "heading",
+          "text": "The harness"
+        },
+        {
+          "type": "paragraph",
+          "text": "Each run does five things. It parses and verifies the input (a failure ends the run quietly). It applies the contract gate. It runs the real plugin's `function(minishield-flatten)` pipeline on a copy of the module - the plugin is loaded once, at the first run, via `PassPlugin::Load`, and the pipeline is built through `PassBuilder` with its standard analysis registration. It verifies the flattened module - a pass that emits invalid IR is a regression in its own right, before behavior is even considered. And it runs the behavioral differential: it compiles the original and the flattened module, each into a native binary with the wrapper `main` linked in, and runs both on a fixed 16-argument battery - `INT_MIN` and `INT_MAX`, zero, negatives, and the small values branch conditions flip on."
+        },
+        {
+          "type": "paragraph",
+          "text": "The trap semantics are the subtle part. If the original binary traps on a battery argument (a signal, or a nonzero exit), the input is undefined behavior before the pass ever ran - an out-of-range shift, a division by zero, an overflow on a battery edge value - and the pass is not blamed for it; the harness skips the input and returns 0. If the original was healthy and the flattened binary traps, or prints a different value, the divergence is the pass's: the harness reports it - the input, the pass's diagnostics, the first divergent argument with both values, and the flattened module's `ms.state` store - and returns 1, which libFuzzer marks interesting, keeping the input in the corpus."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// minishield-fuzz.cpp — fuzz the learner's minishield-flatten pass.\n//\n// Each libFuzzer input is the text of an LLVM IR module. Per run:\n//   1. parse and verify it (most mutations die here);\n//   2. check the input contract: a defined i32 @f(i32), no @main, and no\n//      non-intrinsic declares — a self-contained pure function;\n//   3. run the plugin's function(minishield-flatten) pipeline on a clone\n//      (the real plugin from build/libMiniShield.so, loaded once via\n//      PassPlugin::Load);\n//   4. verify the flattened module;\n//   5. behavioral differential: compile the original and the flattened\n//      module into native binaries (each linked with a wrapper main that\n//      prints f(x) for a fixed argument battery) and compare the output\n//      on every argument.\n//\n// Trap semantics:\n//   - the original binary traps on some argument -> the input is\n//     undefined behavior even before the pass -> skip, not a bug;\n//   - the flattened binary traps or disagrees where the original was\n//     healthy -> behavioral regression -> report and return 1 (libFuzzer\n//     marks the input interesting and keeps it in the corpus).\n\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/LLVMContext.h\"\n#include \"llvm/IR/Module.h\"\n#include \"llvm/IR/Verifier.h\"\n#include \"llvm/IRReader/IRReader.h\"\n#include \"llvm/Passes/PassBuilder.h\"\n#include \"llvm/Plugins/PassPlugin.h\"\n#include \"llvm/Support/Error.h\"\n#include \"llvm/Support/MemoryBuffer.h\"\n#include \"llvm/Support/SourceMgr.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\n#include <cstdio>\n#include <cstdlib>\n#include <cstring>\n#include <memory>\n#include <optional>\n#include <string>\n#include <vector>\n\n#include <fcntl.h>\n#include <sys/wait.h>\n#include <unistd.h>\n\nusing namespace llvm;\n\nnamespace {\n\n// The plugin under test: build/libMiniShield.so by default, or the\n// MINISHIELD_PLUGIN environment variable (the negative control points it\n// at the mutant build).\nstd::string pluginPath() {\n    if (const char *env = getenv(\"MINISHIELD_PLUGIN\"))\n        return env;\n    return \"build/libMiniShield.so\";\n}\n\n// The argument battery: fixed, nothing excluded — INT_MIN and INT_MAX,\n// zero, negatives, and the small values a branch condition flips on.\nconst int kBattery[] = {\n    -2147483648, -1000, -42, -8, -1, 0, 1, 2, 7, 8, 42, 127, 128, 1000,\n    4096, 2147483647};\nconst int kBatteryN = sizeof(kBattery) / sizeof(kBattery[0]);\n\nconst char *kWorkdir = \"/tmp/minishield-fuzz\";\n\n// The wrapper main: a separate translation unit so the module under test\n// never needs to provide one.\nconst char *kWrapper = R\"WRAP(\n#include <stdio.h>\n#include <stdlib.h>\nextern int f(int);\nint main(int argc, char **argv) {\n    if (argc != 2)\n        return 98;\n    int x = atoi(argv[1]);\n    printf(\"%d\\n\", f(x));\n    return 0;\n}\n)WRAP\";\n\nvoid writeFile(const std::string &path, const std::string &content) {\n    FILE *fp = fopen(path.c_str(), \"w\");\n    if (!fp)\n        return;\n    fputs(content.c_str(), fp);\n    fclose(fp);\n}\n\nstd::string moduleText(const Module &M) {\n    std::string out;\n    raw_string_ostream OS(out);\n    M.print(OS, nullptr);\n    return out;\n}\n\n// Run a command, capturing stdout; pclose returns the wait status.\nstruct RunResult {\n    int status;\n    std::string output;\n};\nRunResult runCapture(const std::string &cmd) {\n    RunResult r;\n    FILE *p = popen(cmd.c_str(), \"r\");\n    if (!p) {\n        r.status = -1;\n        return r;\n    }\n    char buf[8192];\n    size_t n;\n    while ((n = fread(buf, 1, sizeof(buf), p)) > 0)\n        r.output.append(buf, n);\n    r.status = pclose(p);\n    return r;\n}\n\n// A trap: killed by a signal, or a nonzero exit (the wrapper returns 0\n// on every healthy call).\nbool trapped(const RunResult &r) {\n    return r.status == -1 || WIFSIGNALED(r.status) ||\n           (WIFEXITED(r.status) && WEXITSTATUS(r.status) != 0);\n}\n\n// Redirect fd 2 to /dev/null (and back) around the plugin's run, so a\n// fuzzing session stays readable.\nvoid silenceStderr(bool on) {\n    static int saved = -1;\n    if (on) {\n        if (saved == -1)\n            saved = dup(2);\n        int fd = open(\"/dev/null\", O_WRONLY);\n        dup2(fd, 2);\n        close(fd);\n    } else if (saved != -1) {\n        dup2(saved, 2);\n        close(saved);\n        saved = -1;\n    }\n}\n\n// ---- plugin + PassBuilder, initialized once ----------------------------\n// gPB is deliberately leaked: the plugin's pass-plugin is linked against the\n// system libstdc++ while this harness uses the conda one, so destroying the\n// PassBuilder's cross-world std::function callbacks at exit is not safe.\n// The fuzzer process is short-lived, so a one-off leak is harmless.\nPassBuilder *gPB;\nbool gInit = false;\nvoid initOnce() {\n    if (gInit)\n        return;\n    gInit = true;\n    system(\"mkdir -p /tmp/minishield-fuzz\");\n    std::string path = pluginPath();\n    Expected<PassPlugin> plugin = PassPlugin::Load(path);\n    if (!plugin) {\n        fprintf(stderr, \"[fuzz] cannot load plugin '%s': %s\\n\", path.c_str(),\n                toString(plugin.takeError()).c_str());\n        exit(2);\n    }\n    gPB = new PassBuilder(); // leaked on purpose (see above)\n    plugin->registerPassBuilderCallbacks(*gPB);\n}\n\n// Parse and verify; null on any failure. The context must outlive the\n// module (the module's destructor reaches back into it).\nstd::unique_ptr<Module> parseModule(const std::string &irText,\n                                    LLVMContext &Ctx) {\n    MemoryBufferRef MBR(irText, \"<fuzz-input>\");\n    SMDiagnostic Err;\n    std::unique_ptr<Module> M = parseIR(MBR, Err, Ctx);\n    if (!M)\n        return nullptr;\n    std::string V;\n    raw_string_ostream OS(V);\n    if (verifyModule(*M, &OS))\n        return nullptr;\n    return M;\n}\n\n// Parse, verify, and apply the input contract. Returns null for any\n// input that is not a self-contained pure i32 @f(i32).\nstd::unique_ptr<Module> parseGate(const std::string &irText,\n                                  LLVMContext &Ctx) {\n    std::unique_ptr<Module> M = parseModule(irText, Ctx);\n    if (!M)\n        return nullptr;\n    // (Module::getFunction is not used: name-map lookups are unreliable for\n    // parser-built modules in this LLVM; iteration is version-proof.)\n    Function *F = nullptr;\n    for (const Function &Fn : *M) {\n        if (Fn.getName() == \"f\")\n            F = const_cast<Function *>(&Fn);\n        if (Fn.getName() == \"main\" && !Fn.isDeclaration())\n            return nullptr; // the wrapper provides main\n    }\n    if (!F || F->isDeclaration())\n        return nullptr;\n    if (!F->getReturnType()->isIntegerTy(32) || F->arg_size() != 1 ||\n        !F->arg_begin()->getType()->isIntegerTy(32))\n        return nullptr;\n    for (const Function &Fn : *M)\n        if (Fn.isDeclaration() && !Fn.isIntrinsic())\n            return nullptr;\n    return M;\n}\n\n// Run function(minishield-flatten) on the module. Returns false (with a\n// message in errOut) if the pipeline fails or the result does not verify.\nbool runPipeline(Module &M, bool live, std::string &errOut) {\n    // The standard PassBuilder setup: register the known analyses and\n    // cross-register the proxies before running any pipeline.\n    LoopAnalysisManager LAM;\n    FunctionAnalysisManager FAM;\n    CGSCCAnalysisManager CGAM;\n    ModuleAnalysisManager MAM;\n    gPB->registerModuleAnalyses(MAM);\n    gPB->registerFunctionAnalyses(FAM);\n    gPB->registerLoopAnalyses(LAM);\n    gPB->registerCGSCCAnalyses(CGAM);\n    gPB->crossRegisterProxies(LAM, FAM, CGAM, MAM);\n    ModulePassManager MPM;\n    Error E = gPB->parsePassPipeline(MPM, \"function(minishield-flatten)\");\n    if (E) {\n        errOut = toString(std::move(E));\n        return false;\n    }\n    if (!live)\n        silenceStderr(true);\n    MPM.run(M, MAM);\n    if (!live)\n        silenceStderr(false);\n    std::string V;\n    raw_string_ostream OS(V);\n    if (verifyModule(M, &OS)) {\n        errOut = \"verify failed after the pass:\\n\" + V;\n        return false;\n    }\n    return true;\n}\n\nenum class DiffResult { kOk, kSkip, kRegression };\n\nstruct Diff {\n    std::vector<RunResult> before, after;\n    size_t firstBad;\n};\n\n// Compile both modules and run the battery.\nDiffResult differential(const std::string &beforeText,\n                        const std::string &afterText, Diff &diff) {\n    writeFile(std::string(kWorkdir) + \"/before.ll\", beforeText);\n    writeFile(std::string(kWorkdir) + \"/after.ll\", afterText);\n    writeFile(std::string(kWorkdir) + \"/wrapper.c\", kWrapper);\n\n    auto compile = [](const std::string &ll, const std::string &bin) {\n        std::string cmd = \"clang-23 -o \" + bin + \" \" + ll + \" \" +\n                          std::string(kWorkdir) + \"/wrapper.c 2>/dev/null\";\n        return system(cmd.c_str()) == 0;\n    };\n    if (!compile(std::string(kWorkdir) + \"/before.ll\",\n                 std::string(kWorkdir) + \"/before_bin\"))\n        return DiffResult::kSkip; // the original does not even build\n    if (!compile(std::string(kWorkdir) + \"/after.ll\",\n                 std::string(kWorkdir) + \"/after_bin\")) {\n        diff.firstBad = 0;\n        return DiffResult::kRegression; // the flattening broke compilation\n    }\n\n    for (int i = 0; i < kBatteryN; ++i) {\n        char arg[24];\n        snprintf(arg, sizeof(arg), \"%d\", kBattery[i]);\n        diff.before.push_back(\n            runCapture(std::string(kWorkdir) + \"/before_bin \" + arg));\n        diff.after.push_back(\n            runCapture(std::string(kWorkdir) + \"/after_bin \" + arg));\n        if (trapped(diff.before.back()))\n            return DiffResult::kSkip; // undefined behavior before the pass\n        if (trapped(diff.after.back()) ||\n            diff.before.back().output != diff.after.back().output) {\n            diff.firstBad = i;\n            return DiffResult::kRegression;\n        }\n    }\n    return DiffResult::kOk;\n}\n\n// The first whole line of text containing needle (\"\" when absent).\nstd::string findLine(const std::string &text, const char *needle) {\n    size_t pos = 0;\n    while ((pos = text.find(needle, pos)) != std::string::npos) {\n        size_t start = (pos == 0) ? 0 : text.rfind('\\n', pos - 1) + 1;\n        size_t end = text.find('\\n', pos);\n        std::string line = text.substr(start, end - start);\n        size_t a = line.find_first_not_of(\" \\t\");\n        if (a != std::string::npos)\n            return line.substr(a);\n        pos = end + 1;\n    }\n    return \"\";\n}\n\nvoid report(const std::string &irText, const std::string &afterText,\n            const Diff &d, const std::string &pipelineErr) {\n    fprintf(stderr,\n            \"\\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed \"\n            \"the behavior of @f\\n\");\n    fprintf(stderr, \"[fuzz] input module (%zu bytes):\\n%s\\n\", irText.size(),\n            irText.c_str());\n    if (!pipelineErr.empty()) {\n        fprintf(stderr, \"[fuzz] %s\\n\", pipelineErr.c_str());\n        return;\n    }\n    // Re-run the pass with stderr live so its diagnostics are visible.\n    LLVMContext Ctx;\n    std::unique_ptr<Module> M = parseGate(irText, Ctx);\n    if (M) {\n        std::string liveErr;\n        fprintf(stderr, \"[fuzz] pass diagnostics (re-run live):\\n\");\n        runPipeline(*M, /*live=*/true, liveErr);\n    }\n    for (size_t i = 0; i <= d.firstBad && i < d.before.size(); ++i) {\n        char arg[24];\n        snprintf(arg, sizeof(arg), \"%d\", kBattery[(int)i]);\n        if (i == d.firstBad) {\n            if (trapped(d.after[i]))\n                fprintf(stderr,\n                        \"[fuzz] battery arg %s: original healthy, flattened \"\n                        \"traps (signal %d)\\n\",\n                        arg, WTERMSIG(d.after[i].status));\n            else {\n                std::string b = d.before[i].output, a = d.after[i].output;\n                while (!b.empty() && b.back() == '\\n')\n                    b.pop_back();\n                while (!a.empty() && a.back() == '\\n')\n                    a.pop_back();\n                fprintf(stderr,\n                        \"[fuzz] battery arg %s: original=%s flattened=%s\\n\",\n                        arg, b.c_str(), a.c_str());\n            }\n            break;\n        }\n    }\n    std::string store = findLine(afterText, \"ptr %ms.state\");\n    if (!store.empty())\n        fprintf(stderr, \"[fuzz] flattened module carries: %s\\n\",\n                store.c_str());\n}\n\n} // namespace\n\nextern \"C\" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n    initOnce();\n    std::string irText(reinterpret_cast<const char *>(data), size);\n\n    // One context for the whole run; it must outlive every module.\n    LLVMContext Ctx;\n\n    // 1. + 2. parse, verify, shape gate.\n    std::unique_ptr<Module> M = parseGate(irText, Ctx);\n    if (!M)\n        return 0;\n\n    // 3. + 4. the pass on a clone (re-parsed from the canonical text,\n    // since this LLVM has no Module::clone).\n    std::string beforeText = moduleText(*M);\n    std::unique_ptr<Module> M2 = parseModule(beforeText, Ctx);\n    if (!M2)\n        return 0;\n    std::string pipelineErr;\n    if (!runPipeline(*M2, /*live=*/false, pipelineErr)) {\n        report(irText, \"\", Diff{}, pipelineErr);\n        return 1;\n    }\n\n    // 5. the behavioral differential.\n    std::string afterText = moduleText(*M2);\n    Diff diff;\n    DiffResult r = differential(beforeText, afterText, diff);\n    if (r == DiffResult::kSkip)\n        return 0;\n    if (r == DiffResult::kRegression) {\n        report(irText, afterText, diff, \"\");\n        return 1;\n    }\n    return 0;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Build and run"
+        },
+        {
+          "type": "paragraph",
+          "text": "From the repository root - where `build/libMiniShield.so` lives - the harness builds against the same LLVM that loads the plugin. The `-fsanitize=fuzzer` flag links libFuzzer's runtime; in this toolchain that bundles ASan/UBSan as well, so a bug in the harness itself does not pass quietly."
+        },
+        {
+          "type": "paragraph",
+          "text": "libFuzzer instruments the harness's own instructions: `cov` counts the branch edges reached so far (and `ft` the function units), and a `NEW` line means some input reached an edge no earlier input did. Most mutations die in the parser, so the edges those `NEW` lines report live in the parser and the gate, not in the pass - which is why the pass is judged on behavior by the differential, not on coverage: `cov` climbing from 185 to 195 in the log below is the gate working, not the pass being exercised."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang++-23 -fsanitize=fuzzer -std=gnu++20 -O2 -D_GLIBCXX_USE_CXX11_ABI=1 -fPIC \\\n    -I$CONDA_PREFIX/include minishield-fuzz.cpp -o minishield-fuzz \\\n    -L$CONDA_PREFIX/lib -lLLVM-23 -Wl,-rpath,$CONDA_PREFIX/lib\n$ ./minishield-fuzz seeds -runs=600\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO:        7 files found in seeds\nINFO: seed corpus: files: 7 min: 128b max: 354b total: 1722b rss: 60Mb\n#8\tpulse  cov: 185 ft: 187 corp: 3/498b exec/s: 4 rss: 63Mb\n#8\tINITED cov: 185 ft: 187 corp: 3/498b exec/s: 4 rss: 63Mb\n#9\tNEW    cov: 189 ft: 201 corp: 4/663b lim: 191 exec/s: 4 rss: 63Mb L: 165/191 MS: 1 EraseBytes-\n...\n#156\tNEW    cov: 192 ft: 205 corp: 6/842b lim: 191 exec/s: 78 rss: 63Mb L: 13/191 MS: 5 ShuffleBytes-CrossOver-ChangeASCIIInt-EraseBytes-CrossOver-\n#192\tNEW    cov: 195 ft: 208 corp: 7/1033b lim: 191 exec/s: 96 rss: 63Mb L: 191/191 MS: 1 ChangeASCIIInt-\n...\n#600\tDONE   cov: 195 ft: 208 corp: 7/913b lim: 191 exec/s: 150 rss: 63Mb\nDone 600 runs in 4 second(s)\n"
+        },
+        {
+          "type": "paragraph",
+          "text": "No report, clean exit. The progress lines tell the story of the gate: a handful of mutated inputs reach new code - coverage climbs from 185 to 195 - and all of that new code is in the parser and the gate, the error branches the mutations trip. A mutated module that survives parse, verify, and the contract is rare under pure random mutation, so the pass itself is exercised mostly on the seeds; the differential is what stands ready - the moment a valid mutated input appears, the pass is judged on behavior, not shape. The session also left the corpus directory grown: libFuzzer keeps every interesting input it finds in `seeds/` beside the seven seeds, so a later run starts from a wider region."
+        },
+        {
+          "type": "heading",
+          "text": "The seeds"
+        },
+        {
+          "type": "paragraph",
+          "text": "The seven seeds span the shapes the flattening pass can see: `seed01`, an UncondBr entry - the only shape the state machine's entry rewiring actually rewires; `seed02`, a CondBr entry with no phis - with the entry-CondBr case in the builder the scaffolding is live for a CondBr entry (every terminator stores its destination state and jumps to the dispatcher); the recorded session was cut from a pre-entry-CondBr build, where the builder instead built scaffolding nothing reaches; `seed03`, a phi loop with an UncondBr entry - the full pipeline, phi demotion and entry rewiring; `seed04`, a switch in the body; `seed05`, a single-block function where the builder does nothing at all; `seed06`, an intrinsic call - the harness's gate allows the declare, the plugin's eligibility guard rejects the call; and `seed07`, a phi join with a CondBr entry - phi demotion without entry rewiring."
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "# ---- seeds/seed01_uncondbr.ll ----\nsource_filename = \"seed01_uncondbr.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:\n  ret i32 1\n\ne:\n  ret i32 2\n}\n\n# ---- seeds/seed02_branchy.ll ----\nsource_filename = \"seed02_branchy.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 10\n  br i1 %c, label %t, label %e\n\nt:\n  %a = mul i32 %x, 3\n  %b = add i32 %a, 1\n  ret i32 %b\n\ne:\n  %c2 = icmp sgt i32 %x, 0\n  br i1 %c2, label %p, label %n\n\np:\n  ret i32 100\n\nn:\n  ret i32 -100\n}\n\n# ---- seeds/seed03_loop.ll ----\nsource_filename = \"seed03_loop.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %i = phi i32 [ 0, %entry ], [ %nx, %b ]\n  %c = icmp slt i32 %i, %x\n  br i1 %c, label %b, label %e\n\nb:\n  %nx = add i32 %i, 1\n  br label %h\n\ne:\n  ret i32 %i\n}\n\n# ---- seeds/seed04_switch.ll ----\nsource_filename = \"seed04_switch.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %body, label %zero\n\nzero:\n  ret i32 0\n\nbody:\n  switch i32 %x, label %def [\n    i32 1, label %one\n    i32 2, label %two\n    i32 3, label %three\n  ]\n\none:\n  ret i32 10\n\ntwo:\n  ret i32 20\n\nthree:\n  ret i32 30\n\ndef:\n  ret i32 40\n}\n\n# ---- seeds/seed05_straight.ll ----\nsource_filename = \"seed05_straight.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %a = mul i32 %x, %x\n  %b = add i32 %a, 1\n  ret i32 %b\n}\n\n# ---- seeds/seed06_intrinsic.ll ----\nsource_filename = \"seed06_intrinsic.c\"\n\ndeclare i32 @llvm.abs.i32(i32, i1)\n\ndefine i32 @f(i32 %x) {\nentry:\n  %a = call i32 @llvm.abs.i32(i32 %x, i1 false)\n  %b = add i32 %a, 5\n  ret i32 %b\n}\n\n# ---- seeds/seed07_phi_join.ll ----\nsource_filename = \"seed07_phi_join.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:\n  %a = mul i32 %x, 2\n  br label %j\n\ne:\n  %b = add i32 %x, 10\n  br label %j\n\nj:\n  %v = phi i32 [ %a, %t ], [ %b, %e ]\n  %c2 = icmp sgt i32 %v, 50\n  br i1 %c2, label %big, label %small\n\nbig:\n  ret i32 1\n\nsmall:\n  ret i32 0\n}\n"
+        },
+        {
+          "type": "heading",
+          "text": "The negative control"
+        },
+        {
+          "type": "paragraph",
+          "text": "A fuzzer that finds nothing has proved nothing: its silence could be 'there is no bug' or it could be 'the harness cannot see bugs of this kind'. The way to tell the difference is to plant a known bug - a mutant. Copy the plugin's six sources to a scratch directory and change one line in `StateMachineBuilder.cpp`: the initial state the entry block stores is the id of the entry's successor; the mutant stores the next id instead."
+        },
+        {
+          "type": "paragraph",
+          "text": "The recorded diff assumes builder state entry-UncondBr: yes · entry-CondBr: no · non-entry terminators: no - the recorded/book state, and the build the recorded session was cut from. Check yours: `grep -c 'case llvm::Instruction::CondBr' lib/StateMachineBuilder.cpp` (0 = the recorded/book state; 1 = a tree that has the entry-CondBr case - the one-line mutant still exists, but line 54 may have moved). Artifact-side check: `grep -c 'br label %ms.dispatch' <flattened seed>` (1 for the UncondBr-entry seeds, whose entry jumps to the dispatcher; 0 for a CondBr-entry seed in this builder state)."
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ mkdir -p mutant/src && cp lib/*.cpp mutant/src/\n$ diff lib/StateMachineBuilder.cpp mutant/src/StateMachineBuilder.cpp\n54c54\n<                 auto *initialState = entryBuilder.getInt32(successorId);\n---\n>                 auto *initialState = entryBuilder.getInt32(successorId + 1)\n\n$ clang++-23 -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -D_GLIBCXX_USE_CXX11_ABI=1 \\\n    -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS \\\n    -D__STDC_LIMIT_MACROS -Iinclude -I$CONDA_PREFIX/include \\\n    mutant/src/*.cpp -o mutant/libMiniShieldMutant.so \\\n    -L$CONDA_PREFIX/lib -lLLVM-23 -Wl,-rpath,$CONDA_PREFIX/lib"
+        },
+        {
+          "type": "paragraph",
+          "text": "The mutant is built with the learner's own build flags (the ones from `build/compile_commands.json`), the same include tree, one line apart. Now point the harness at the mutant - the `MINISHIELD_PLUGIN` override exists for exactly this - and run the same seeds:"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ MINISHIELD_PLUGIN=mutant/libMiniShieldMutant.so ./minishield-fuzz seeds -runs=7\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO:        7 files found in seeds\nINFO: seed corpus: files: 7 min: 128b max: 354b total: 1722b rss: 60Mb\n\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed the behavior of @f\n[fuzz] input module (179 bytes):\nsource_filename = \"seed01_uncondbr.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:\n  ret i32 1\n\ne:\n  ret i32 2\n}\n\n[fuzz] pass diagnostics (re-run live):\n[MiniShield] eligible: f\nNumber of Phis: 0\n[fuzz] battery arg -2147483648: original=2 flattened=1\n[fuzz] flattened module carries: store i32 1, ptr %ms.state, align 4\n\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed the behavior of @f\n[fuzz] input module (243 bytes):\nsource_filename = \"seed03_loop.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %i = phi i32 [ 0, %entry ], [ %nx, %b ]\n  %c = icmp slt i32 %i, %x\n  br i1 %c, label %b, label %e\n\nb:\n  %nx = add i32 %i, 1\n  br label %h\n\ne:\n  ret i32 %i\n}\n\n[fuzz] pass diagnostics (re-run live):\n[MiniShield] eligible: f\nNumber of Phis: 1\n[fuzz] battery arg -2147483648: original=0 flattened=-1721230799\n[fuzz] flattened module carries: store i32 1, ptr %ms.state, align 4\n#8\tINITED cov: 185 ft: 187 corp: 3/607b exec/s: 0 rss: 63Mb\n#8\tDONE   cov: 185 ft: 187 corp: 3/607b lim: 288 exec/s: 0 rss: 63Mb\nDone 8 runs in 0 second(s)\n"
+        },
+        {
+          "type": "paragraph",
+          "text": "Both mutant-killers fire, on the first battery argument. For `seed01` the mutant's wrong initial state sends the dispatch straight to `%t`, so `f` returns 1 for every input - the differential catches `original=2` (at `x = INT_MIN`) against `flattened=1`. For `seed03` the wrong state lands the dispatch in the loop body before the demoted phi's stack slot is ever written, so the flattened binary reads an uninitialized slot: `flattened=-1721230799`. The exact number changes from run to run; that variance is what an uninitialized read looks like. (libFuzzer also runs one empty unit first, hence the 8 runs.)"
+        },
+        {
+          "type": "heading",
+          "text": "Reading the regression in the IR"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"seed01_uncondbr.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %ms.state = alloca i32, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nh:                                                ; preds = %ms.dispatch\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:                                                ; preds = %ms.dispatch, %h\n  ret i32 1\n\ne:                                                ; preds = %ms.dispatch, %h\n  ret i32 2\n\nms.dispatch:                                      ; preds = %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %h\n    i32 1, label %t\n    i32 2, label %e\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}\n"
+        },
+        {
+          "type": "paragraph",
+          "text": "The report's last line points at the evidence. The flattened `seed01` stores the initial state in the entry block and switches on it in the dispatcher: state `0` is `%h`, `1` is `%t`, `2` is `%e` - the ids the builder assigned in block order. The mutant's flattening differs by exactly one token: the entry block stores `1` instead of `0` (in the mutant's flattened module the same line reads `store i32 1, ptr %ms.state, align 4`), so the first dispatch lands on `%t` instead of `%h`. Same scaffolding, one wrong id, and every argument to `f` answers 1. That is the whole class of bug the differential is built for: the IR still parses, still verifies, the scaffolding is still shape-correct; only the behavior moved. A verify-only test never sees it."
+        },
+        {
+          "type": "paragraph",
+          "text": "With the negative control established, the clean session's verdict stands: the learner's `minishield-flatten`, as it stands, reports no behavioral regression over the region it was probed - the capstone's exit criterion for this volume. The fuzzer is a standing instrument, not a one-off test: every time the pass changes - the CondBr entry rewiring that comes next, the terminator work after that - the same harness, the same seeds, and one extra build line tell you whether behavior held."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: (a) The input contract rejects a module that defines `@main` or declares a non-intrinsic function. Why must each of those two clauses hold for the differential to mean anything? (b) The harness skips an input when the original binary traps on a battery argument, but reports one when the flattened binary traps or disagrees. What does a trap in the original tell you about the input, and why is skipping - not reporting - the right call? (c) What does the negative control establish that the 600-run clean session cannot, on its own?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) The harness links its own wrapper `main` (reads one argument, prints `f(x)`); a module that defines its own `main` collides with it, and the comparison is no longer between 'the pass ran' and 'it did not'. A non-intrinsic declare is a call to a function whose body the harness does not have: the binary would not link, or its output would depend on code the pass never touched, and a divergence could no longer be attributed to the flattening. The contract keeps the comparison closed: two binaries that differ only in whether `minishield-flatten` ran between parse and compile.",
+                "(b) A trap in the original - the unmodified input, compiled as-is - is undefined behavior the input carried before the pass ever ran: an out-of-range shift, a division by zero, an integer overflow on a battery edge value. The pass is not responsible for UB it did not introduce, and reporting it would be a false positive; the fuzzer's job is to find behavior the pass changes, not to police the inputs. So the harness discards that input (returns 0) and moves on. A trap - or a disagreement where the original was healthy - is attributed to the pass and reported.",
+                "(c) The clean session only shows that nothing was found in the explored region - but 'found nothing' is compatible with 'the harness cannot see bugs of this kind'. The negative control plants a known behavioral bug (the one-line off-by-one in the initial state) and shows the harness catches it on the first battery argument, with the exact diff and the exact IR line. Only then does the clean session's silence become evidence: the pass preserved behavior over the explored region, rather than the test being too weak to notice otherwise."
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 4303
+    },
+    {
+      "id": 89,
+      "number": 1,
+      "day": 3,
+      "group": "glossary",
+      "title": "Look up a term",
+      "originalTitle": "Glossary. Terms used in Volume 3",
+      "summary": "The working glossary for Volume 3: every term used in the hardening lessons, defined in one to three sentences with a pointer to the lesson where it appears; terms defined in Volumes 1-2 are cross-referenced, not repeated.",
+      "takeaway": "If a term is new, the glossary is the fastest detour.",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Alphabetical, one-to-three-sentence definitions of the terms that appear in this volume, for readers who met them before they were explained. \"See ...\" points to the lesson where the term is used, named by its title; the lesson's deep dives go further than the entry here. Terms that Volumes 1 and 2 already define - undefined behavior, the differential test, PHI, SSA, PassBuilder, verify, and the rest - are not repeated; the Volume 1 glossary and the Volume 2 term reference hold those entries."
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Term",
+              "Definition"
+            ],
+            [
+              "ASLR (address-space layout randomization).",
+              "The kernel's per-run randomization of the stack, heap, and library bases - and, for position-independent executables, of the program image itself. ASLR randomizes the base, not the layout: the offset between `global` and `main` in the position-independence demo is invariant across runs. A fixed-address `EXEC` executable defeats it for the image - the same addresses on every run. (See \"Position independence\".)"
+            ],
+            [
+              "Battery.",
+              "The fixed set of arguments the fuzzing harness runs both binaries on: 16 values from `INT_MIN` to `INT_MAX`, including zero and the small values branch conditions flip on. The differential compares the two outputs at every battery argument, and the first divergent argument is what a regression report names. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "Behavioral regression.",
+              "A divergence between the original and the pass's output on a defined input: a different value on some battery argument, or a trap where the original was healthy. The negative control's off-by-one mutant produces exactly two, on `seed01` (returns 1 for every input) and `seed03` (reads an uninitialized stack slot). (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "`BIND_NOW`.",
+              "The dynamic-section flag of full RELRO: the loader resolves every jump slot eagerly at load - no lazy binding - and the whole `PT_GNU_RELRO` range, both GOT tables, is read-only after load. The default PIE build lacks the flag and leaves `.got.plt` writable. (See \"Position independence\".)"
+            ],
+            [
+              "Bogus control flow (BCF).",
+              "An OLLVM-style transform that inserts a gate block at every conditional branch: an opaque predicate chooses between the original target (true side) and a new dead block (false side). The gate is what a static reader must model, and the lesson's three dissolutions - constant seed, runtime seed, runtime seed plus an opaque call - show what the final optimizer does to it. (See \"Bogus control flow\".)"
+            ],
+            [
+              "CFI (control-flow integrity).",
+              "The family of runtime checks that every control-flow transfer lands on a legitimate target: a corrupted function pointer cannot dispatch to a wrong-type function, and a corrupted vtable pointer cannot dispatch to a wrong class. This volume teaches its two concrete members - the indirect-call check and the vtable check - by reading what clang 23.1.5 generates, rather than by writing a from-scratch CFI pass. (See \"The code-hardening landscape\".) Backward CFI is the mirror-image check - at the target, verifying that the caller is permitted to reach it - the CET/shadow-stack family that Volume 1 §1.5.5 already names. This volume teaches only forward checks: the guard sits at the call site, testing the pointer before the call, and every CFI entry in this glossary is a forward check."
+            ],
+            [
+              "CFI-ICALL (the indirect-call check).",
+              "A guard before every indirect call: verify that the target has the expected function type before dispatching. In LLVM 23.1.5 the guard is `llvm.type.test` paired with `llvm.ubsantrap`, not the legacy `llvm.cfi_icheck` intrinsic older material describes. An LTO feature - the flag refuses to work without `-flto` - and LTO removes every guard whose target it can resolve. (See \"The indirect call check\".)"
+            ],
+            [
+              "CFI-VCALL (the vtable check).",
+              "A guard before every virtual call: the vtable pointer loaded from the object's first word must point into the type-info hierarchy of the call site's static base class. Like CFI-ICALL it is an LTO feature, and it additionally requires `-fvisibility=hidden`, which pins the type-info symbols to the local copies. The check is on which class an object claims to be, not on what that class's vtable points to. (See \"The vtable check\".)"
+            ],
+            [
+              "CFI thunk.",
+              "The one-instruction jump stub LTO creates when it rebuilds a function with its CFI type descriptor attached: the old address keeps working as a trampoline to the rebuilt body (`op_right` to `op_right.cfi` in the indirect-call lesson). The thunk keeps every existing call site live after the move. (See \"The indirect call check\".)"
+            ],
+            [
+              "Corpus.",
+              "The set of interesting inputs a fuzzer accumulates: the seeds plus every mutated input that reaches new code, kept on disk in the corpus directory, which is a positional argument to the fuzzer. A later run starts from the wider corpus - the lesson's 600-run session grew the seed directory from 7 to 12 files, all gate and parser error-branch explorations. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "Dead code elimination (DCE).",
+              "The optimizer's removal of instructions and blocks that cannot affect observable behavior. In the OLLVM part it is the mechanism BCF's dead blocks dissolve by: their stores become dead, the blocks empty, and the empty fallthroughs merge - the predicate is never proven, the structure is simply emptied. Opaque side effects are the content DCE may not delete. (See \"Bogus control flow\".)"
+            ],
+            [
+              "Entropic power schedule.",
+              "The schedule libFuzzer announces at startup - \"Running with entropic power schedule (0xFF, 100).\" - that paces a session's mutation effort; the two numbers are its parameters, and a `-runs=N` session ends when the run count is reached. The progress lines the log prints (`NEW`, `REDUCE`, `pulse`) are the schedule at work. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "EXEC.",
+              "The ELF `Type` of a fixed-address executable - what `-no-pie` produces: the loader maps the image at the addresses recorded in the file, on every run, so every self-address is stable in advance and ASLR does not apply to the image. The position-independence demo's `-no-pie` build prints identical addresses across three runs. (See \"Position independence\".)"
+            ],
+            [
+              "Fuzzer / libFuzzer.",
+              "A coverage-guided mutation fuzzer: starts from a seed corpus, mutates inputs, runs the target, and keeps the inputs that reach new code. LLVM's libFuzzer runs the target in-process - the target is a single `LLVMFuzzerTestOneInput` function, and `-fsanitize=fuzzer` links the runtime, which in this toolchain bundles ASan and UBSan as well. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "GOT (global offset table).",
+              "The table of slots the loader fills with the final addresses of imported functions; calls to imports go through it. PIE leaves the GOT writable after load - the standing target for the GOT-overwrite class of attack that RELRO answers. (See \"Position independence\".)"
+            ],
+            [
+              "Guard variable (TLS guard).",
+              "The canary value itself: one random number per process, held in thread-local storage and read on x86-64 Linux at `%fs:40`. The same value is planted in every protected frame, not one per frame, so an attacker who can read memory can read the canary and write it back around the overflow. (See \"The stack canary check\".)"
+            ],
+            [
+              "Hardening quality.",
+              "The standard the landscape lesson sets: judged on what the stated attacker can still do after the technique, at what cost to legitimate users. A structural observation - \"the block count doubled\", \"a canary is present\" - is not a quality claim by itself. Every chapter in the volume returns to it, and for obfuscation it lands hardest: the quality is what survives the final optimizer. (See \"The code-hardening landscape\".)"
+            ],
+            [
+              "Inlining.",
+              "The optimizer's replacement of a call with the callee's body, available when the callee is visible to the optimizer (`internal` linkage) and has a single caller. It is subroutine splitting's exact inverse: the lesson's `total.N` parts are inlined back, and the optimizer then works on the recovered loop (here, vectorizing it four-wide). (See \"Subroutine splitting\".)"
+            ],
+            [
+              "Input contract.",
+              "The harness's precondition that makes an IR module runnable in isolation: `@f` is defined and is `i32 @f(i32)`; there is no defined `@main` (the harness links its own wrapper `main`); and there are no non-intrinsic declares (a call whose body the harness does not have would not link, or would tie the output to code the pass never touched). A module that fails the contract gate counts as a clean run - not a bug, just outside the region. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "Jump slot / lazy binding.",
+              "A `.got.plt` slot the dynamic linker fills on first call - lazy binding - which is why the default PIE build leaves `.got.plt` writable. Full RELRO's `BIND_NOW` resolves every jump slot at load and makes the table read-only. (See \"Position independence\".)"
+            ],
+            [
+              "`llvm.type.test`.",
+              "The intrinsic both CFI checks use as their guard in LLVM 23.1.5: given a pointer and a metadata name, it tests whether the memory at that pointer carries a CFI type descriptor matching the name - `_ZTSFiiE` for the function type `int(int)` (CFI-ICALL), `_ZTS4Base` for the class `Base` (CFI-VCALL). It replaces the legacy `llvm.cfi_icheck` intrinsic older material describes; a failed test branches to `llvm.ubsantrap`. (See \"The indirect call check\", \"The vtable check\".)"
+            ],
+            [
+              "`llvm.ubsantrap`.",
+              "The intrinsic that traps the process: it lowers to an undefined instruction, and the process dies with SIGILL (exit 132, \"Illegal instruction (core dumped)\"). The failure path for both CFI checks - a hard abort, not a report; without a debugger the failure looks like a random illegal instruction, not a CFI violation. (See \"The indirect call check\".)"
+            ],
+            [
+              "Load base.",
+              "The address at which the loader maps a position-independent image; every self-address in the image is the load base plus an offset, and the `R_X86_64_RELATIVE` relocations are what write those values in. ASLR picks a new base each run; the in-image layout - offsets like the `0x2288` between `global` and `main` - is invariant. (See \"Position independence\".)"
+            ],
+            [
+              "LTO (link-time optimization).",
+              "A compile mode in which the linker receives bitcode instead of machine code and resolves what per-translation-unit compilation could not: devirtualized calls, inlined bodies, folded guards. CFI-ICALL and CFI-VCALL are LTO features - the flags refuse to work without `-flto` - and LTO removes every CFI guard whose target it can resolve, which is why the guard in the indirect-call lesson sits on a pointer LTO can never know. (See \"The indirect call check\".)"
+            ],
+            [
+              "Mutant.",
+              "A deliberately broken build used to prove a test can see a bug of a given kind: the lesson's mutant is a scratch copy of the plugin's six sources with a one-line off-by-one at `StateMachineBuilder.cpp:54` - the entry block stores `successorId + 1` instead of `successorId` - built with the learner's own build flags and pointed at by the `MINISHIELD_PLUGIN` override. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "Negative control.",
+              "A deliberately planted bug that a test must catch, run before the real verdict: without it, a clean run's silence is compatible with \"the harness cannot see bugs of this kind\". The lesson's negative control - the off-by-one mutant - fires on both mutant-killer seeds at the first battery argument, and only then does the 600-run clean session's silence become evidence. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "Off-by-one.",
+              "A state id, index, or bound shifted by one: the planted bug class of the fuzzing lesson. The mutant's off-by-one stores the wrong initial state, so the first dispatch lands on the wrong block (`%t` instead of `%h` for `seed01`) - the IR still parses, still verifies, and the scaffolding is shape-correct; only the behavior moved, which is the class a verify-only test never sees. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "OLLVM.",
+              "The 2015 project that collected obfuscation transforms for LLVM - bogus control flow, string encryption, subroutine splitting, and more. \"OLLVM-style\" in this volume means that family: each transform changes the program's structure without changing its behavior, on the assumption that a static reader spends time on the added structure; the final optimizer, which proves rather than reads, is the assumption's enemy. (See \"Bogus control flow\".)"
+            ],
+            [
+              "Opaque predicate.",
+              "A condition that is always true by a number-theoretic fact but that the optimizer does not prove in branch context: in the bogus-control-flow lesson the product of two consecutive integers - `s*(s-1)` - is even, so `s*(s-1) % 2 == 0` is always true, yet with a runtime seed the optimizer normalizes the predicate's shape without proving its truth. A BCF gate rests on one, and the gate's fate is the predicate's. (See \"Bogus control flow\".)"
+            ],
+            [
+              "Persistence.",
+              "The property an obfuscation must have: surviving the final optimization. The deployment rule the OLLVM part proves with the learner's own flattening pass: obfuscation must be the last transform in the pipeline that produces the shipped binary - \"last\" is a position, not a property, and an artifact re-optimized after obfuscation is not an obfuscated artifact. (See \"What the final optimizer keeps\".)"
+            ],
+            [
+              "PIE (position-independent executable).",
+              "A build whose ELF `Type` is `DYN`: the loader treats the program like a shared library, chooses a base at load, and the image's own addresses become load-base-relative values written by `R_X86_64_RELATIVE` relocations. The `-pie` flag; on this toolchain the default, which is why the position-independence lesson spells the flag out in every command. (See \"Position independence\".)"
+            ],
+            [
+              "RELRO (relocation read-only).",
+              "The `PT_GNU_RELRO` segment: the range the loader flips to read-only after relocation is done. Partial RELRO (the default) covers `.got` but leaves `.got.plt` writable for lazy binding; full RELRO (`-Wl,-z,relro,-z,now`) moves `.got.plt` inside the widened segment and adds `BIND_NOW`, after which a write to a jump slot faults. (See \"Position independence\".)"
+            ],
+            [
+              "R_X86_64_RELATIVE.",
+              "The relocation type only a PIE executable carries: the records read `*ABS*+offset`, and the loader resolves each as `load_base + offset`, filling the executable's own writable slots - `.fini_array` and `.init_array` entries and a `.data` slot in the lesson's fixture. The program's self-addresses become load-time values instead of constants baked into the file. (See \"Position independence\".)"
+            ],
+            [
+              "Seed.",
+              "One corpus input a fuzzer starts from: a hand-picked valid input that exercises a known shape. The lesson's seven seeds span the flattening pass's support shapes - from a single-block function where the builder does nothing, to a phi loop with an UncondBr entry that exercises the full pipeline - and they define the region the fuzzer explores. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "SIGILL.",
+              "The illegal-instruction signal: how `llvm.ubsantrap` kills the process - exit 132, \"Illegal instruction (core dumped)\". The CFI checks' trap, distinct from SIGABRT (exit 134), the canary's `__stack_chk_fail` abort. Without a debugger the two failures look alike in the shell, and both are hard, not reports. (See \"The indirect call check\", \"The stack canary check\".)"
+            ],
+            [
+              "`ssp` / `sspstrong`.",
+              "The attribute-bundle names of the stack-protector modes, and the only trace of a canary in the IR: `ssp` marks `-fstack-protector` (functions with char arrays larger than 8 bytes), `sspstrong` marks `-fstack-protector-strong` (adding arrays of any type, `alloca` calls, and taking the address of a local), and `sspreq` marks `-fstack-protector-all` (every function). The frontend only records which frames are eligible; the backend materializes the guard load, store, and compare from the attribute. (See \"The stack canary check\".)"
+            ],
+            [
+              "Stack canary (stack protector).",
+              "A random value planted in a frame between the vulnerable buffer and the saved return address and compared on function exit: an overflow that reaches the return address must cross the canary, and the mismatch aborts the process before the corrupted return executes. The check is on control data - what the frame holds - not on control-flow targets, and it leaves nothing in the IR. (See \"The stack canary check\".)"
+            ],
+            [
+              "`__stack_chk_fail`.",
+              "The abort entry the backend calls when the canary's exit-time compare fails: it prints \"stack smashing detected\" and aborts the process (SIGABRT, exit 134). The runtime face of the canary, in the same class as the CFI trap - a loud abort rather than continuing wrong. (See \"The stack canary check\".)"
+            ],
+            [
+              "Stack smashing.",
+              "A buffer overflow corrupting the frame past the buffer; the classic canary demo. Without the canary the overflow silently rewrites the saved return address - the program prints `HACKED` and exits 0; with the canary, the exit check finds the smashed guard and aborts with \"stack smashing detected\" (SIGABRT, exit 134). (See \"The stack canary check\".)"
+            ],
+            [
+              "String encryption (strenc).",
+              "An OLLVM-style transform that replaces each plaintext string constant with an encrypted blob (`@enc`) and a per-byte key (`@key`), and rewrites every use into a XOR decrypt loop that reconstructs the plaintext into a stack buffer at runtime. The property provided is \"no contiguous literal in the artifact at the shipped optimization level\" - and at -O2 the loop constant-folds back into immediate stores, so the transform must be the last step of the pipeline for the property to hold. (See \"String encryption\".)"
+            ],
+            [
+              "Subroutine splitting (subdiv).",
+              "An OLLVM-style transform that moves each non-entry block of a function into its own `internal` function; the original keeps its entry and becomes a state dispatcher - a `switch` over a state variable that calls the right part and loops. The most fragile of the three OLLVM transforms in this volume: it adds structure without content, and the inliner is its exact inverse. (See \"Subroutine splitting\".)"
+            ],
+            [
+              "Threat model.",
+              "The explicit statement of which attacker you are defending against and what success means for them - the landscape lesson's first term, and the denominator of every quality claim in the volume. Flattening answers the \"reads or patches the program's logic\" row of the threat table and leaves the rest open. (See \"The code-hardening landscape\".)"
+            ],
+            [
+              "Trap semantics.",
+              "The harness's rule for a signal or nonzero exit on a battery argument: if the original binary traps, the input is undefined behavior before the pass ever ran - a Volume 2 term, where \"one observed successful run is not evidence of correctness\" - and the harness skips the input; if the original was healthy and the flattened binary traps or disagrees, the divergence is the pass's, and the harness reports it and returns 1. (See \"Fuzzing the flattening pass\".)"
+            ],
+            [
+              "Type descriptor (type-info name).",
+              "The mangled `__class_type_info` name - `_ZTS` plus the mangled type - that the compiler attaches to every CFI-compiled function definition (the function type's name; `_ZTSFiiE` for `int(int)`) and to class vtables (the class name; `_ZTS4Base` for `Base`). It is what `llvm.type.test` matches against: a target without one, or with a different one, fails the check. (See \"The indirect call check\", \"The vtable check\".)"
+            ]
+          ]
+        }
+      ],
+      "words": 2978
+    }
+  ]
+}
