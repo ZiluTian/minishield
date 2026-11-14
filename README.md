@@ -38,6 +38,10 @@ code-hardening techniques (opaque predicates, function splitting, instruction
 substitution, forward CFI, name obfuscation) each become one more named pass
 plugged into the same skeleton. Volume 1 closes on this as a capstone lesson:
 [Zoom out: a framework for hardening](https://zilutian.github.io/minishield/#lesson-78).
+It lays out the seams and then works a complete second technique — opaque
+predicates — end to end: the registry branch, the header, the eligibility
+guard, the builder, the CMake line, a fixture, and the differential that proves
+behavior held. That full skeleton is the template for adding any further pass.
 
 ## Set up the environment
 
