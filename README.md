@@ -16,6 +16,18 @@ development; it does not yet rewrite the function control flow.
 LLVM's `verify` pass checks IR structure; it does not prove behavior is
 preserved.
 
+## Framework direction
+
+MiniShield is intended to grow into a plugin that hosts several independent
+code-hardening passes. The design separates shared infrastructure—such as pass
+registration and reusable CFG analysis—from each technique's own eligibility
+rules and transformation. The [Volume 1 framework capstone](https://zilutian.github.io/minishield/#lesson-78)
+works through how another technique, opaque predicates, could fit that design.
+
+That is the project's direction, not its current feature list: control-flow
+flattening is the only hardening pass being developed here. Other techniques
+covered in Volume 3 are study topics, not available plugin passes.
+
 ## Quick start
 
 Requires Conda/Miniforge on Linux x86-64. The [environment.yml](environment.yml)
