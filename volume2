@@ -4940,6 +4940,23 @@ stateSlot : ptr ── address of ──> [ i32 memory slot ]
 
 The dispatcher is a different thing: it is a `BasicBlock *`, not an address to an i32 slot. `CreateBr(dispatcher)` transfers control to that block; its load reads `stateSlot`, and its switch interprets the loaded integer as the next block's state ID.
 
+An alloca reserves space but does not initialize it. The dispatcher must not load the slot until some path has stored a valid ID. In this checkpoint, entry executes the select and store before its new branch reaches the dispatcher. The textual position of the dispatcher block later in the module does not make it run first; the branch destination and instruction order determine execution.
+
+Execution-order sketch (a slice of the function, not a standalone module):
+
+```llvm
+entry:
+  %ms.next = select i1 %condition, i32 0, i32 1
+  store i32 %ms.next, ptr %ms.state
+  br label %ms.dispatch
+
+ms.dispatch:
+  %ms.current = load i32, ptr %ms.state
+  switch i32 %ms.current, label %ms.invalid [ ... ]
+```
+
+If control reached `ms.dispatch` without first storing a state, the load would read uninitialized memory and provide no reliable state ID. It is not a random-number generator. The invariant for the full transformation is: every edge entering the dispatcher must be preceded on that path by a store of the intended successor's ID.
+
 Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:
 
 ```cpp
