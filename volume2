@@ -4910,6 +4910,16 @@ llvm::Value *nextState = entryBuilder.CreateSelect(
 
 `ids.lookup(...)` gives the C++ unsigned state number. `getInt32(...)` turns that number into a typed LLVM constant, which is a `Value *` operand for `CreateSelect`. The final string is the optional SSA result name; it appears as `%ms.next` in printed IR. `CreateSelect` returns a general `Value *` because IRBuilder methods commonly expose results through LLVM's Value interface.
 
+Keep storing and branching as two distinct operations:
+
+```cpp
+entryBuilder.CreateStore(nextState, stateSlot);
+entryBuilder.CreateBr(dispatcher);
+entryTerminator->eraseFromParent();
+```
+
+`CreateStore(value, address)` writes the selected i32 into the alloca named `stateSlot`; its return value is a `StoreInst *`, which can be ignored here. `CreateBr(destination)` creates the terminator whose destination is the `BasicBlock *` named `dispatcher`. Do not use `dispatcher` as the store address or assign the store instruction to that block variable. Erase the old conditional branch only after both replacement instructions have been inserted.
+
 Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:
 
 ```cpp
