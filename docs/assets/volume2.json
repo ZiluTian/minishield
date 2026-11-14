@@ -8355,6 +8355,28 @@
         },
         {
           "type": "paragraph",
+          "text": "The relevant API has this shape:"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "Value *CreateSelect(Value *Condition,\n                    Value *TrueValue,\n                    Value *FalseValue,\n                    const Twine &Name = \"\");"
+        },
+        {
+          "type": "paragraph",
+          "text": "The condition is the first argument; the value chosen for true is second, and the value chosen for false is third. Both alternatives must have the same LLVM type. Here, the condition is i1 and both state constants are i32, so the result is an i32 `Value *` that can be stored into `stateSlot`."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "llvm::Value *nextState = entryBuilder.CreateSelect(\n    branch->getCondition(),\n    entryBuilder.getInt32(ids.lookup(trueDestination)),\n    entryBuilder.getInt32(ids.lookup(falseDestination)),\n    \"ms.next\");"
+        },
+        {
+          "type": "paragraph",
+          "text": "`ids.lookup(...)` gives the C++ unsigned state number. `getInt32(...)` turns that number into a typed LLVM constant, which is a `Value *` operand for `CreateSelect`. The final string is the optional SSA result name; it appears as `%ms.next` in printed IR. `CreateSelect` returns a general `Value *` because IRBuilder methods commonly expose results through LLVM's Value interface."
+        },
+        {
+          "type": "paragraph",
           "text": "Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:"
         },
         {
@@ -8627,7 +8649,7 @@
           "irComparison": true
         }
       ],
-      "words": 2699,
+      "words": 2835,
       "quiz": {
         "q": "What does CreateSelect return here?",
         "choices": [

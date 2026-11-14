@@ -4889,6 +4889,27 @@ For phi.ll, true must select left’s state and false right’s state. Inspect a
 
 The C++ pass runs while `opt` is transforming the module. `entryBuilder.CreateSelect(...)` inserts a new instruction into that module; it does not evaluate `%condition` in the C++ process. Later, when the transformed function runs, the `select` chooses an i32 state number. The dispatcher then reads that number and routes to the matching block. The two possible paths remain mutually exclusive.
 
+The relevant API has this shape:
+
+```cpp
+Value *CreateSelect(Value *Condition,
+                    Value *TrueValue,
+                    Value *FalseValue,
+                    const Twine &Name = "");
+```
+
+The condition is the first argument; the value chosen for true is second, and the value chosen for false is third. Both alternatives must have the same LLVM type. Here, the condition is i1 and both state constants are i32, so the result is an i32 `Value *` that can be stored into `stateSlot`.
+
+```cpp
+llvm::Value *nextState = entryBuilder.CreateSelect(
+    branch->getCondition(),
+    entryBuilder.getInt32(ids.lookup(trueDestination)),
+    entryBuilder.getInt32(ids.lookup(falseDestination)),
+    "ms.next");
+```
+
+`ids.lookup(...)` gives the C++ unsigned state number. `getInt32(...)` turns that number into a typed LLVM constant, which is a `Value *` operand for `CreateSelect`. The final string is the optional SSA result name; it appears as `%ms.next` in printed IR. `CreateSelect` returns a general `Value *` because IRBuilder methods commonly expose results through LLVM's Value interface.
+
 Use the names already present in `StateMachineBuilder::build`. Fill the marked steps inside the entry terminator switch:
 
 ```cpp
