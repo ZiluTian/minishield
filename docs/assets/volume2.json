@@ -8747,7 +8747,7 @@
         },
         {
           "type": "task",
-          "text": "Task: Future exercise: handle original SwitchInst terminators, not the newly created dispatcher switch."
+          "text": "Task: In `lib/StateMachineBuilder.cpp`, extend the entry terminator switch to handle an original `SwitchInst`. Encode its default and each case destination as an i32 next-state value. Leave the dispatcher switch alone; it decodes state IDs after the entry stores one."
         },
         {
           "type": "heading",
@@ -8805,6 +8805,49 @@
           "type": "code",
           "language": "cpp",
           "text": "case llvm::Instruction::Switch: {\n    auto *sw = llvm::cast<llvm::SwitchInst>(T);\n    next = stateOf(sw->getDefaultDest());\n    for (auto oneCase : sw->cases()) {\n        auto *matches = b.CreateICmpEQ(sw->getCondition(), oneCase.getCaseValue());\n        next = b.CreateSelect(matches, stateOf(oneCase.getCaseSuccessor()),\n                              next, \"ms.next\");\n    }\n    break;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "Study-session walkthrough — keep the original default while lowering cases",
+          "sessionWalkthrough": true
+        },
+        {
+          "type": "paragraph",
+          "text": "For `tests/ir/switch.ll`, traversal assigns `zero` state 0, `one` state 1, and `other` state 2. Begin `nextState` with the default destination's state (2). Each case comparison may replace that value with its destination's ID; if no case matches, the default remains selected."
+        },
+        {
+          "type": "paragraph",
+          "text": "Use `llvm::Value *nextState`, not `auto *nextState`: `entryBuilder.getInt32(...)` initially returns a `ConstantInt *`, while `CreateSelect(...)` returns the more general `Value *`. The variable must be able to hold both the initial constant and each select result."
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "case llvm::Instruction::Switch: {\n    auto *originalSwitch =\n        llvm::cast<llvm::SwitchInst>(entryTerminator);\n    llvm::Value *nextState = entryBuilder.getInt32(\n        ids.lookup(originalSwitch->getDefaultDest()));\n\n    for (auto oneCase : originalSwitch->cases()) {\n        auto *matches = entryBuilder.CreateICmpEQ(\n            originalSwitch->getCondition(), oneCase.getCaseValue(),\n            \"ms.case\");\n        auto *caseState = entryBuilder.getInt32(\n            ids.lookup(oneCase.getCaseSuccessor()));\n        nextState = entryBuilder.CreateSelect(\n            matches, caseState, nextState, \"ms.next\");\n    }\n\n    // TODO: store nextState to stateSlot, branch to dispatcher,\n    //       then erase entryTerminator.\n    break;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "The original switch condition and each `getCaseValue()` constant have the same integer type, which may be i8 or i64 rather than i32. `CreateICmpEQ` compares those original operands and produces an i1 condition. The state constants selected by the comparison are i32 because the dispatcher's state slot is i32. Do not cast the original switch input to i32 just to match the state IDs."
+        },
+        {
+          "type": "paragraph",
+          "text": "For input 0, the first select chooses state 0; for input 1, the second select chooses state 1; for any other input, every comparison is false and state 2 remains. The dispatcher switch then routes to the corresponding original block. This step handles the entry switch; rewriting switch terminators in every original state block comes with the terminator loop later."
+        },
+        {
+          "type": "task",
+          "text": "Task: Add this case, rebuild, and run `tests/ir/switch.ll` with `verify`. Inspect the entry's comparisons and chained selects, followed by the state store and branch to dispatch. Check that the default starts at `other`'s state, then reason through values 0, 1, and 8: the function must return 10, 20, and -1 respectively."
+        },
+        {
+          "type": "checkpoint",
+          "text": "Checkpoint: Why is `nextState` typed as `llvm::Value *`, and why does the comparison use the switch input's type while the selected state values use i32?",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "`nextState` first holds the i32 default-state constant from `getInt32`, then holds the result of `CreateSelect`, whose API returns `Value *`; that general type accommodates both. `icmp eq` must compare operands of the same type, so it uses the original switch condition and its matching case constant, which may be i8, i32, or i64. The selected destinations are state IDs stored in an i32 slot, so those alternatives are i32 constants."
+              ]
+            }
+          ]
         },
         {
           "type": "heading",
@@ -9053,7 +9096,7 @@
           "irComparison": true
         }
       ],
-      "words": 2258,
+      "words": 2692,
       "quiz": {
         "q": "Can two different switch case constants map to the same state?",
         "choices": [

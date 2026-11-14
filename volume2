@@ -5163,7 +5163,7 @@ Starting from the default is what preserves unmatched inputs. Comparing every ca
 
 There are now two different switches in the story. The original switch represents a program decision that this lesson translates into comparisons and selects. The new dispatcher switch decodes the state ID and must remain in place. Confusing the two can make the transformer rewrite its own routing machinery.
 
-Task: Future exercise: handle original SwitchInst terminators, not the newly created dispatcher switch.
+Task: In `lib/StateMachineBuilder.cpp`, extend the entry terminator switch to handle an original `SwitchInst`. Encode its default and each case destination as an i32 next-state value. Leave the dispatcher switch alone; it decodes state IDs after the entry stores one.
 
 ### The template to start with
 
@@ -5217,6 +5217,47 @@ case llvm::Instruction::Switch: {
     break;
 }
 ```
+
+### Study-session walkthrough — keep the original default while lowering cases
+
+For `tests/ir/switch.ll`, traversal assigns `zero` state 0, `one` state 1, and `other` state 2. Begin `nextState` with the default destination's state (2). Each case comparison may replace that value with its destination's ID; if no case matches, the default remains selected.
+
+Use `llvm::Value *nextState`, not `auto *nextState`: `entryBuilder.getInt32(...)` initially returns a `ConstantInt *`, while `CreateSelect(...)` returns the more general `Value *`. The variable must be able to hold both the initial constant and each select result.
+
+```cpp
+case llvm::Instruction::Switch: {
+    auto *originalSwitch =
+        llvm::cast<llvm::SwitchInst>(entryTerminator);
+    llvm::Value *nextState = entryBuilder.getInt32(
+        ids.lookup(originalSwitch->getDefaultDest()));
+
+    for (auto oneCase : originalSwitch->cases()) {
+        auto *matches = entryBuilder.CreateICmpEQ(
+            originalSwitch->getCondition(), oneCase.getCaseValue(),
+            "ms.case");
+        auto *caseState = entryBuilder.getInt32(
+            ids.lookup(oneCase.getCaseSuccessor()));
+        nextState = entryBuilder.CreateSelect(
+            matches, caseState, nextState, "ms.next");
+    }
+
+    // TODO: store nextState to stateSlot, branch to dispatcher,
+    //       then erase entryTerminator.
+    break;
+}
+```
+
+The original switch condition and each `getCaseValue()` constant have the same integer type, which may be i8 or i64 rather than i32. `CreateICmpEQ` compares those original operands and produces an i1 condition. The state constants selected by the comparison are i32 because the dispatcher's state slot is i32. Do not cast the original switch input to i32 just to match the state IDs.
+
+For input 0, the first select chooses state 0; for input 1, the second select chooses state 1; for any other input, every comparison is false and state 2 remains. The dispatcher switch then routes to the corresponding original block. This step handles the entry switch; rewriting switch terminators in every original state block comes with the terminator loop later.
+
+Task: Add this case, rebuild, and run `tests/ir/switch.ll` with `verify`. Inspect the entry's comparisons and chained selects, followed by the state store and branch to dispatch. Check that the default starts at `other`'s state, then reason through values 0, 1, and 8: the function must return 10, 20, and -1 respectively.
+
+Checkpoint: Why is `nextState` typed as `llvm::Value *`, and why does the comparison use the switch input's type while the selected state values use i32?
+
+### Model answer
+
+`nextState` first holds the i32 default-state constant from `getInt32`, then holds the result of `CreateSelect`, whose API returns `Value *`; that general type accommodates both. `icmp eq` must compare operands of the same type, so it uses the original switch condition and its matching case constant, which may be i8, i32, or i64. The selected destinations are state IDs stored in an i32 slot, so those alternatives are i32 constants.
 
 ### Verify
 
