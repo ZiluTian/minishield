@@ -92,6 +92,10 @@ Editable book sources are [volume1](volume1), [volume2](volume2), and
 `python3 -m http.server 8000 --directory docs` and open
 <http://localhost:8000>.
 
+The book is available in Simplified Chinese too: switch languages with the
+button in the top right corner. Code, LLVM IR, commands, and identifiers stay
+in English in both editions; the prose, quizzes, and interface are translated.
+
 ## Book review and revision log
 
 `debate/` records how the book is reviewed and revised. It is a three-reader

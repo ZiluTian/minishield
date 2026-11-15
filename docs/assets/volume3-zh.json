@@ -1,0 +1,1611 @@
+{
+  "day": 3,
+  "title": "第 3 卷——超越平坦化的代码加固",
+  "status": "完整教学草稿。通过具体的 LLVM 示例，讲解控制流平坦化之外的加固技术的速成练习。在完成第 2 卷实现之后，编写并运行这些示例。",
+  "home": {
+    "headline": "一项技术。<br><em>一整套工具箱。</em>",
+    "intro": "MiniShield 做控制流平坦化——众多加固技术中的一种。第 1 卷的毕业项目表明，这个插件是一个把各项技术作为命名 pass 来承载的框架。这门速成课程填充它：控制流完整性、栈 canary、OLLVM 式混淆、位置无关，以及证明每项技术行为不变的模糊测试。",
+    "coverFoot": "平坦化 →<br>加固。",
+    "aside": {
+      "label": "路线图",
+      "text": "第 3 卷是速成课，不是第二次实现：每项技术都有它的威胁、机制、具体的 LLVM IR 和代价。OLLVM 家族由你在同一个插件中实现；CFI、canary 和 PIE 则用工具链读取并验证。"
+    }
+  },
+  "groups": [
+    {
+      "name": "加固全景",
+      "label": "LANDSCAPE",
+      "key": "landscape",
+      "ids": [
+        79
+      ],
+      "description": "确立威胁模型，把控制流平坦化放入其中，并设定“某项加固技术有效”的声明标准。"
+    },
+    {
+      "name": "控制流完整性",
+      "label": "CFI",
+      "key": "cfi",
+      "ids": [
+        80,
+        81
+      ],
+      "description": "守卫程序实际执行的两类间接分派——间接调用和虚调用。读取 clang 生成的 IR 并在运行时验证它。"
+    },
+    {
+      "name": "栈 canary",
+      "label": "CANARIES",
+      "key": "canaries",
+      "ids": [
+        82
+      ],
+      "description": "对返回路径的控制数据保护：canary 在 LLVM 23.1.5 中实际如何发出（IR 中的属性、机器码中的 TLS 机制）、每种模式保护哪些函数，以及运行时 A/B 证明。"
+    },
+    {
+      "name": "OLLVM 式混淆",
+      "label": "OLLVM",
+      "key": "ollvm",
+      "ids": [
+        83,
+        84,
+        85,
+        86
+      ],
+      "description": "按第 1 卷毕业项目的配方添加到 MiniShield 插件的三个 OLLVM 家族混淆——虚假控制流、字符串加密、子程序拆分——每个都配 -O0 差分证明和 -O2 下的消解，最后给出让混淆得以存活的部署规则：放在最后运行。"
+    },
+    {
+      "name": "位置无关",
+      "label": "PIE",
+      "key": "pie",
+      "ids": [
+        87
+      ],
+      "description": "这种加固存在于链接器和加载器中，而不是 IR 中：-pie/-no-pie 在模块中不留任何痕迹的地方，ELF 转而记录了什么（EXEC 与 DYN、FLAGS_1 PIE、绝对重定位与加载基址相对重定位）、运行时的 ASLR 证明，以及 RELRO 把 .got.plt 移入只读段。"
+    },
+    {
+      "name": "对平坦化 pass 做模糊测试",
+      "label": "FUZZING",
+      "key": "fuzzing",
+      "ids": [
+        88
+      ],
+      "description": "毕业项目：学习者自己的 minishield-flatten 插件在 libFuzzer 下做行为差分——让 IR 模块可以独立运行的输入契约、子进程的前后测试组、区分既有未定义行为与 pass 引入回归的 trap 语义、对真实插件干净的 600 次运行会话，以及 harness 用精确 diff 抓到的单行 off-by-one 变异。"
+    },
+    {
+      "name": "参考",
+      "label": "GLOSSARY",
+      "key": "glossary",
+      "ids": [
+        89
+      ],
+      "description": "第 3 卷术语表：加固各课用到的每个术语，并指向术语出现的课程；第 1–2 卷的术语只做交叉引用，不重复。"
+    }
+  ],
+  "lessons": [
+    {
+      "id": 79,
+      "number": 1,
+      "day": 3,
+      "group": "landscape",
+      "title": "代码加固全景",
+      "originalTitle": "The code-hardening landscape",
+      "summary": "把控制流平坦化放入威胁模型，点名本卷覆盖的加固家族，并设定“某项加固技术有效”的声明标准。",
+      "takeaway": "平坦化只是一个家族——混淆。每项技术以不同的代价应对不同的威胁，而混淆是唯一一个其价值可以被最终优化器移除的家族。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "课程引用的编号方式"
+        },
+        {
+          "type": "paragraph",
+          "text": "本卷中的“Lesson N”引用使用 网页书的全局 id：3.1.1 = 79，3.2.1 = 80，3.2.2 = 81，3.3.1 = 82，3.4.1 到 3.4.3 = 83 到 85（三个 OLLVM 课程），3.4.4 = 86，3.5.1 = 87，3.6.1 = 88，术语表（3.7.1）= 89。"
+        },
+        {
+          "type": "paragraph",
+          "text": "到目前为止，MiniShield 实现了唯一一种代码加固技术：控制流平坦化，它通过状态机调度器重写被接受函数的控制流。第 1 卷的最后一课从那里跳出看全局：插件的接缝——命名 pass 注册表、按技术的资格 guard、共享 CFG 分析，以及差分和统计 harness——与技术无关，因此每种加固技术都变成又一个命名 pass。本卷用具体技术填充这个框架，按每种技术所应对的威胁而非其插入的接缝来组织。每一章都遵循相同的形状：威胁、机制、来自 23.1.5 工具链的具体 LLVM IR、一道练习，以及代价。"
+        },
+        {
+          "type": "heading",
+          "text": "威胁与应对它们的家族"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "威胁——攻击者得到什么",
+              "家族",
+              "本卷中的技术"
+            ],
+            [
+              "读取或修补程序逻辑",
+              "混淆",
+              "控制流平坦化（第 2 卷）· 虚假控制流 · 字符串加密 · 子程序拆分"
+            ],
+            [
+              "通过被破坏的间接调用、vtable 指针或函数指针转移控制",
+              "控制流完整性",
+              "基于类型的守卫（23.1.5 中的 `llvm.type.test` + `llvm.ubsantrap`）"
+            ],
+            [
+              "破坏保存的返回地址并劫持函数返回",
+              "控制数据保护",
+              "栈 canary——`llvm.stackprotector`"
+            ],
+            [
+              "预测代码在内存中的位置并击败 ASLR",
+              "平台强化",
+              "位置无关代码 + ASLR + RELRO"
+            ],
+            [
+              "找出其他部分假设不存在的内存 bug",
+              "内存安全（开发期）",
+              "Sanitizer——用于本卷的测试和模糊测试，不随产品发布"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "这张表是分工，不是排名。CFI 阻止被破坏的 vtable 指针分派到错误的类型，但对直接读取二进制找漏洞的攻击者毫无作用。混淆让这种读取更难，但不会让缓冲区溢出变安全。一套加固方案分层叠加各家族，使任何单点失守都不给攻击者所需的东西；本卷逐层教学，好让你看清接缝在哪里。"
+        },
+        {
+          "type": "heading",
+          "text": "一个攻击，从头到尾"
+        },
+        {
+          "type": "paragraph",
+          "text": "在讲各家族之前，先完整走一遍一个攻击——栈溢出，canary 一章将对它自己的演示验证防御。程序读取攻击者输入，并把它拷贝进一个 16 字节栈缓冲区，没有边界检查——`memcpy(buf, line, len)` 拷入 `buf[16]`，即 `canary_pipe.c` 中的 `process` 函数。攻击者输入超过 16 字节，拷贝越过缓冲区进入帧的其余部分：它越过 canary 槽 `-8(%rbp)`——开启 canary 时编译器种下的随机守卫——继续前进，直到覆写 `+8(%rbp)` 处保存的返回地址。随后函数执行 `ret`：CPU 把返回地址弹出到指令指针，跳转到 `+8(%rbp)` 现在的值——攻击者的代码。这就是整个攻击：一次无检查的拷贝、一个被覆写的字、一次跳转到外部代码的返回。"
+        },
+        {
+          "type": "paragraph",
+          "text": "开启 canary 后，溢出完全相同，结局不同：函数最后的比较从 TLS 重新读回守卫，与种在 `-8(%rbp)` 的副本对比，发现被破坏，于是在损坏的 `ret` 触发之前就中止于 `__stack_chk_fail`（SIGABRT，退出码 134）。溢出无论如何都会发生；canary 改变的是结果——无声的劫持变成了响亮的崩溃。"
+        },
+        {
+          "type": "paragraph",
+          "text": "表的第一行靠读取来攻击，工具链很短：`strings` 找字面量（URL、魔词、错误消息），`objdump` 或 `llvm-objdump` 看反汇编和重定位，再加一个反编译器——IDA 或 Ghidra——从反汇编重建函数和控制流。分析者找三样东西：标出有趣路径的字符串字面量、敏感逻辑周围干净的控制流图（许可证分支、校验跳转），以及利用必须翻转的那一个分支。三者都是结构——这正是混淆家族让结构膨胀的原因，也是膨胀只能买时间而不能封住溢出的原因。"
+        },
+        {
+          "type": "heading",
+          "text": "MiniShield 的平坦化在哪里"
+        },
+        {
+          "type": "paragraph",
+          "text": "平坦化是本书中混淆家族的成员。它提高了理解和修改控制流的代价，并以运行时付出代价——一个状态槽、一次 load、一个 switch，以及调度器毁掉的直线优化——还要在流水线末端付出代价：足够激进的最终优化器可以把状态机简化回接近原程序，第 2 卷的退出证据恰好以这个观察收尾。混淆有一个其他家族没有的质量问题：它的价值是优化之后剩下的部分，而不是 pass 发出的部分。本卷每一章都会回到这个问题。"
+        },
+        {
+          "type": "heading",
+          "text": "本卷如何组织"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "每项技术采用相同的形状：它应对的威胁、机制、用隔离的 LLVM 23.1.5 教学参考生成并验证的具体 LLVM IR、一道动手练习，以及代价与限制。",
+            "OLLVM 家族——虚假控制流、字符串加密、子程序拆分——由你作为新 pass 实现在 MiniShield 插件中，使用毕业项目配方（注册、资格 guard、builder、编排器、固定测试输入），并用第 2 卷测试章节的差分测试方法证明每一项都保持行为不变。",
+            "CFI、栈 canary 和位置无关通过读取和验证 clang 已经生成的内容来教学——从零写一个 CFI pass 超出速成课范围。",
+            "最后一课对你自己的一个 pass 做模糊测试，因为固定种子上的差分测试覆盖的范围不如对同一性质的 fuzzer。"
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "章节之前先讲两个术语。威胁模型是对你在防哪个攻击者、成功对他意味着什么的显式陈述。加固的质量取决于该攻击者在技术之后还能做什么、对合法用户付出什么代价——像“块数翻倍”或“存在 canary”这样的结构观察本身不是质量声明。"
+        },
+        {
+          "type": "paragraph",
+          "text": "还有九个术语先落地、后解释；每条一行，并给出承载解释的课程："
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "vtable / vptr——每类的分派表，以及藏在每个对象第一个字里指向它的指针（3.2.2）。",
+            "ASLR / PIE——内核每次运行时的基址随机化，以及它所作用的位置无关构建（3.5.1）。",
+            "GOT / RELRO——导入函数地址的表，以及让它只读的段（3.5.1）。",
+            "mangled type-info name——CFI 检查比对的 `_ZTS...` 字符串，以及如何读 mangling（3.2.1；词汇表 3.7.1）。",
+            "调用约定——关于函数的参数和结果放在哪里的约定；为什么无 CFI 运行中错误类型的调用仍能返回值（3.2.1）。",
+            "符号插入（symbol interposition）——另一个库中的同名符号如何顶替你的符号进行绑定，以及 `-fvisibility=hidden` 阻止什么（3.2.2）。",
+            "`checksec`——一行打印二进制的 RELRO、PIE 和 canary 状态的工具（3.5.1）。",
+            "逆向工程——读取发布的二进制找漏洞；本课的入门部分描绘它，3.4.1 给它定价。",
+            "退出码算术——132 = 128 + SIGILL，134 = 128 + SIGABRT：shell 如何报告被信号杀死的进程（3.7.1）。"
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：MiniShield 的平坦化提高了逆向工程的代价。表中的威胁里，它真正应对哪些、留下哪些未解，以及为什么它的失效模式不同于 CFI 和 canary 的失效模式？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "它应对第一行——读取或修补程序逻辑：平坦化后的 CFG 把控制结构藏在调度器和状态槽后面，因此理解或修改行为需要对状态机建模。",
+                "其他行它都留开着：被破坏的间接调用或 vtable 指针（CFI 威胁）、被破坏的返回地址（canary 威胁）以及内存 bug 本身，对平坦化后的程序依然有效，因为平坦化重排控制流，而不改变程序执行什么或数据存放在哪里。",
+                "它的失效模式是优化，而不是绕过：最终优化器可以证明状态机的行为，把它简化回接近原始 CFG（第 2 卷的退出证据把整个调度器缩减为一个 select），因此发布出去的产物可能在结构上未加固。CFI 检查和 canary 改变程序运行时的行为，所以能挺过优化；混淆的质量必须在最终产物上判断，而不是在 pass 输出上。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1393
+    },
+    {
+      "id": 80,
+      "number": 1,
+      "day": 3,
+      "group": "cfi",
+      "title": "间接调用检查",
+      "originalTitle": "The indirect call check",
+      "summary": "正向 CFI 守卫间接调用：读取 clang 23.1.5 在 -fsanitize=cfi-icall -flto 下发出的 llvm.type.test + llvm.ubsantrap IR，理解守卫为什么只出现在 LTO 无法解析目标的地方，并在运行时验证错误类型的调用以 SIGILL 中止。",
+      "takeaway": "CFI-ICALL 是对被调指针的类型测试，LTO 只在目标确实未知处插入：它对错误类型的目标以 SIGILL 中止，对类型正确但函数错误的情况不作任何约束。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "正向 CFI（CFI-ICALL）应对全景中的第一个具体威胁：攻击者覆写一个函数指针——通过缓冲区溢出、被破坏的指针表、数据竞争——程序随后调用指针现在指向的东西。指针是数据，调用点无条件信任它。正向 CFI 在每个间接调用前插入守卫：分派前验证目标具有期望的函数类型。在 LLVM 23.1.5 中，守卫是 `llvm.type.test` 内置函数与 `llvm.ubsantrap` 的组合，而不是旧资料描述的遗留 `llvm.cfi_icheck` 内置函数。"
+        },
+        {
+          "type": "heading",
+          "text": "IR 中的检查"
+        },
+        {
+          "type": "paragraph",
+          "text": "最小情况：程序从一个 extern 函数获取函数指针——它在当前翻译单元之外，编译器永远无法知道它指向哪里。这是 clang 23.1.5 用 `-fsanitize=cfi-icall -flto -O2` 发出的（从真实捕获中裁剪；`opt -passes=verify` 接受它）："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare ptr @lookup(i32)\n\ndeclare i1 @llvm.type.test(ptr, metadata)\ndeclare void @llvm.ubsantrap(i8 immarg)\n\ndefine i32 @run_op(i32 %id, i32 %x) {\n  %fp = tail call ptr @lookup(i32 %id)\n  %ok = tail call i1 @llvm.type.test(ptr %fp, metadata !\"_ZTSFiiE\")\n  br i1 %ok, label %do_call, label %trap\n\ntrap:\n  tail call void @llvm.ubsantrap(i8 2)\n  unreachable\n\ndo_call:\n  %r = tail call i32 %fp(i32 %x)\n  ret i32 %r\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "从上往下读。`%fp` 是攻击者可控的指针：它来自 `lookup`，位于另一个翻译单元，所以即使完整 LTO 也无法解析它。`%ok` 是守卫：`llvm.type.test` 询问 `%fp` 处的内存是否带有与 `_ZTSFiiE` 匹配的 CFI 类型描述符——`int(int)` 函数类型的 mangled type-info name。描述符由编译器附加到每个以 CFI 编译的函数上；没有描述符或描述符不同的目标都会测试失败。分支随后去往 `do_call`（真正的间接调用发生处）或 `trap`（`llvm.ubsantrap` 降级为未定义指令，进程以 SIGILL 死亡，退出码 132）。"
+        },
+        {
+          "type": "paragraph",
+          "text": "两件事它不是。第一，它不是地址检查：没有任何东西把 `%fp` 与允许的地址列表比较，所以类型正确但函数错误的目标仍然通过。第二，守卫只出现在目标未知之处。没有这个 flag，同样的源码编译为无条件间接调用："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare ptr @lookup(i32)\n\ndefine i32 @run_op(i32 %id, i32 %x) {\n  %fp = tail call ptr @lookup(i32 %id)\n  %r = tail call i32 %fp(i32 %x)\n  ret i32 %r\n}"
+        },
+        {
+          "type": "heading",
+          "text": "LTO 能看到目标时，检查换了形态"
+        },
+        {
+          "type": "paragraph",
+          "text": "CFI-ICALL 是 LTO 特性——没有 `-flto` 这个 flag 拒绝工作。LTO 的活是解析间接调用，所以前端会发出的大多数守卫在链接时消失：目标可证明唯一时调用被去虚化或内联，没有东西需要守卫。目标集小但无法完全解析时，通用类型测试退化为与已知地址的比较。在下述单翻译单元演示中，LTO 把守卫重写为："
+        },
+        {
+          "type": "code",
+          "language": "asm",
+          "text": "2017d7: 48 3d 30 18 20 00             \tcmpq\t$0x201830, %rax\n2017dd: 75 4a                         \tjne\t0x201829\n2017df: bf 15 00 00 00                \tmovl\t$0x15, %edi\n2017e4: ff d0                         \tcallq\t*%rax\n...\n201829: 67 0f b9 40 02                \tud1l\t0x2(%eax), %eax\n20182e: cc                            \tint3"
+        },
+        {
+          "type": "paragraph",
+          "text": "解析出的地址与 `0x201830` 比较——`op_right` 的地址，唯一类型正确的目标——不匹配则跳转到 `ud1` trap。注意 `op_right` 本身现在是一个单指令 thunk，跳到 `op_right.cfi`——LTO 重建的函数体，其 CFI 类型描述符已附加。要记住的形状：守卫恰好出现在链接时指针确实未知的地方——外部、数据依赖、攻击者可写——并以那里最便宜的形态出现。"
+        },
+        {
+          "type": "heading",
+          "text": "`type.test` 实际在测试什么"
+        },
+        {
+          "type": "paragraph",
+          "text": "守卫的第二个操作数是期望类型，作为 **call-site metadata（调用点元数据）**：在最小模块中，它是直接附加到 `type.test` 调用上的 mangled type-info name `_ZTSFiiE`；LTO 对同一检查的捕获携带的是 `!{i64 0, !\"_ZTSFiiE\"}` 这一对——一个偏移和一个名字——模块的 CFI 元数据中每个 CFI 编译的函数记录一次（模块 flag `!{i32 4, !\"CFI Canonical Jump Tables\", i32 1}` 标记模块使用此方案；vcall 的捕获为每个类和每个虚方法各列一条这样的条目，`!{i64 16, !\"_ZTS4Base\"}`、`!{i64 16, !\"_ZTSM4BaseFiiE.virtual\"}`）。"
+        },
+        {
+          "type": "paragraph",
+          "text": "这就是检查是 **LTO 特性**的原因。没有 LTO，每个翻译单元只能看到自己的函数，检查只能退回运行时库去查找目标的描述符；有了 LTO，链接步骤可以把每函数描述符合并进一张表，检查变成指针直接对该表的解析——没有表就没有检查，所以 flag 对 `-flto` 有硬性要求。`op_right` 的 `.cfi` 副本出于同样原因存在：重建的函数体携带描述符，而原符号留下来作为单指令 trampoline，供没有用 CFI 编译的调用方使用。"
+        },
+        {
+          "type": "paragraph",
+          "text": "因此“目标集”有了具体含义：它是*所有描述符与此类型匹配的函数*——用类型作为地址集的粗略替身。这调和了全景课所说的“target-set checks”与本课所说的“不是地址检查”：守卫不拿指针与允许的地址列表比较；它问被指向函数的类型描述符是否与调用点的一致。"
+        },
+        {
+          "type": "paragraph",
+          "text": "读名字：这里的 Itanium mangling 故意很短。`_ZTS` 标记一个 **type-info name**（`__class_type_info` 的 name 字段，不是函数地址）；`Fii` 是取 `i32`、返回 `i32` 的函数；vcall 的 `4Base` 中，开头的 `4` 是标识符 `Base` 的长度。"
+        },
+        {
+          "type": "heading",
+          "text": "运行时证明"
+        },
+        {
+          "type": "paragraph",
+          "text": "源码是本书自己的固定测试输入，`cfi_pipe.c`："
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\ntypedef int (*op)(int);\nint op_right(int x) { return 2 * x; }\nint op_wrong(void) { return 99; }\nint main(int argc, char **argv) {\n  if (argc > 1 && strcmp(argv[1], \"self\") == 0) {\n    printf(\"%p %p\\n\", (void *)op_right, (void *)op_wrong);\n    return 0;\n  }\n  unsigned long long addr;\n  if (scanf(\"%lli\", &addr) != 1) {\n    printf(\"no input\\n\");\n    return 2;\n  }\n  op fp = (op)addr;\n  int r = fp(21);\n  printf(\"result -> %d\\n\", r);\n  return 0;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "演示程序从标准输入读取一个指针地址并经由它调用；`self` flag 打印两个候选目标的地址（一个合法的 `int(int)` 函数和一个类型错误的 `int()` 函数）。它用 `-no-pie` 链接，使打印的地址在多次运行间稳定——在 ASLR 下每次启动打印的都不同（PIE 一章会回到这一点）。"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -fsanitize=cfi-icall -flto -O2 -no-pie -fuse-ld=lld cfi_pipe.c -o cfi_pipe\n$ clang-23 -flto -O2 -no-pie -fuse-ld=lld cfi_pipe.c -o cfi_pipe_nocfi\n$ ./cfi_pipe self\n0x201830 0x201790\n$ echo 0x201830 | ./cfi_pipe\nresult -> 42\n$ echo 0x201790 | ./cfi_pipe\nIllegal instruction (core dumped)\n$ ./cfi_pipe_nocfi self\n0x201778 0x201780\n$ echo 0x201780 | ./cfi_pipe_nocfi\nresult -> 99"
+        },
+        {
+          "type": "paragraph",
+          "text": "合法目标正常分派并返回 42。类型错误的目标死于非法指令——那就是 CFI trap，硬中止，不是报告。而在未开 CFI 构建的二进制中，同样的错误类型输入根本不崩溃：调用顺利通过，`op_wrong` 返回 99，程序把它当正常结果打印出来。这种静默成功正是 CFI 消除的威胁——一个落在调用约定匹配但行为错误的函数上的损坏指针；唯一可观察的差异是错误的答案。CFI 把它变成可见的中止。"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "`-fsanitize=cfi-icall` 只能与 `-flto` 一起工作，且链接中的每个目标文件都必须经过 CFI 插桩：非 CFI 目标没有类型描述符可匹配，连合法调用也会中止。",
+            "LTO 移除所有它能解析目标的守卫，其余折叠为最便宜的等价形式；一个所有间接调用目标都已知的程序完全不包含 CFI 检查，而这不是配置错误。",
+            "检查针对目标的类型，不是地址：签名匹配的错误函数仍是合法目标。",
+            "`llvm.ubsantrap` 降级为未定义指令（SIGILL，退出码 132），不是消息；没有调试器时，失败看起来像一次随机非法指令，而不是 CFI 违规。"
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：演示中错误类型的目标中止，合法目标完成。(a) 守卫测试什么？它比对的值来自哪里？(b) 为什么这个程序中会出现守卫？(c) 为什么无 CFI 运行是比 CFI 运行更危险的失败？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 它测试目标的函数类型描述符：`llvm.type.test` 把编译器附加到每个 CFI 编译的函数定义上的东西与 `_ZTSFiiE`（`int(int)` 函数类型的 mangled type-info name）比较。它不是地址——类型正确的错误函数仍然通过。",
+                "(b) 因为被调指针在链接时确实未知：在最小模块中它来自 extern 的 `lookup`，在演示中它在运行时从标准输入解析。LTO 只有在能解析目标时才能移除或折叠守卫，这里做不到。",
+                "(c) 没有 CFI 时，错误类型的调用静默成功——打印 `result -> 99`，退出码 0：破坏达成目的，而没有人知道。有 CFI 时，进程以 SIGILL 中止：劫持被拦截且可见。静默失败的检查比没有检查更糟，因为它隐藏了攻击；CFI 的价值在于让失败变成崩溃。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1566
+    },
+    {
+      "id": 81,
+      "number": 2,
+      "day": 3,
+      "group": "cfi",
+      "title": "vtable 检查",
+      "originalTitle": "The vtable check",
+      "summary": "反向 CFI 守卫虚调用：读取 clang++ 23.1.5 在 -fsanitize=cfi-vcall 下发出的 vtable 指针 llvm.type.test，理解它能抓住哪些破坏、漏掉哪些，并在运行时验证错误类的 vtable 会中止而派生类的 vtable 通过。",
+      "takeaway": "CFI-VCALL 在分派前把 vtable 指针与静态基类描述符比对：它抓住 vtable 属于错误类的对象，而不是抓住槽位被破坏的合法 vtable。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "CFI-ICALL 守卫被调指针。更常见的 C++ 威胁高一层：对象的 vtable 指针。被破坏的 vptr——类型混淆写入、到达对象第一个字的缓冲区溢出、指向复用分配的过期指针——会让 `b->apply(x)` 分派到一个完全无关的类。CFI-VCALL 在每个虚调用前插入守卫：vtable 指针必须指向调用点静态基类的 type-info 层级之内。"
+        },
+        {
+          "type": "heading",
+          "text": "30 秒看懂虚分派（给读 IR 的人，不是给 C++ 的人）"
+        },
+        {
+          "type": "paragraph",
+          "text": "本课的检查是对 C++ 对象模型的陈述，所以这里把该模型整理成读 IR 的人能握住的形态："
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "每个对象以一个隐藏指针开头，即 vptr：`Derived` 对象的第一个字不是你声明的字段；编译器在那里存了一个指针，它指向该类的 vtable。",
+            "vtable 是每类一份的函数指针数组，按声明顺序每个虚方法一个槽；槽 0 是第一个虚方法（这里是 `apply`），槽 1 是下一个。它是数据——一张地址表——这正是被破坏的 vptr 把分派变成指针追逐劫持的原因。",
+            "`b->apply(x)` 是三个机器步骤：从对象第一个字加载 vptr，加载该 vtable 的槽 0，间接调用得到的指针。运行时没有类名查找；分派就是本课 IR 展示的 load-load-call。",
+            "派生类有自己的 vtable，开头槽位相同：`Derived` 的表以基类的槽开头（无论是否重写），接着是自己的槽。指向 `Derived` 的 `Base *` 会加载派生类的 vtable，所以指针的静态类型对加载哪张表没有任何说明。",
+            "每个类有一个 `__class_type_info` 对象，其 vtable 在 `vtable[-1]` 处指向它——第一个方法之前一个槽。“vtable 属于 `Base` 的层级”意思是该 vtable 的 `[-1]` 处的 type-info 是 `Base` 的 type-info，或是某个派生自 `Base` 的类的 type-info（派生类的 type-info 携带回到其基类的链条）。`Evil` 的 type-info 两者都不是，这就是整个测试。",
+            "`llvm.type.test` 查阅的是编译器构建的一张表，不是一个地址：每个 CFI 编译的类一个条目，把该类的 type-info 映射到该类及其已知派生类的 vtable。守卫把对象的 vtable 与调用点静态基类的条目比对——是这个集合，而不是某个地址，才是“Base 的层级”。",
+            "`-fvisibility=hidden` 保护那张表的地址。type-info 符号是全局且有名字的（`_ZTV4Base`、`_ZTI4Base`）；默认可见性下，另一个链接库中的同名符号可以顶替本地符号绑定——符号插入——守卫随后就会对着别人的表检查。隐藏可见性把符号钉在本地副本上，这就是 clang 在没有它时拒绝 `-fsanitize=cfi-vcall` 的原因。"
+          ]
+        },
+        {
+          "type": "heading",
+          "text": "检查针对的是 vtable 指针"
+        },
+        {
+          "type": "paragraph",
+          "text": "用 clang++ 23.1.5 和 `-fsanitize=cfi-vcall -fvisibility=hidden -flto -O2` 捕获（要求隐藏可见性；没有它 flag 被拒绝）。从真实捕获中裁剪，`opt -passes=verify` 接受它："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i1 @llvm.type.test(ptr, metadata)\ndeclare void @llvm.ubsantrap(i8 immarg)\n\ndefine i32 @run_op(i64 %obj, i32 %x) {\n  %objptr = inttoptr i64 %obj to ptr\n  %vtable = load ptr, ptr %objptr, align 8\n  %ok = call i1 @llvm.type.test(ptr %vtable, metadata !\"_ZTS4Base\")\n  br i1 %ok, label %do_call, label %trap\n\ntrap:\n  call void @llvm.ubsantrap(i8 2)\n  unreachable\n\ndo_call:\n  %slot = load ptr, ptr %vtable, align 8\n  %r = call i32 %slot(ptr %objptr, i32 %x)\n  ret i32 %r\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "与 ICALL 守卫的两点不同。被测试的指针不是函数地址，而是从对象第一个字加载的 vtable 指针——`%vtable = load ptr, ptr %objptr`。描述符也不是函数类型名，而是调用点静态类型的 mangled 类名：`_ZTS4Base` 是 `Base` 的 type-info name。当 vtable 属于 `Base` 或其派生类时 `llvm.type.test` 成功——C++ 的动态类型规则，在每个分派处强制。通过之后，分派照常进行：加载 vtable 的槽 0 并经由它调用。"
+        },
+        {
+          "type": "paragraph",
+          "text": "这一对共同覆盖 C++ 程序执行的两类间接分派：ICALL 拿函数指针对函数类型测试；VCALL 拿 vtable 指针对类类型测试。同一个内置函数、同一个 trap，操作数不同、描述符不同。"
+        },
+        {
+          "type": "heading",
+          "text": "运行时证明"
+        },
+        {
+          "type": "paragraph",
+          "text": "源码是本书自己的固定测试输入，`vcall_pipe.cpp`："
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\nstruct Base { virtual int apply(int) = 0; virtual ~Base() {} };\nstruct Derived : Base { int apply(int x) override { return x * 2; } };\nstruct Evil { virtual int evil(int) { return 99; } };\nint main(int argc, char **argv) {\n  if (argc > 1 && strcmp(argv[1], \"self\") == 0) {\n    static Derived d;\n    static Evil e;\n    printf(\"%p %p\\n\", (void *)&d, (void *)&e);\n    return 0;\n  }\n  unsigned long long p;\n  if (scanf(\"%lli\", &p) != 1) return 2;\n  Base *b = (Base *)p;\n  int r = b->apply(21);\n  printf(\"result -> %d\\n\", r);\n  return 0;\n}"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang++-23 -fsanitize=cfi-vcall -fvisibility=hidden -flto -O2 -no-pie -fuse-ld=lld vcall_pipe.cpp -o vcall_pipe\n$ ./vcall_pipe self\n0x203df8 0x203e00\n$ echo 0x203df8 | ./vcall_pipe\nresult -> 42\n$ echo 0x203e00 | ./vcall_pipe\nIllegal instruction (core dumped)"
+        },
+        {
+          "type": "paragraph",
+          "text": "程序打印两个静态对象的地址——一个 `Derived`（派生自 `Base`）和一个 `Evil`（没有派生）——然后经由从标准输入读取的地址分派。`Derived` 通过：它的 vtable 在 `Base` 的层级内，调用返回 42。`Evil` 失败：它不派生自 `Base`，所以它的 vtable 未注册在 `Base` 的 type-info 之下，类型测试在任何 vtable 槽加载之前就中止了进程。"
+        },
+        {
+          "type": "paragraph",
+          "text": "边界很重要。CFI-VCALL 抓住 vtable 属于错误的类，而不是槽错误的正确类：攻击者把一个合法 `Derived` vtable 的槽 0 覆写为指向自己函数的地址，仍然通过检查，因为 vtable 指针在正确的层级内，劫持照旧成功。这与前一课是同一个“类型对地址”的区别，高了一层。"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "`-fsanitize=cfi-vcall` 要求 `-fvisibility=hidden`；没有它编译器拒绝该 flag。",
+            "检查针对 vtable 指针（对象第一个字），而不是从 vtable 加载的方法指针：合法类 vtable 中被破坏的槽不会被抓住。",
+            "与 CFI-ICALL 一样，这也是 LTO 特性：LTO 能去虚化的调用——一旦证明动态类型，这是常见情况——完全不携带守卫。",
+            "描述符是调用点的静态类型（这里是 `Base`）；经由更派生类型的指针调用时，按那个更派生的类型检查，所以检查沿派生链向上组合。"
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：演示中 `Derived` 分派成功，`Evil` 分派中止。(a) 守卫测试哪个指针，与哪个描述符比对？(b) 为什么 clang 要求这个 flag 配 `-fvisibility=hidden`？(c) 对合法 vtable 的哪种破坏这个检查拦不住？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 从对象第一个字加载的 vtable 指针，与 `_ZTS4Base` 比对——调用点静态基类的 type-info name——而不是与将被调用的方法地址比对。",
+                "(b) 守卫把对象的 vtable 指针与本地、编译期已知的 vtable/type-info 地址比较。默认可见性的 type-info 符号会被动态链接器从其他共享对象插入不同的副本，检查就会静默地对错地址；`-fvisibility=hidden` 把 type-info 符号钉在本地副本上，所以 clang 只在这个 flag 存在时才接受 `-fsanitize=cfi-vcall`。",
+                "(c) 合法 vtable 内部被破坏的槽：把真实 `Derived` vtable 的槽 0 覆写为指向攻击者代码，vtable 指针仍指向正确层级，检查通过，分派被劫持。CFI-VCALL 验证对象声称是哪个类，而不验证该类 vtable 指向什么。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1311
+    },
+    {
+      "id": 82,
+      "number": 1,
+      "day": 3,
+      "group": "canaries",
+      "title": "栈 canary 检查",
+      "originalTitle": "The stack canary check",
+      "summary": "按 clang 23.1.5 实际发出的方式读栈 canary：IR 中的 sspstrong 属性、机器码中的 TLS 植入/比较/中止机制、每种 -fstack-protector 模式保护哪些函数，以及运行时证明——同一次溢出在没有 canary 时是静默劫持，有了 canary 则是可见的中止。",
+      "takeaway": "栈 canary 是种在缓冲区与保存的返回地址之间的每进程随机值，在函数出口检查：它把经典的返回地址劫持变成可见的中止，但它只守卫自己帧守卫的东西——不守全局变量、不守堆、不守未保护函数，也守不住泄漏的守卫。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "栈 canary 应对威胁表中“控制数据”一行：攻击者覆写函数的保存返回地址——经典的缓冲区溢出——函数返回时跳到攻击者的代码而不是调用方。canary 是种在易受破坏缓冲区与保存返回地址之间的帧中的随机值，在函数退出时比较：如果溢出够得到返回地址，它一定越过了 canary，比较会在损坏的返回执行之前中止进程。与 CFI 不同，canary 改变的是帧里持有的数据，而不是控制流可以指向什么。"
+        },
+        {
+          "type": "paragraph",
+          "text": "读这一章要记住的一件事：你在 IR 里找不到 canary。这是 clang 23.1.5 实际留下的东西，也是检查真正所在之处。"
+        },
+        {
+          "type": "heading",
+          "text": "canary 不在 IR 中"
+        },
+        {
+          "type": "paragraph",
+          "text": "易受破坏的函数是 `process`：把攻击者可控的长度无检查地拷入 16 字节缓冲区。用 `-fstack-protector-strong -O0` 编译后，模块如下（属性束已裁剪；`opt -passes=verify` 接受它）："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i64 @strlen(ptr noundef)\ndeclare void @llvm.memcpy.p0.p0.i64(ptr noalias writeonly, ptr noalias readonly, i64, i1 immarg)\n\n; clang 23.1.5, -fstack-protector-strong -O0; attribute bundle trimmed\ndefine dso_local i32 @process(ptr noundef %line) #0 {\n  %2 = alloca ptr, align 8\n  %3 = alloca [16 x i8], align 16\n  %4 = alloca i32, align 4\n  store ptr %line, ptr %2, align 8\n  store i32 0, ptr %4, align 4\n  %5 = getelementptr inbounds [16 x i8], ptr %3, i64 0, i64 0\n  %6 = load ptr, ptr %2, align 8\n  %8 = call i64 @strlen(ptr noundef %6)\n  call void @llvm.memcpy.p0.p0.i64(ptr align 16 %5, ptr align 1 %6, i64 %8, i1 false)\n  %9 = load i32, ptr %4, align 4\n  %10 = add nsw i32 %9, 1\n  ret i32 %10\n}\n\nattributes #0 = { sspstrong \"stack-protector-buffer-size\"=\"8\" }"
+        },
+        {
+          "type": "paragraph",
+          "text": "在这个模块里 grep canary，什么也找不到：没有内置函数、没有调用、没有 store。保护在 IR 中的全部痕迹是函数属性束里的 `sspstrong`，旁边是 `\"stack-protector-buffer-size\"` 值。同样源码的默认构建与之完全相同，只是属性束里没有 `sspstrong`——其他 IR 一个字节都不变。（LLVM 23 确实在其 Intrinsics.td 中定义了 `llvm.stackprotector` 内置函数——它“把栈守卫写到栈帧的正确位置”——但这条 C 流水线从不发出它；守卫直接在机器码中成形。）后端读取属性后生成 canary。"
+        },
+        {
+          "type": "heading",
+          "text": "canary 所在的机器码"
+        },
+        {
+          "type": "paragraph",
+          "text": "这是同一函数的后端输出（`-fstack-protector-strong -O0`；`.cfi` 指令已省略）。帧是 `subq $64`：缓冲区在 `-32(%rbp)`，canary 槽在 `-8(%rbp)`，保存的返回地址在 `+8(%rbp)`："
+        },
+        {
+          "type": "code",
+          "language": "asm",
+          "text": "process:\n\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n\tsubq\t$64, %rsp\n\tmovq\t%fs:40, %rax\n\tmovq\t%rax, -8(%rbp)\n\tmovq\t%rdi, -40(%rbp)\n\tmovl\t$0, -44(%rbp)\n\tmovq\t-40(%rbp), %rdi\n\tmovq\t%rdi, -56(%rbp)\n\tcallq\tstrlen@PLT\n\tmovq\t-56(%rbp), %rsi\n\tmovq\t%rax, %rdx\n\tleaq\t-32(%rbp), %rdi\n\tcallq\tmemcpy@PLT\n\tmovl\t-44(%rbp), %eax\n\tincl\t%eax\n\tmovl\t%eax, -48(%rbp)\n\tmovq\t%fs:40, %rax\n\tmovq\t-8(%rbp), %rcx\n\tcmpq\t%rcx, %rax\n\tjne\t.LBB1_2\n\tmovl\t-48(%rbp), %eax\n\taddq\t$64, %rsp\n\tpopq\t%rbp\n\tretq\n.LBB1_2:\n\tcallq\t__stack_chk_fail@PLT"
+        },
+        {
+          "type": "paragraph",
+          "text": "分三拍读。入口：`movq %fs:40, %rax` 从每进程 TLS 加载守卫，`movq %rax, -8(%rbp)` 把副本种在帧中缓冲区与返回地址之间——正是 `--help` 文本承诺的位置：守卫“必须放在栈帧中这样的位置，使易受破坏变量溢出的缓冲区会先覆写守卫值，再覆写函数的返回地址”。出口：从 TLS 重新加载守卫，与种下的副本比较，不匹配则跳到 `callq __stack_chk_fail@PLT`，进程中止。注意值的来源：每进程 TLS 中只有一个随机数——每个受保护帧种下的是同一个值，而不是一帧一个。"
+        },
+        {
+          "type": "heading",
+          "text": "哪些函数获得 canary"
+        },
+        {
+          "type": "paragraph",
+          "text": "模式 flag 选择后端保护哪些帧。一个 TU 中三种函数形状，四种编译方式（clang 23.1.5，`-O0`）："
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "函数",
+              "形状",
+              "`-fstack-protector`",
+              "`-strong`",
+              "`-all`"
+            ],
+            [
+              "`f_array`",
+              "局部 `char[16]`",
+              "是",
+              "是",
+              "是"
+            ],
+            [
+              "`f_ptr`",
+              "取局部变量的地址",
+              "否",
+              "是",
+              "是"
+            ],
+            [
+              "`f_math`",
+              "纯算术",
+              "否",
+              "否",
+              "是"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "`--help` 文本写明启发式：普通模式保护含有超过 8 字节 char 数组的函数；strong 加上任意类型的数组、`alloca` 调用和取局部变量地址；`-all` 保护所有函数。注意 `f_ptr` 触发 strong 是因为 `memcpy(&c, ...)`——取局部变量的地址——而不是它的指针参数。并且这个工具链的默认是完全没有 canary：许多发行版的编译器默认开启 `-fstack-protector-strong`，但这里的 conda clang 没有，所以本课每条命令都把 flag 写全。"
+        },
+        {
+          "type": "heading",
+          "text": "运行时证明"
+        },
+        {
+          "type": "paragraph",
+          "text": "源码是本书自己的固定测试输入，`canary_pipe.c`："
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n#include <string.h>\n#include <stdint.h>\n#include <stdlib.h>\n\n__attribute__((noinline)) void sink(void) {\n  printf(\"HACKED: process returned into sink\\n\");\n  exit(0);\n}\n\n/* The vulnerable function: no bounds check, attacker-controlled length. */\n__attribute__((noinline)) int process(char *line, size_t len) {\n  char buf[16];\n  int auth = 0;\n  memcpy(buf, line, len);   /* overflow when len > 16 */\n  return auth + 1;\n}\n\nint main(int argc, char **argv) {\n  if (argc > 1 && strcmp(argv[1], \"self\") == 0) {\n    printf(\"%p\\n\", (void *)sink);\n    return 0;\n  }\n  unsigned long long addr;\n  if (scanf(\"%lli\", &addr) != 1) return 2;\n  char payload[64];\n  size_t n = 0;\n  for (int i = 0; i < 24; i++) payload[n++] = 'A';\n  for (int i = 0; i < 4; i++) {      /* spray: cover wherever the\n                                        saved return address sits */\n    memcpy(payload + n, &addr, 8);\n    n += 8;\n  }\n  payload[n] = 0;\n  int r = process(payload, n);\n  printf(\"process returned %d\\n\", r);\n  return 0;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "演示程序在 `main` 中构造一个 56 字节的 payload —— 24 字节填充，随后是 `sink` 的地址（一个会打印并退出的函数）重复四次 —— 并显式带上长度传给 `process`，这样地址中的 NUL 字节不会截断拷贝。这次喷洒覆盖了保存的返回地址所落入的任意 8 字节槽位。与 CFI 一章一样，`-no-pie` 让打印出来的地址在多次运行之间保持稳定。"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -O0 -no-pie -fuse-ld=lld canary_pipe.c -o canary\n$ clang-23 -fstack-protector-strong -O0 -no-pie -fuse-ld=lld canary_pipe.c -o canary_strong\n$ ./canary self\n0x201810\n$ echo 0x201810 | ./canary\nHACKED: process returned into sink\n$ echo 0x201810 | ./canary_strong\n*** stack smashing detected ***: terminated\nAborted (core dumped)"
+        },
+        {
+          "type": "paragraph",
+          "text": "没有 canary 时，溢出会把保存的返回地址改写为 `sink`：程序打印 `HACKED`，劫持已经悄然成功 —— 退出码 0，没有任何错误。有 canary 时，同样的溢出在通往返回地址的路上撞毁了 `-8(%rbp)` 处的守卫；退出检查发现不匹配，在损坏的返回执行之前 abort —— 退出码 134（SIGABRT），\"stack smashing detected.\" 同样的溢出，同样的 payload：一种构建让攻击落地，另一种把它变成崩溃。这就是 canary 的价值主张，形状与 CFI 的相同 —— 静默的失陷变成可见的 abort —— 只是针对的是控制数据而非控制流目标。"
+        },
+        {
+          "type": "heading",
+          "text": "canary 拦不住什么"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "全局或堆上的函数指针：canary 守护的是单个栈帧的保存返回地址。对 `.data` 或堆上被破坏的指针它无能为力 —— 那些位置从不触碰栈帧。",
+            "启发式未保护的函数：上面的 `f_math` 既没有守卫也没有检查，所以未保护栈帧里的溢出对 canary 不可见。",
+            "返回前已被使用的被破坏局部变量：如果溢出止步于守卫槽之前 —— 例如破坏了局部对象里的 vtable 指针 —— 那么在 canary 仍然完好时损害已经造成。",
+            "已知的守卫值：该值每个进程只有一个随机数，存放在 TLS 中。能读内存的攻击者就能读出 canary，并在溢出之后再把它写回去。",
+            "最终优化器会抹掉的缓冲区：在 `-O2` 下，`process` 变成 `movl $1, %eax; retq` —— 缓冲区、溢出和 canary 一起消失，因为保护只能存活在它保护的状态存活的期间。"
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "成本小且局部：每个被保护的函数，入口处一次 TLS 加载、一次存储，退出处一次 TLS 加载加一次比较，外加一条通向 abort 的冷分支。它是与 CFI trap 同类的运行时检查，而非编译期性质 —— 和 CFI trap 一样，它的全部价值在于响亮地 abort，而不是带着错误继续。"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "canary 存在于机器码中，不在 IR 中：在 `.ll` 里 grep 守卫找不到任何东西。证据是 属性束中的 `sspstrong` 属性，以及汇编里的 `%fs:` 加载。",
+            "守卫是进程级的，不是帧级的：整个地址空间共用一个 TLS 值。泄漏掉这一个值就破了进程内所有的 canary。",
+            "演示故意使用 `-O0`：在 `-O2` 下，优化器会抹掉有漏洞的缓冲区，保护也随之消失 —— 因为它保护的状态消失了。",
+            "对守卫槽的部分破坏就足以触发检查：比较覆盖全部 8 字节，所以溢出只要与守卫有任何重叠就会 abort。",
+            "这个工具链的默认是没有 canary；本课的每条命令都显式写出了该 flag。"
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：演示中，无 canary 的构建到达了 `sink`，带 canary 的构建 abort。(a) 守卫值从哪里来，又被种在栈帧的什么位置？(b) 保护在 IR 中唯一的痕迹是什么，为什么这让 canary 对只读 IR 的读者不可见？(c) 举出一种仍然能攻破带 canary 构建的溢出，并说明 canary 为什么看不到它。",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 守卫是 TLS 中的进程级值（`movq %fs:40, %rax` —— 进程中每个栈帧都是同一个数）。入口处把一份副本存入帧中的 `-8(%rbp)`，位于 `-32(%rbp)` 处有漏洞的缓冲区和 `+8(%rbp)` 处的保存返回地址之间，因此从缓冲区溢出的数据必须越过守卫才能到达返回地址。",
+                "(b) 函数 attribute bundle 中的 `sspstrong`（连同 `\"stack-protector-buffer-size\"`）。前端只记录哪些帧有资格；后端从该属性生成 load/store/compare，所以只读 IR 的读者根本看不到任何 canary 指令 —— 保护是生成的机器码的性质，不是 IR 的性质。",
+                "(c) 例如覆盖一个全局函数指针：canary 只守护受保护帧的保存返回地址。`.data` 中被破坏的调度指针从不触碰任何帧的守卫，程序顺着它调度，而 canary 从未被询问 —— 检查只存在于插桩函数的退出处，且只针对它们自己的返回路径。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1791
+    },
+    {
+      "id": 83,
+      "number": 1,
+      "day": 3,
+      "group": "ollvm",
+      "title": "虚假控制流",
+      "originalTitle": "Bogus control flow",
+      "summary": "把 OLLVM 的虚假控制流变换作为学习者的 pass：在每个条件分支上加不透明谓词门，false 一侧死冗余块，-O0 差分证明，以及 -O2 消融 —— 常量种子被折叠，运行时种子死于死存储消除，只有不透明的副作用存活下来，被提升到单个 sink。",
+      "takeaway": "虚假控制流添加的是由优化器无法证明的谓词把守的死结构。它的质量是最终产物的性质，而不是 pass 输出的性质：在 -O2 下，门被折叠或死块被清空，变换中存活的只有优化器不允许删除的东西 —— 它看不到的副作用。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "本部分把三种 OLLVM 系混淆当作 MiniShield pass，按照第 1 卷收官的配方一次加一个：在 `lib/Plugin.cpp` 中注册名字，把支持契约编码进 guard，写 builder，编排资格判定，构建，verify，并用一对固定测试输入收尾 —— 变换前后都通过 `opt -passes=verify` 且运行行为完全一致。OLLVM 是 2015 年把这些变换收集进 LLVM 的项目：每一种都在不改变程序行为的前提下改变程序结构，其假设是静态读者 —— 人或分析工具 —— 会花时间在这些添加的结构上。正是这个假设被 全景课置于危险之中：最终优化器不读程序，而是证明关于它的结论，凡能证明掉的就移除。本部分的标准由 全景课设定：以最终产物而非 pass 输出来评判每个变换。"
+        },
+        {
+          "type": "heading",
+          "text": "配方，实例化到 bcfl"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "在 `lib/Plugin.cpp` 中注册分支：`Name == \"minishield-bcfl\"` → `FPM.addPass(minishield::BogusControlFlowPass())`，与 `minishield-flatten` 和 `minishield-stats` 并列。",
+            "写 guard `BcflEligibility::check(F)`：函数至少有一个条件分支；没有 `unreachable`、没有 `musttail`、没有内联汇编 —— `tests/ir/` 中共享的否定固定测试输入 已覆盖这些形态。拒绝时打印具名诊断，并原样保留函数。",
+            "写 builder：对每个条件分支，插入一个门块，对一个种子求值不透明谓词，true 一侧是原来的目标，false 一侧是一个新的死块。",
+            "在 `BogusControlFlowPass::run` 中编排，完全照 `FlatteningPass::run` 的样子：guard、build、verify。",
+            "用固定测试输入对加分差分收尾：两个模块都通过 verify，两个二进制运行行为完全一致。"
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "固定测试输入是 `grade`，一个只有一个条件分支的函数 —— 在 `-O0` 下有三个块。不透明谓词是两个连续整数的乘积：给定种子 `s`，计算 `s² − s`，即 `s·(s−1)`，并测试它是否为偶数。`s` 和 `s−1` 中总有一个是偶数，所以乘积总是偶数，谓词总是为真 —— 但这是关于种子的数论事实，而不是优化器被给到的东西。"
+        },
+        {
+          "type": "heading",
+          "text": "变换后的模块"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"bcfl_fixture.c\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @printf(ptr noundef, ...)\n\n@.fmt = private unnamed_addr constant [16 x i8] c\"grades sum: %d\\0A\\00\"\n\n; bcfl: 4 new blocks. Each side's real target is now reached through a gate\n; guarded by an opaque predicate (product of consecutive integers is even).\n; The seeds are constants chosen at transform time; the redundant blocks are dead.\ndefine i32 @grade(i32 noundef %score) {\nentry:\n  %seed_pass = alloca i32, align 4\n  %seed_fail = alloca i32, align 4\n  store i32 987654, ptr %seed_pass, align 4\n  store i32 135791, ptr %seed_fail, align 4\n  %cmp = icmp sge i32 %score, 60\n  br i1 %cmp, label %gate_pass, label %gate_fail\ngate_pass:\n  %sp = load i32, ptr %seed_pass, align 4\n  %t = mul i32 %sp, %sp\n  %d = sub i32 %t, %sp\n  %p = urem i32 %d, 2\n  %g = icmp eq i32 %p, 0\n  br i1 %g, label %pass, label %bogus_pass\npass:\n  ret i32 1\nbogus_pass:\n  store i32 0, ptr %seed_pass, align 4\n  br label %pass\ngate_fail:\n  %sf = load i32, ptr %seed_fail, align 4\n  %t2 = mul i32 %sf, %sf\n  %d2 = sub i32 %t2, %sf\n  %p2 = urem i32 %d2, 2\n  %g2 = icmp eq i32 %p2, 0\n  br i1 %g2, label %fail, label %bogus_fail\nfail:\n  ret i32 0\nbogus_fail:\n  store i32 0, ptr %seed_fail, align 4\n  br label %fail\n}\n\ndefine i32 @main() {\n  %r1 = call i32 @grade(i32 70)\n  %r2 = call i32 @grade(i32 30)\n  %sum = add i32 %r1, %r2\n  %p = call i32 @printf(ptr @.fmt, i32 %sum)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "对照原始版本读它。入口现在把两个种子 —— 变换时选定的 `987654` 和 `135791` —— 存入 allocas。原来的分支不再到达它的真实目标：`br i1 %cmp` 去往 `gate_pass` 和 `gate_fail`。每个门加载自己的种子，计算 `mul` → `sub` → `urem 2` → `icmp eq 0`，然后分支：true 一侧（唯一会运行的那一侧）到达未改动的 `pass`/`fail` 块；false 一侧去往新的 `bogus_pass`/`bogus_fail` 块，该块向种子写入后顺流到真实目标。函数从 3 个块变成 7 个，模块从 517 字节变成 1444 字节。冗余块按构造是死的 —— 门总是走 true 边 —— 而这正是重点：它们存在是为了被读，而不是被执行。"
+        },
+        {
+          "type": "heading",
+          "text": "-O0 差分证明"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output bcfl_before.ll\n$ opt-23 -passes=verify -disable-output bcfl_after.ll\n$ clang-23 -O0 bcfl_before.ll -o bcfl_before_bin\n$ clang-23 -O0 bcfl_after.ll -o bcfl_after_bin\n$ ./bcfl_before_bin\ngrades sum: 1\n$ ./bcfl_after_bin\ngrades sum: 1\n$ diff <(./bcfl_before_bin) <(./bcfl_after_bin)\n(identical)"
+        },
+        {
+          "type": "paragraph",
+          "text": "两个模块都通过 verify；两个二进制打印同一行 —— `grade(70)` 返回 1，`grade(30)` 返回 0，总和都是 1。注意什么在这里不是证据：`-O0` 的 ELF 大小纹丝不动（两个二进制都是 16624 字节），因为节对齐吞掉了差异 —— 模块的字节数，517 → 1444，才是衡量变换添加了什么的诚实标尺。"
+        },
+        {
+          "type": "heading",
+          "text": "-O2 对它做了什么"
+        },
+        {
+          "type": "paragraph",
+          "text": "现在把最终优化器跑在混淆后的模块上。种子是常量，所以门的算术是编译期常量：谓词折叠为 true，false 边死去，冗余块（其唯一指令是向一个之后无人读取的种子写入）被消除，门被合并掉。七个块变成一个："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @printf(ptr noundef, ...)\n\n@.fmt = private unnamed_addr constant [16 x i8] c\"grades sum: %d\\0A\\00\"\n\n; -O2 on the bcfl module: the seeds are constants, so the gate predicates\n; fold, the dead blocks are removed, and the original branch linearizes.\ndefine i32 @grade(i32 noundef %score) {\nentry:\n  %cmp = icmp sgt i32 %score, 59\n  %. = zext i1 %cmp to i32\n  ret i32 %.\n}\n\ndefine i32 @main() {\n  %p = call i32 @printf(ptr @.fmt, i32 1)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "`grade` 回到单个块 —— `icmp sgt i32 %score, 59`（优化器自己对 `score >= 60` 的重写）、一个 `zext`、一个 `ret` —— 而 `main` 把两次 `grade` 调用折叠成了常量 `1`。变换完全消失了。把两种机制分开看。第一，常量种子：谓词*计算*出常量，所以它上面的一切都被折叠。第二，种子不是常量时会发生什么 —— 把两个 store 都换成 `store i32 %score`：谓词现在作用于运行时数据，而优化器仍然不会通过证明来消融这个门。一个最小探针（对一个参数做 `s·(s−1) % 2 == 0` 的裸分支）显示 LLVM 23 的 `-O2` 会把谓词规范化为 `x·(x−1)` 加 `and 1`，并把分支变成 `select` —— 但保留了它：连续整数乘积的偶性在这个上下文中并未被证明。运行时种子的模块照样消融，7 → 1 个块，走的是另一条路：冗余块的 store 是死的（门之后没有任何东西读取种子），DCE 清空了这些块，空的顺流块被合并。谓词从未被证明；结构只是被清空了。"
+        },
+        {
+          "type": "paragraph",
+          "text": "优化器不能删除的唯一内容是副作用。在每个冗余块里放一个不透明调用（`call void @record_trace(i32 7)` 和 `(i32 9)`），死块就不再能被清空：这些调用必须保留。`-O2` 的回答是把两个死块合并成一个 sink，放在仍然存活着的门分支的 false 一侧 —— `br i1 %g, label %common.ret, label %common.ret.sink.split` —— 带一个被提升的调用和一个选择传哪个参数的 `select`。七个块变成三个；运行时行为仍然完全一致，因为谓词确实总是为真，sink 也确实从不执行。变换中存活下来的是藏在一个看似存活的分支后面的提升调用，而不是 pass 发出的四个新增块。"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "常量种子：谓词计算出常量；折叠 → 死边消除 → 死块 DCE → 合并。7 个块 → 1。",
+            "运行时种子，无副作用：冗余块的 store 被消除，块变成空的顺流，块合并移除了门。7 个块 → 1。谓词从未被证明。",
+            "运行时种子 + 不透明调用：调用必须存活；两个死块合并成一个 sink，位于存活门的 false 一侧，参数被选定。7 个块 → 3。"
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "三条路线共享一条规律，而这条规律在本部分反复出现：混淆添加没有行为的结构，优化器的工作恰恰是移除没有行为的结构。不透明的副作用是优化器不允许删除的唯一内容，而它们甚至会被提升和缩小。pass 输出（1444 字节，7 个块）和最终产物（1 个块）读起来是不同的程序；出厂的是后者。"
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：在变换后的模块中，门总朝一个方向走，但 -O2 并没有通过证明这一点来消融它们。(a) 陈述谓词及其总是为真的原因，并指出优化器对它的哪次重写没有把活儿干完。(b) 常量种子构建消融 7 → 1 个块，运行时种子构建也消融 7 → 1 个块。分别说出消融它们的不同机制。(c) 在幸存变体中，`record_trace` 调用在 -O2 之后落在哪里，为什么那个位置是变换能取到的最强形态？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 两个连续整数的乘积：门计算 `s·(s−1) % 2 == 0`。`s` 和 `s−1` 中有一个是偶数，所以乘积总是偶数，谓词总是为真。`instcombine` 把 `s² − s` 重写为 `s·(s−1)`，把 `urem 2` 重写为 `and 1` —— 它规范化了谓词的形状，但没有在分支上下文中证明它为真。",
+                "(b) 常量种子：谓词计算为常量 true，false 边被消除，冗余块（其唯一 store 的目标是死种子）被 DCE，门被合并掉 —— 函数被线性化。运行时种子，无副作用：优化器从不证明谓词；DCE 移除冗余块的死 store，块变成空的顺流，块合并把门本身移除。",
+                "(c) 落在仍然存活着的门分支的 false 一侧的单个 sink 块（`common.ret.sink.split`）中，从两个死块中被提升出来，带一个选择传哪个参数（7 或 9）的 `select`。该调用是不透明的副作用，所以 DCE 不能删除它；两个死块合并成一个共享的 sink，把混淆的一对调用塌缩成一个 —— 而由于门的谓词确实总是为真，sink 从不运行，行为保持不变。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1778
+    },
+    {
+      "id": 84,
+      "number": 2,
+      "day": 3,
+      "group": "ollvm",
+      "title": "字符串加密",
+      "originalTitle": "String encryption",
+      "summary": "把 OLLVM 字符串加密作为学习者的 pass：明文字面常量被替换为一个加密 blob、一个密钥和一个解密循环，-O0 证明输出相同且 `strings` 找不到任何东西，-O2 证明对常量的解密循环本身就是常量 —— 明文以立即数形式回来，blob 被删除。",
+      "takeaway": "字符串加密把字面量移出 `.rodata`，藏到运行时 XOR 之后，使静态阅读产物的人只能看到 blob。与本部分的每个变换一样，它的价值是最终产物的性质：在 -O2 下循环被常量折叠，明文以立即数值回来，加密只存在于循环无法被折叠的那个优化层级上。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "静态阅读二进制的第一个动作是看它的字符串：程序用到的 URL、密钥、魔词和格式化字面量。OLLVM 的字符串加密攻击的正是这个：每个明文字面常量变成一个加密 blob 加逐字节密钥，每处使用变成一个解密循环，在运行时把明文重建进栈缓冲区。程序仍然在计算明文 —— 变换改变的是字节放在哪里，而不是它们是什么。"
+        },
+        {
+          "type": "paragraph",
+          "text": "作为 MiniShield pass，它遵循与上一课相同的五个接缝：注册表中的 `minishield-strenc`；一个 guard，针对字符串常量可达的函数（没有 `musttail`、没有内联汇编，共享的 `tests/ir/` 固定测试输入）；一个 builder，把每个 `c\"...\"` 全局替换为 `@enc`/`@key` 对，并在使用处插入逐字节 XOR 循环；同样的编排；以及下面这对固定测试输入，经差分验证。"
+        },
+        {
+          "type": "heading",
+          "text": "变换后的模块"
+        },
+        {
+          "type": "paragraph",
+          "text": "固定测试输入是 `banner`，它 `puts` 常量 `\"minishield\\0\"` —— 一个全局、一个调用、一个 305 字节的模块。变换后："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"strenc_fixture.c\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @puts(ptr noundef)\n\n; The plaintext is out of the module: only the encrypted blob and the key remain.\n@enc = private unnamed_addr constant [11 x i8] c\"\\37\\76\\ad\\e2\\04\\6c\\b7\\f4\\47\\94\\68\"\n@key = private unnamed_addr constant [11 x i8] c\"\\5a\\1f\\c3\\8b\\77\\04\\de\\91\\2b\\f0\\68\"\n\ndefine void @banner() {\nentry:\n  %buf = alloca [11 x i8], align 1\n  %i = alloca i64, align 8\n  store i64 0, ptr %i, align 8\n  br label %loop\nloop:\n  %iv = load i64, ptr %i, align 8\n  %c = icmp slt i64 %iv, 11\n  br i1 %c, label %body, label %after\nbody:\n  %gep_e = getelementptr inbounds [11 x i8], ptr @enc, i64 0, i64 %iv\n  %e = load i8, ptr %gep_e\n  %gep_k = getelementptr inbounds [11 x i8], ptr @key, i64 0, i64 %iv\n  %k = load i8, ptr %gep_k\n  %x = xor i8 %e, %k\n  %gep_b = getelementptr inbounds [11 x i8], ptr %buf, i64 0, i64 %iv\n  store i8 %x, ptr %gep_b\n  %inc = add i64 %iv, 1\n  store i64 %inc, ptr %i, align 8\n  br label %loop\nafter:\n  %b0 = getelementptr inbounds [11 x i8], ptr %buf, i64 0, i64 0\n  %p = call i32 @puts(ptr %b0)\n  ret void\n}\n\ndefine i32 @main() {\n  call void @banner()\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "`@.str` 没了。取而代之的是：`@enc`（密文）和 `@key`（逐字节密钥），两者都在变换时选定 —— 明文的第 `i` 个字节是 `@enc[i] xor @key[i]`，最后一个字节是加密后的 NUL 终止符（`0x00 xor 0x68`）。`banner` 分配一个栈缓冲区，运行一个以 `i64` 为索引的循环：加载一个密文字节，加载一个密钥字节，XOR，存储。索引是 `i64`，因为对数组的 `getelementptr` 接受 `i64` 索引 —— 把 32 位计数器加宽，就是手写版本出错的细节，`opt` 以 `expected 'i64'` 拒绝它。明文现在在运行时只存在于 `%buf` 中，介于循环退出与 `puts` 调用之间。"
+        },
+        {
+          "type": "heading",
+          "text": "差分证明"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output strenc_before.ll\n$ opt-23 -passes=verify -disable-output strenc_after.ll\n$ clang-23 -O0 strenc_before.ll -o strenc_before_bin\n$ clang-23 -O0 strenc_after.ll -o strenc_after_bin\n$ diff <(./strenc_before_bin) <(./strenc_after_bin)\n(identical)\n$ strings strenc_before_bin | grep -x minishield\nminishield\n$ strings strenc_after_bin | grep -x minishield\n(no match — exit status 1)"
+        },
+        {
+          "type": "paragraph",
+          "text": "两条注记。第一，为什么是 `grep -x`：在 conda 工具链下构建的二进制，其 note 段中带有工具链自己的路径 —— `/home/.../minishield/...` —— 所以裸 `grep minishield` 会在*两个*二进制中命中这些路径噪声。`-x` 锚定整行，所以只有真正的字符串行会匹配。第二，成本：为了把一个 11 字节的字面量藏到循环背后，模块从 305 字节长到 1175 字节。"
+        },
+        {
+          "type": "heading",
+          "text": "-O2 对它做了什么"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "target triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @puts(ptr noundef)\n\n; -O2 on the strenc module: the decrypt loop over constants is itself\n; a constant. The result is emitted as immediates; @enc and @key are gone.\ndefine void @banner() {\nentry:\n  %buf = alloca [11 x i8], align 8\n  store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>, ptr %buf, align 8\n  %gep_b.8 = getelementptr inbounds nuw i8, ptr %buf, i64 8\n  store i8 108, ptr %gep_b.8, align 8\n  %gep_b.9 = getelementptr inbounds nuw i8, ptr %buf, i64 9\n  store i8 100, ptr %gep_b.9, align 1\n  %gep_b.10 = getelementptr inbounds nuw i8, ptr %buf, i64 10\n  store i8 0, ptr %gep_b.10, align 2\n  %p = call i32 @puts(ptr nonnull dereferenceable(1) %buf)\n  ret void\n}\n\ndefine noundef i32 @main() {\n  %buf.i = alloca [11 x i8], align 8\n  call void @llvm.lifetime.start.p0(ptr nonnull %buf.i)\n  store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>, ptr %buf.i, align 8\n  %gep_b.8.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 8\n  store i8 108, ptr %gep_b.8.i, align 8\n  %gep_b.9.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 9\n  store i8 100, ptr %gep_b.9.i, align 1\n  %gep_b.10.i = getelementptr inbounds nuw i8, ptr %buf.i, i64 10\n  store i8 0, ptr %gep_b.10.i, align 2\n  %p.i = call i32 @puts(ptr nonnull dereferenceable(1) %buf.i)\n  call void @llvm.lifetime.end.p0(ptr nonnull %buf.i)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "解密循环的操作数是两个常量数组，所以整个循环都是编译期常量。`-O2` 用立即数 store 替换了它 —— `store <8 x i8> <i8 109, i8 105, i8 110, i8 105, i8 115, i8 104, i8 105, i8 101>` 是 `minishie`，再加上 `l`、`d` 和 NUL 作为单独的 store —— 并完全删除了 `@enc` 和 `@key`。陷阱在测试里：在 -O2 模块上 `grep minishield` 什么都找不到，于是用同样的 `strings` 式检查探测产物的读者会得出明文仍被隐藏的结论。事实并非如此：它回来了，以 store 中立即数值的形式，而不是字符串字面量 —— 一个读 store 立即数的反汇编器会直接看到这些字节。变换所提供的性质从来不是“优化器无法重建明文”；而是“在出厂的优化层级上，明文不是产物中一段连续的字面量”。"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "变换前，任何层级：字面量都躺在 `.rodata` 里；`strings` 能发现它。",
+            "变换后，-O0：blob + 密钥 + 运行时循环；`strings` 什么都找不到；成本是每次调用都要一个栈缓冲区和一个逐字节循环。",
+            "变换后，-O2：循环被常量折叠成立即数，全局被删除，字节在反汇编的立即数字段中可见。产物与未加密的一样容易读。"
+          ]
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：(a) 在变换后的模块中，明文在运行时存在于哪里，哪两个全局保存着它的材料？(b) 在 -O0 二进制上 `strings` 找不到任何东西，在 -O2 模块上 `grep minishield` 也找不到任何东西。-O2 下实际回来的是什么，以什么形式回来，为什么这让 -O0 的 `strings` 测试成为对最终产物的误导探测？(c) 陈述最终流水线满足什么条件时，字符串加密的性质才真正在出厂的二进制中成立。",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 在栈缓冲区（`%buf`）中，由 XOR 循环逐字节重建，只存在于循环退出与 `puts` 调用之间。它的材料保存在两个全局中，`@enc`（密文）和 `@key`（逐字节密钥）；明文本身不出现在任何全局中。",
+                "(b) 在 -O2 下，针对两个常量数组的解密循环被常量折叠：明文以立即数值（`store <8 x i8> <i8 109, ...>`）回来，而不是字符串字面量 —— 所以即使读 store 的反汇编器能看到这些字节，`grep minishield` 也找不到任何东西。-O0 的 `strings` 测试度量的是“这个 -O0 二进制中没有连续字面量”；它对最终产物一无所知，而那里同样的变换被折叠回了普通 store。",
+                "(c) 变换必须是流水线的最后一步 —— 在最终优化之后应用，使之后没有任何优化器 pass（第二次 `opt -O2`、链接时的 LTO）能折叠解密循环。这就是本部分在下一课收尾时给出的部署规则。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1324
+    },
+    {
+      "id": 85,
+      "number": 3,
+      "day": 3,
+      "group": "ollvm",
+      "title": "子程序拆分",
+      "originalTitle": "Subroutine splitting",
+      "summary": "把 OLLVM 子程序拆分作为学习者的 pass：每个非入口块变成一个 `internal` 子程序，原函数变成状态调度器，差分证明行为不变，-O2 证明内联器正是该变换的精确逆 —— 每个部分都被内联回去，恢复出的循环被向量化。",
+      "takeaway": "子程序拆分是一种纯粹的结构分解：控制流图（CFG）的块变成模块级的 `internal` 函数，由状态 switch 驱动。它是三个变换中最脆弱的，因为它不添加谓词、不添加数据、不添加副作用 —— 只有一种分解，而优化器的内联器会精确地把它重建回来。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "子程序拆分（OLLVM 的 `subdiv`）接收一个 CFG 纠缠的函数，把它的每个非入口块移进自己的 `internal` 函数。原函数保留入口，变成针对状态变量的调度器：一个 `switch`，调用对应的部分然后循环回来。每个部分看起来都像不相干的辅助函数，而 CFG 的形状 —— 静态分析所依赖的东西 —— 在任何单个函数内部都不再可见。"
+        },
+        {
+          "type": "paragraph",
+          "text": "又是五个接缝，带着上一课的模式：注册表中的 `minishield-subdivide`；一个 guard，针对块可移动的函数（没有入边在分裂后需要落脚点的 PHI 节点 —— 下面的固定测试输入 在 -O0 下没有 PHI，所有状态都在 allocas 中；没有 `musttail`、没有内联汇编）；一个 builder，把每个非入口块切成一个 `internal` 函数，把需要的 allocas 作为指针参数传入，把每个条件分支转换为写下一个状态的 `select`，把每个无条件分支转换为常量 store，并把 `ret` 变成该部分的返回；同样的编排；以及固定测试输入对，经差分验证。"
+        },
+        {
+          "type": "heading",
+          "text": "变换后的模块"
+        },
+        {
+          "type": "paragraph",
+          "text": "固定测试输入是 `total`，一个累加 `a·b` 的循环，处于其 -O0 形态：五个块（`entry`、`cond`、`body`、`inc`、`exit`），四个 allocas，没有 PHI。变换后 —— 2 → 6 个函数，模块 1123 → 2232 字节："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"subdivide_fixture.c\"\ntarget triple = \"x86_64-conda-linux-gnu\"\n\ndeclare i32 @printf(ptr noundef, ...)\n\n@.fmt = private unnamed_addr constant [15 x i8] c\"total(6,4)=%d\\0A\\00\"\n\n; subdivide: each non-entry block becomes an internal subroutine. The original\n; function keeps only the entry setup and becomes the state dispatcher.\n; State numbering follows block order: 1=cond, 2=body, 3=inc, 4=exit.\n\ndefine internal void @total.1(ptr %p_i, ptr %p_b, ptr %p_state) {\n  %i = load i32, ptr %p_i, align 4\n  %b2 = load i32, ptr %p_b, align 4\n  %c = icmp slt i32 %i, %b2\n  %ns = select i1 %c, i32 2, i32 4\n  store i32 %ns, ptr %p_state, align 4\n  ret void\n}\n\ndefine internal void @total.2(ptr %p_a, ptr %p_sum, ptr %p_state) {\n  %a2 = load i32, ptr %p_a, align 4\n  %s = load i32, ptr %p_sum, align 4\n  %ns = add nsw i32 %s, %a2\n  store i32 %ns, ptr %p_sum, align 4\n  store i32 3, ptr %p_state, align 4\n  ret void\n}\n\ndefine internal void @total.3(ptr %p_i, ptr %p_state) {\n  %i2 = load i32, ptr %p_i, align 4\n  %inc2 = add nsw i32 %i2, 1\n  store i32 %inc2, ptr %p_i, align 4\n  store i32 1, ptr %p_state, align 4\n  ret void\n}\n\ndefine internal i32 @total.4(ptr %p_sum) {\n  %r = load i32, ptr %p_sum, align 4\n  ret i32 %r\n}\n\ndefine i32 @total(i32 noundef %a, i32 noundef %b) {\nentry:\n  %p_a = alloca i32, align 4\n  %p_b = alloca i32, align 4\n  %p_sum = alloca i32, align 4\n  %p_i = alloca i32, align 4\n  store i32 %a, ptr %p_a, align 4\n  store i32 %b, ptr %p_b, align 4\n  store i32 0, ptr %p_sum, align 4\n  store i32 0, ptr %p_i, align 4\n  %p_state = alloca i32, align 4\n  store i32 1, ptr %p_state, align 4\n  br label %dispatch\ndispatch:\n  %s = load i32, ptr %p_state, align 4\n  switch i32 %s, label %invalid [\n    i32 1, label %c1\n    i32 2, label %c2\n    i32 3, label %c3\n    i32 4, label %c4\n  ]\nc1:\n  call void @total.1(ptr %p_i, ptr %p_b, ptr %p_state)\n  br label %dispatch\nc2:\n  call void @total.2(ptr %p_a, ptr %p_sum, ptr %p_state)\n  br label %dispatch\nc3:\n  call void @total.3(ptr %p_i, ptr %p_state)\n  br label %dispatch\nc4:\n  %r = call i32 @total.4(ptr %p_sum)\n  ret i32 %r\ninvalid:\n  unreachable\n}\n\ndefine i32 @main() {\n  %r = call i32 @total(i32 6, i32 4)\n  %p = call i32 @printf(ptr @.fmt, i32 %r)\n  ret i32 0\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "先读各部分。`total.1` 是旧的 `cond` 块：它计算分支决定，但不分支，而是写下下一个状态 —— `%ns = select i1 %c, i32 2, i32 4`：再循环一次（状态 2）或退出（状态 4）。`total.2` 是 `body`（累加，然后写状态 3）。`total.3` 是 `inc`（自增，然后写状态 1，回到条件判断）。`total.4` 是 `exit` —— 唯一返回值的部分，返回累加和。条件分支变成了状态赋值；无条件分支变成了常量 store；`ret` 变成了该部分的返回。现在看调度器：`total` 保留入口设置，新增一个初始化为 1 的 `%p_state` alloca，并在 `switch i32 %s` 上循环：每个 case 调用对应的部分并返回调度；case 4 返回该部分的值；`invalid` 默认是 `unreachable`，因为状态只会被赋成 1 到 4。"
+        },
+        {
+          "type": "heading",
+          "text": "差分证明"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output subdivide_before.ll\n$ opt-23 -passes=verify -disable-output subdivide_after.ll\n$ clang-23 -O0 subdivide_before.ll -o subdivide_before_bin\n$ clang-23 -O0 subdivide_after.ll -o subdivide_after_bin\n$ diff <(./subdivide_before_bin) <(./subdivide_after_bin)\n(identical)\n$ ./subdivide_after_bin\ntotal(6,4)=24\n$ grep -c '^define' subdivide_before.ll\n2\n$ grep -c '^define' subdivide_after.ll\n6"
+        },
+        {
+          "type": "paragraph",
+          "text": "两个模块都通过 verify；两个二进制都打印 `total(6,4)=24`；模块多出四个 `internal` 函数。-O0 二进制的大小几乎没动（16624 对 16632 字节）—— 又是节对齐 —— 所以诚实的衡量是函数数量和模块字节数。"
+        },
+        {
+          "type": "heading",
+          "text": "-O2 对它做了什么"
+        },
+        {
+          "type": "paragraph",
+          "text": "每个 `total.N` 都是 `internal`（模块外没有任何定义能引用它），且只有一个调用者 —— 调度器。这正是内联器的精确目标，-O2 内联了全部四个部分，恢复出原循环，然后优化恢复出的循环。下面的片段是 -O2 模块中的 `total` 函数（它引用的 attribute group 和循环元数据位于模块末尾）："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define i32 @total(i32 noundef %a, i32 noundef %b) local_unnamed_addr #1 {\ndispatch.outer4:\n  %c.i.jt129 = icmp sgt i32 %b, 0\n  br i1 %c.i.jt129, label %dispatch.outer4.jt3.lr.ph, label %c4\n\ndispatch.outer4.jt3.lr.ph:                        ; preds = %dispatch.outer4\n  %min.iters.check = icmp ult i32 %b, 8\n  br i1 %min.iters.check, label %dispatch.outer4.jt3.preheader, label %vector.ph\n\nvector.ph:                                        ; preds = %dispatch.outer4.jt3.lr.ph\n  %n.vec = and i32 %b, 2147483640\n  %broadcast.splatinsert = insertelement <4 x i32> poison, i32 %a, i64 0\n  %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> poison, <4 x i32> zeroinitializer\n  br label %vector.body\n\nvector.body:                                      ; preds = %vector.body, %vector.ph\n  %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]\n  %vec.phi = phi <4 x i32> [ zeroinitializer, %vector.ph ], [ %0, %vector.body ]\n  %vec.phi32 = phi <4 x i32> [ zeroinitializer, %vector.ph ], [ %1, %vector.body ]\n  %0 = add <4 x i32> %vec.phi, %broadcast.splat\n  %1 = add <4 x i32> %vec.phi32, %broadcast.splat\n  %index.next = add nuw i32 %index, 8\n  %2 = icmp eq i32 %index.next, %n.vec\n  br i1 %2, label %middle.block, label %vector.body, !llvm.loop !0\n\nmiddle.block:                                     ; preds = %vector.body\n  %bin.rdx = add <4 x i32> %1, %0\n  %3 = tail call i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %bin.rdx)\n  %cmp.n = icmp eq i32 %b, %n.vec\n  br i1 %cmp.n, label %c4, label %dispatch.outer4.jt3.preheader\n\ndispatch.outer4.jt3.preheader:                    ; preds = %dispatch.outer4.jt3.lr.ph, %middle.block\n  %p_sum.0.ph2031.ph = phi i32 [ 0, %dispatch.outer4.jt3.lr.ph ], [ %3, %middle.block ]\n  %inc2.i.sink30.ph = phi i32 [ 0, %dispatch.outer4.jt3.lr.ph ], [ %n.vec, %middle.block ]\n  br label %dispatch.outer4.jt3\n\ndispatch.outer4.jt3:                              ; preds = %dispatch.outer4.jt3.preheader, %dispatch.outer4.jt3\n  %p_sum.0.ph2031 = phi i32 [ %ns.i1, %dispatch.outer4.jt3 ], [ %p_sum.0.ph2031.ph, %dispatch.outer4.jt3.preheader ]\n  %inc2.i.sink30 = phi i32 [ %inc2.i, %dispatch.outer4.jt3 ], [ %inc2.i.sink30.ph, %dispatch.outer4.jt3.preheader ]\n  %ns.i1 = add nsw i32 %p_sum.0.ph2031, %a\n  %inc2.i = add nuw nsw i32 %inc2.i.sink30, 1\n  %c.i.jt1 = icmp slt i32 %inc2.i, %b\n  br i1 %c.i.jt1, label %dispatch.outer4.jt3, label %c4, !llvm.loop !3\n\nc4:                                               ; preds = %dispatch.outer4.jt3, %middle.block, %dispatch.outer4\n  %p_sum.0.ph20.lcssa = phi i32 [ 0, %dispatch.outer4 ], [ %3, %middle.block ], [ %ns.i1, %dispatch.outer4.jt3 ]\n  ret i32 %p_sum.0.ph20.lcssa\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "注意优化器对恢复出的循环做了什么：它没有止步于原循环 —— 它把循环向量化了（4 宽 i32 加法），每个向量迭代以 `llvm.vector.reduce.add.v4i32` 收尾。与未混淆的原始模块的对比正是重点：`-O2` 作用在*普通*模块上时，把同一个循环强度削减为闭式 `mul i32 %b, %a` 加一个 select；而 `-O2` 作用在*混淆*模块上时，恢复出循环并把它向量化。两种最终状态都计算 `a·b`；但它们是不同程序，因为内联后的状态机改变了优化器看待这个循环的方式。变换本身 —— 六个函数、一个 switch、一个状态机 —— 连同 2232 字节一起消失了。"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "变换",
+              "Pass 输出（-O0）",
+              "最终产物（-O2）"
+            ],
+            [
+              "虚假控制流",
+              "7 个块，1444 B",
+              "1 个块 —— 种子折叠，或死块 DCE + 合并"
+            ],
+            [
+              "字符串加密",
+              "blob + 密钥 + 循环，1175 B",
+              "立即数 store；全局被删除"
+            ],
+            [
+              "子程序拆分",
+              "6 个函数，2232 B",
+              "1 个函数；循环被 4 宽向量化"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Subdivide 是三者中最脆弱的，原因现在可以看清了：它添加的是没有内容的结构。虚假控制流添加了一个优化器无法证明的谓词（加上不透明的副作用，就是优化器不允许删除的内容）；字符串加密把数据移到至少必须在 -O0 下执行的循环后面。Subdivide 添加的只是对既有内容的分解 —— 而分解恰恰是内联器移除的东西。输出是内联燃料的变换，无法在一个会内联的优化器面前存活。"
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：(a) 在变换后的模块中，原来的条件分支在各部分内部以什么形式出现，调度器的 `invalid` case 起什么作用？(b) 说出 `total.N` 函数的两个性质，使它们在 -O2 下必然是内联目标。(c) 为什么子程序拆分是本部分三个 OLLVM 变换中最脆弱的？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 以写入共享状态槽的 `select` 写下下一个状态：`total.1` 以 `%ns = select i1 %c, i32 2, i32 4; store i32 %ns, ptr %p_state` 结尾，调度器的 `switch` 按存储的值重新分支。`invalid` case 是 `switch` 的默认，且是 `unreachable`：状态只会被赋成 1 到 4，所以默认分支把状态机的不变量编码成了死代码。",
+                "(b) `internal` 链接 —— 模块外没有任何定义能引用它们 —— 以及单一调用者，即调度器。内联器能看到整个被调函数及其唯一使用点，所以调用和函数都消失了。",
+                "(c) 它添加的是没有内容的结构：没有新谓词、没有移动的数据、没有副作用 —— 只是对既有控制流图（CFG）的分解。内联器，它的精确逆，撤销这个分解，然后优化恢复出的循环（此处是 4 宽向量化）。另外两个变换留下了优化器不能简单删除的东西：存活分支后面一个无法证明的谓词，或循环后面的字节。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1729
+    },
+    {
+      "id": 86,
+      "number": 4,
+      "day": 3,
+      "group": "ollvm",
+      "title": "最终优化器留下什么",
+      "originalTitle": "What the final optimizer keeps",
+      "summary": "让 OLLVM 式混淆存活下来的部署规则：变换必须在最终优化之后运行。用学习者真实的插件证明 —— 对 clang -O2 的输出做平坦化，调度器得以保留且运行行为完全一致；对产物重跑 -O2，调度器被移除；两个流水线陷阱（名为 `O2` 的 pass 不存在；`optnone` 使可选 pass 静默跳过）决定了这条规则能适用于哪些输入。",
+      "takeaway": "混淆是一个流水线位置，而不仅仅是一个 pass：把它放在最后，作用于最终优化后的 IR；否则下一个优化器 pass 会第二次审视产物，把它抹掉。证明是学习者自己的插件作用在真实的 -O2 模块上 —— 而反面证明是对混淆产物再跑一次 -O2，调度器被完全移除。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "第 83 课到第 85 课都以同样方式收尾：-O2 作用在 pass 输出上，消融了变换。消融不是变换的缺陷，而是流水线顺序 —— 每种情况下，变换都作用在未优化的 IR 上，随后最终优化器又在其上运行。本课证明的部署规则：混淆必须是最后一个变换，作用于最终优化后的产物。证明用的是学习者一直在构建的插件 —— 第 2 卷的平坦化 pass，`build/libMiniShield.so` —— 而不是参考实现。"
+        },
+        {
+          "type": "heading",
+          "text": "一个能扛过 -O2 的函数"
+        },
+        {
+          "type": "paragraph",
+          "text": "固定测试输入是 `classify`，一个基于运行时输入的分支函数："
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n\n__attribute__((noinline)) int classify(int x) {\n    if (x < 0)\n        return 100 - x;\n    if (x < 50)\n        return x * 2;\n    return x / 2 + 5;\n}\n\nint main(void) {\n    int v;\n    if (scanf(\"%d\", &v) != 1) return 2;\n    printf(\"classify(%d)=%d\\n\", v, classify(v));\n    return 0;\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "为什么不复用上一课的 `total`？因为 -O2 会在任何混淆运行之前把它强度削减为 `a·b`：五块循环消失了，没有剩余可变换的东西。`classify` 的分支取决于一个优化器无法折叠的运行时输入，且调用是 `noinline`，所以这个函数能保持其形状通过最终优化。在 -O2 下它是五个块 —— 标签 `3`、`5`、`7`、`9`、`12`，clang 给 -O2 IR 的数字标签 —— 在汇合处有一个 PHI："
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define dso_local range(i32 0, -2147483648) i32 @classify(i32 noundef %0) local_unnamed_addr #0 {\n  %2 = icmp slt i32 %0, 0\n  br i1 %2, label %3, label %5\n\n3:                                                ; preds = %1\n  %4 = sub nsw i32 100, %0\n  br label %12\n\n5:                                                ; preds = %1\n  %6 = icmp samesign ult i32 %0, 50\n  br i1 %6, label %7, label %9\n\n7:                                                ; preds = %5\n  %8 = shl nuw nsw i32 %0, 1\n  br label %12\n\n9:                                                ; preds = %5\n  %10 = lshr i32 %0, 1\n  %11 = add nuw nsw i32 %10, 5\n  br label %12\n\n12:                                               ; preds = %9, %7, %3\n  %13 = phi i32 [ %4, %3 ], [ %8, %7 ], [ %11, %9 ]\n  ret i32 %13\n}"
+        },
+        {
+          "type": "heading",
+          "text": "用真实插件在 -O2 之后做平坦化"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -O2 -S -emit-llvm persist_fixture.c -o persist_o2.ll\n$ opt-23 -load-pass-plugin=build/libMiniShield.so \\\n    -passes='function(minishield-flatten),verify' \\\n    -S persist_o2.ll -o persist_final.ll\n[MiniShield] eligible: classify\nNumber of Phis: 1\n[MiniShield] rejected: main: intrinsic calls are outside this prototype's scope"
+        },
+        {
+          "type": "paragraph",
+          "text": "三行输出，全部正确：`classify` 有资格，pass 统计到它只有一个 PHI（汇合块的那个，由准备阶段降级 —— 在下方的产物中可见），而 `main` 被学习者自己的 guard 拒绝：在 -O2 下它仍带有 `llvm.lifetime.start`/`llvm.lifetime.end` 内置调用，第 2 卷确立的支持契约排除了这些 —— guard 打印其具名原因并原样保留该函数。流水线是两级：先跑最终优化器（`-O2` 到 `.ll`），然后混淆（`function(minishield-flatten)`），然后 `verify`。"
+        },
+        {
+          "type": "heading",
+          "text": "产物"
+        },
+        {
+          "type": "paragraph",
+          "text": "此清单假设 builder 状态为 entry-UncondBr: yes · entry-CondBr: no · non-entry terminators: no —— 即记录/书中的状态，2.5.5 结束时的跟练构建状态。检查你自己的：`grep -c 'case llvm::Instruction::CondBr' lib/StateMachineBuilder.cpp`（0 = 记录/书中的状态；1 = 有 entry-CondBr case 的树，此时条件入口也会被重接，而这个产物的 `ms.dispatch` 会带有前驱）。产物侧检查：`grep -c 'br label %ms.dispatch' persist_final.ll`（0 = 与印刷版一致，入口未重接；1 = 你的树重接了它）。"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "define dso_local range(i32 0, -2147483648) i32 @classify(i32 noundef %0) local_unnamed_addr #0 {\n  %ms.state = alloca i32, align 4\n  %.reg2mem = alloca i32, align 4\n  %2 = icmp slt i32 %0, 0\n  br i1 %2, label %3, label %5\n\n3:                                                ; preds = %ms.dispatch, %1\n  %4 = sub nsw i32 100, %0\n  store i32 %4, ptr %.reg2mem, align 4\n  br label %12\n\n5:                                                ; preds = %ms.dispatch, %1\n  %6 = icmp samesign ult i32 %0, 50\n  br i1 %6, label %7, label %9\n\n7:                                                ; preds = %ms.dispatch, %5\n  %8 = shl nuw nsw i32 %0, 1\n  store i32 %8, ptr %.reg2mem, align 4\n  br label %12\n\n9:                                                ; preds = %ms.dispatch, %5\n  %10 = lshr i32 %0, 1\n  %11 = add nuw nsw i32 %10, 5\n  store i32 %11, ptr %.reg2mem, align 4\n  br label %12\n\n12:                                               ; preds = %ms.dispatch, %9, %7, %3\n  %.reload = load i32, ptr %.reg2mem, align 4\n  ret i32 %.reload\n\nms.dispatch:                                      ; No predecessors!\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %3\n    i32 1, label %5\n    i32 2, label %7\n    i32 3, label %9\n    i32 4, label %12\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}"
+        },
+        {
+          "type": "paragraph",
+          "text": "这是学习者的平坦化 pass 作用在 -O2 IR 上的输出，值得逐块读。先是准备阶段：优化后块之间共享的值已移到栈上 —— 汇合块 `12` 处的 `phi`（在三个分支结果中做选择的那个）不见了，取而代之的是 `%.reg2mem` 槽，每个分支向其中存储、汇合处从其中加载 —— 而优化后的块本身完好无损，包括 -O2 写 `x * 2` 处的 `shl nuw nsw`。PHI 降级和值逃逸本身就保持行为不变。然后是状态机：一个 `ms.state` 槽，一个 `ms.dispatch` 块，它对 `ms.current` 的 `switch` 把五个状态映射到五个优化块上，`ms.invalid` → `unreachable` 作为 switch 的默认。变换把脚手架搭在优化后的函数之上；脚手架是否接到了入口是另一个问题，产物对此回答得很直白。"
+        },
+        {
+          "type": "heading",
+          "text": "pass 重接与未重接的入口"
+        },
+        {
+          "type": "paragraph",
+          "text": "`ms.dispatch` 带有 `; No predecessors!` 注释：在这个构建中，入口的条件分支尚未被重接 —— `entry` 仍然直接到达 `3` 和 `5`，所以调度器是已添加但未接线的脚手架。不过这个构建并非无所事事：它确实会重接无条件入口。下面的固定测试输入是第 2 卷出口证据的形态 —— 一个无条件跳入带 PHI 的循环头 —— 由手写而非 clang 生成，因为 `clang -O0` 把每个函数都标记为 `optnone`，可选 pass 会静默跳过 `optnone` 函数（本课两个流水线陷阱中的第二个），它带第二个函数且入口是条件分支，所以一个模块展示了两种情况："
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ opt-23 -passes=verify -disable-output wire_fixture.ll\n$ opt-23 -load-pass-plugin=build/libMiniShield.so \\\n    -passes='function(minishield-flatten),verify' \\\n    -S wire_fixture.ll -o wire_flat.ll\n[MiniShield] eligible: count_to\nNumber of Phis: 1\n[MiniShield] eligible: main\nNumber of Phis: 0\n$ grep -A1 'store i32 0, ptr %ms.state' wire_flat.ll\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n$ grep '^ms.dispatch:' wire_flat.ll\nms.dispatch:                                      ; preds = %entry\nms.dispatch:                                      ; No predecessors!\n$ clang-23 wire_fixture.ll -o wire_orig\n$ clang-23 wire_flat.ll -o wire_flat_bin\n$ echo 5 | ./wire_orig  &&  echo 5 | ./wire_flat_bin\ncount_to(5)=5\ncount_to(5)=5"
+        },
+        {
+          "type": "paragraph",
+          "text": "在 `count_to` 中，入口的分支被替换为对后继状态的存储（`0`，第一个块的 id）和一个跳转到调度器的跳转，它的 `ms.dispatch` 现在有了真正的前驱。在 `main` 中 —— 与 `classify` 一样 —— 入口的条件分支未被动过，它的 `ms.dispatch` 没有任何前驱。条件入口的情形正是 CondBr 课构建的：每个原始终结指令存储其目标状态并跳转到调度器，这正是第 2 卷出口证据中完全接线清单所展示的。持久性规则不依赖于那个缺口：产物就是最终优化器所看到的，下方的对照实验测量最终优化器对产物做了什么。"
+        },
+        {
+          "type": "heading",
+          "text": "行为一致性"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 persist_final.ll -o persist_final_bin\n$ clang-23 -O2 persist_fixture.c -o persist_orig_bin\n$ echo 42 | ./persist_final_bin  &&  echo 42 | ./persist_orig_bin\nclassify(42)=84\nclassify(42)=84\n$ echo 7 | ./persist_final_bin  &&  echo 7 | ./persist_orig_bin\nclassify(7)=14\nclassify(7)=14\n$ echo -7 | ./persist_final_bin  &&  echo -7 | ./persist_orig_bin\nclassify(-7)=107\nclassify(-7)=107"
+        },
+        {
+          "type": "paragraph",
+          "text": "三个输入，每个分支一个：负数（`-7 → 100 − (−7) = 107`）、中间（`7 → 2·7 = 14`）、高位（`42 → 42/2 + 5 = 84`）。混淆产物与普通 -O2 二进制在全部三个输入上一致：平坦化后的 -O2 函数是一个正确的程序。"
+        },
+        {
+          "type": "heading",
+          "text": "对照：重跑 -O2"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ grep -c 'switch i32' persist_final.ll\n1\n$ opt-23 -O2 -S persist_final.ll -o persist_reopt.ll\n$ grep -c 'switch i32' persist_reopt.ll\n0"
+        },
+        {
+          "type": "paragraph",
+          "text": "对混淆产物再跑一遍 -O2，调度器就没了：`switch` 计数从 1 → 0，`ms.state` 和 `ms.dispatch` 被删除，`classify` 回到普通分支。行为没有变化 —— 重新优化的二进制仍打印同样的三行 —— 但产物在结构上又回到未混淆状态。产物有多混淆，取决于作用在其上的最后一个变换；在最终优化器之前运行的变换，是给优化器一次第二次审视的机会，而优化器会抓住它。"
+        },
+        {
+          "type": "paragraph",
+          "text": "在印刷版（部分接线）产物中，`ms.dispatch` 没有任何前驱，所以移除是机械的：**DCE** 删除不可达块及其 `switch`，**mem2reg** 把被降级的槽值重新提升回寄存器。在完全接线的构建中，同一终点通过不同机制到达 —— **证明状态机**，第 2 卷 §2.7.4 的合并路线，其中每条路径的状态都是已知常量，调度随之坍缩。同一可观察结果，不同机制。"
+        },
+        {
+          "type": "heading",
+          "text": "两个流水线陷阱"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "`O2` 不是 pass 名。`opt -passes='O2,function(minishield-flatten)'` 以 `unknown pass name 'O2'` 失败：优化层级不是 pass 流水线的元素。流水线内的层级写法是 `default<O2>`（默认 O2 流水线），`default<O2>,function(minishield-flatten)` 可以解析 —— 当你想把整条规则写进一条命令时，拼写很重要。",
+            "`optnone` 让可选 pass 静默跳过。`clang -O0` 把每个函数都标记为 `optnone`（本固定测试输入的 -O0 模块里有三个；-O2 模块里为零）。`minishield-flatten` 是一个可选 pass —— 通过流水线解析回调注册，而不是由流水线形状所要求的 —— 可选 pass 跳过 `optnone` 函数时不给任何诊断：在 -O0 IR 上运行它，什么都不会改变，也不会打印任何 `[MiniShield]` 行。`default<O2>` 也救不了它：-O2 尊重 `optnone` 并保留该属性，所以一次性 `default<O2>,function(minishield-flatten)` 作用在 -O0 IR 上同样什么也不平坦化。这条规则的输入必须是真实的最终优化 IR，而不是 -O0 草稿。"
+          ]
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "步骤",
+              "`classify`",
+              "调度器",
+              "行为"
+            ],
+            [
+              "-O2（普通）",
+              "5 个块，普通分支",
+              "—",
+              "—"
+            ],
+            [
+              "-O2 之后平坦化",
+              "优化后的块 + `ms.dispatch`",
+              "`switch` 存在",
+              "一致"
+            ],
+            [
+              "对产物跑 -O2",
+              "普通分支已恢复",
+              "消失（switch 1 → 0）",
+              "一致"
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "四课，一条规律。三个变换添加结构 —— 门、blob、分解 —— 而最终优化器移除结构；每个 -O2 小节都从变换的一侧展示了移除（常量折叠、死存储消除、内联），本课则从部署侧展示这条规则：变换必须是产出出厂二进制的那条流水线中的最后一步。“最后”是一个位置，而不是一个性质：对照实验证明，变换之后再跑一个优化器 pass 就会把它抹掉，所以之后再被重新优化的混淆 IR —— 无论是第二个 `opt`、链接时的 LTO，还是下游工具 —— 都不是一个混淆产物。本部分中每个加固声明都必须回答的问题是 全景课提出的那个：最终产物长什么样？"
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：(a) 持久性演示为什么用 `classify` 而不是上一课的 `total`？(b) 平坦化 pass 作用在 -O0 IR 上不打印任何诊断也不改变任何东西。说出负责的那个属性，以及它所控制的那类 pass。(c) 用一句话陈述部署规则，并说明重优化对照（switch 计数 1 → 0）对一个先混淆又被再次优化的产物证明了什么。",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) 因为 -O2 会在任何混淆运行之前把 `total` 强度削减为闭式 `a·b`（一个 `mul` 加一个 select）：五块循环消失了，没有剩余可变换的东西。`classify` 的分支取决于一个优化器无法折叠的运行时输入，且调用是 `noinline`，所以它保持了五块结构通过最终优化。",
+                "(b) `optnone`，由 `clang -O0` 附加到每个函数上。它控制的是可选 pass —— 通过流水线解析回调添加的 pass（如 `minishield-flatten`），而不是由流水线形状所要求的 pass：可选 pass 完全跳过 `optnone` 函数，不给任何诊断。",
+                "(c) 混淆必须是产出出厂二进制的那条流水线中最后一个变换，作用于最终优化后的 IR。对照实验证明了反面：对混淆产物再跑一次 -O2，调度器的 `switch` 被移除（1 → 0），函数回到普通分支 —— 行为不变，结构未混淆。“最后”意味着其后不再有任何东西；混淆之后又被重新优化的产物不是混淆产物。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 2087
+    },
+    {
+      "id": 87,
+      "number": 1,
+      "day": 3,
+      "group": "pie",
+      "title": "位置无关",
+      "originalTitle": "Position independence",
+      "summary": "按工具链实际实现的方式来读 PIE、ASLR 和 RELRO：IR 中零痕迹（-pie 与 -no-pie 模块逐字节相同），一切在 ELF 中（EXEC 对 DYN、FLAGS_1 PIE、绝对重定位对基于加载基址的相对重定位、RELRO 段），以及运行时证明 —— 固定地址构建每次运行打印同样的指针，PIE 构建每次运行打印一个新的基址。",
+      "takeaway": "位置无关性是一种存在于链接器和加载器中的加固，而不是 IR 中：位置模型在模块中不留任何痕迹，决定记录在 ELF 头和重定位表中，ASLR 随机化加载基址，完整 RELRO 通过把 .got.plt 移入只读段来关闭最后一个可写的 GOT。pass 插件无法表达其中任何一项 —— 它是构建 flag 与加载时决定，用 readelf 验证，而不是 opt。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "本卷前三个部分都留下了可读的痕迹：CFI 在 IR 中留下了检查（`llvm.type.test` + `llvm.ubsantrap`），canary 在 IR 中留下了一个属性（`sspstrong`），OLLVM 变换改变了 IR 的结构。本章追问位置无关性住在哪里，答案是：根本不在 IR 中。它应对的威胁是 全景课（第 79 课）的威胁表中的“可预测布局”一行：ASLR 随机化栈、堆和库的基址，但一个非位置无关的可执行文件在每次运行时都映射在其固定的文件地址上，所以攻击者需要的每一个地址 —— 一个函数、一个 GOT 槽、一个返回目标 —— 都是预先稳定的。PIE 让程序本身成为加载时的值。"
+        },
+        {
+          "type": "heading",
+          "text": "IR 什么也没说"
+        },
+        {
+          "type": "paragraph",
+          "text": "固定测试输入打印一个全局的地址和 `main` 的地址 —— 攻击者要算的两类自地址："
+        },
+        {
+          "type": "code",
+          "language": "c",
+          "text": "#include <stdio.h>\n\nint global = 42;\n\nint main(void) {\n    printf(\"global at %p, main at %p\\n\", (void *)&global, (void *)main);\n    return 0;\n}"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang-23 -no-pie -O0 -S -emit-llvm pie_fixture.c -o pie_nopie.ll\nclang-23: warning: argument unused during compilation: '-no-pie'\n$ clang-23 -pie -O0 -S -emit-llvm pie_fixture.c -o pie_pie.ll\nclang-23: warning: argument unused during compilation: '-pie'\n$ cmp pie_nopie.ll pie_pie.ll\n(identical — and again at -O2)"
+        },
+        {
+          "type": "paragraph",
+          "text": "两种位置模型产生逐字节相同的模块 —— 在 `-O0` 和 `-O2` 下都是 —— 编译器甚至警告说该 flag 在 IR 路径上未被使用。canary 一章在 IR 里找到了后端据以行动的痕迹，而这里 IR 什么也不承载：读 IR 的人分不出两种构建，IR pass 既无法表达也无法检测位置模型。决定在 IR 之下做出并记录。"
+        },
+        {
+          "type": "heading",
+          "text": "可执行文件说了算"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-readelf-23 -h pie_nopie | grep Type\n  Type:                              EXEC (Executable file)\n$ llvm-readelf-23 -h pie_pie | grep Type\n  Type:                              DYN (Shared object file)\n$ llvm-readelf-23 -d pie_pie | grep FLAGS\n  0x000000006ffffffb (FLAGS_1)      PIE"
+        },
+        {
+          "type": "paragraph",
+          "text": "`-no-pie` 可执行文件是 `EXEC`：加载器把它映射到文件中记录的固定地址上 —— 演示打印的 `0x201xxx` 范围。PIE 可执行文件是 `DYN`：一个位置无关对象，加载器把它当成共享库来对待 —— 它选一个基址，映像中的每个地址都从它算起。动态段中的 `(FLAGS_1) PIE` 标签是加载器的标记。（这个工具链默认 PIE —— 不带 flag 的构建是带该标签且地址被随机化的 `DYN` —— 这就是为什么下面的每条命令都把 flag 写出来。）"
+        },
+        {
+          "type": "paragraph",
+          "text": "重定位表展示了“从基址算起”是怎么工作的："
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-objdump-23 -R pie_nopie\nDYNAMIC RELOCATION RECORDS\nOFFSET           TYPE                     VALUE\n00000000002028a0 R_X86_64_GLOB_DAT        __libc_start_main\n00000000002028a8 R_X86_64_GLOB_DAT        __gmon_start__\n00000000002038e0 R_X86_64_JUMP_SLOT       printf\n$ llvm-objdump-23 -R pie_pie\nDYNAMIC RELOCATION RECORDS\nOFFSET           TYPE                     VALUE\n00000000000027c0 R_X86_64_RELATIVE        *ABS*+0x16e0\n00000000000027c8 R_X86_64_RELATIVE        *ABS*+0x1720\n00000000000039b0 R_X86_64_RELATIVE        *ABS*+0x39b0\n0000000000002980 R_X86_64_GLOB_DAT        __libc_start_main\n..."
+        },
+        {
+          "type": "paragraph",
+          "text": "`-no-pie` 可执行文件的重定位全部是库重定位：加载器把导入函数的最终地址写入它的 GOT 槽。PIE 可执行文件除了那些同样的条目外，还带有 `R_X86_64_RELATIVE` 记录 —— `*ABS*+0x16e0` 等等 —— 加载器把它们解析为 `load_base + offset`，填充可执行文件自己的可写槽 —— 这里是 `.fini_array` 和 `.init_array` 条目以及一个 `.data` 槽；`.got` 不在其中，它的库槽仍来自两种构建都携带的 `GLOB_DAT` 记录。程序的自地址是加载时的值：`&global` 不是烙进文件里的常量，而是随机化的基址加一个偏移。"
+        },
+        {
+          "type": "heading",
+          "text": "运行时 ASLR"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ for i in 1 2 3; do ./pie_nopie; done\nglobal at 0x2038c0, main at 0x201680\nglobal at 0x2038c0, main at 0x201680\nglobal at 0x2038c0, main at 0x201680\n$ for i in 1 2 3; do ./pie_pie; done\nglobal at 0x603bc21939b8, main at 0x603bc2191730\nglobal at 0x65386ac319b8, main at 0x65386ac2f730\nglobal at 0x6072bb9f79b8, main at 0x6072bb9f5730"
+        },
+        {
+          "type": "paragraph",
+          "text": "`-no-pie` 构建跑三次：地址完全相同。可执行文件在每次运行、每台机器上都映射在其固定的文件地址上，所以随二进制一起出厂的攻击者也把每个目标地址一并出厂了。PIE 构建跑三次：每次都是一个新的基址，而 `global` 与 `main` 之间的偏移（`0x2288`）保持不变 —— ASLR 随机化的是基址，不是布局。这就是 ELF 头里 `EXEC` 对 `DYN` 之分的运行时一面。它还点明了这本书悄悄做了两章的选择：CFI 和 canary 演示都用 `-no-pie` 构建，让打印出来的地址在多次运行之间保持稳定 —— 非 PIE 恰恰就是内核不随机化其基址的二进制。"
+        },
+        {
+          "type": "heading",
+          "text": "RELRO：让 GOT 只读"
+        },
+        {
+          "type": "paragraph",
+          "text": "PIE 留下可写的区域是 GOT。在 PIE 可执行文件中，对导入函数的调用经过 `.got.plt`，其槽由加载器写入 —— 立即写入，或在首次调用时惰性写入。可写的 GOT 是 GOT 覆写类攻击的长期靶子。RELRO（relocation read-only，重定位只读）是链接器/加载器的回答：一个 `PT_GNU_RELRO` 段，列出加载器在完成重定位后转为只读的范围。"
+        },
+        {
+          "type": "paragraph",
+          "text": "它应对的攻击，一次写入就够了：某个可达缓冲区中的溢出把一个 `.got.plt` 跳转槽改写成攻击者控制的地址；下一次对该导入的调用 —— 固定测试输入中是 `printf` —— 会跳到那里，而不是那个函数。重定位完成后 `PT_GNU_RELRO` 范围是只读的，所以这次写入会 fault 而不是落地。这两层把守同一条链的不同环节：CFI-ICALL 把守经由被破坏指针的*调用*；RELRO 把守指针*所来源的表* —— 互补的两层，同样的威胁形状。`checksec`，那个用一行打印二进制 RELRO、PIE 和 canary 状态的工具，正是这份证据的一行版。"
+        },
+        {
+          "type": "paragraph",
+          "text": "像 `checksec` 那样读两种 PIE 构建 —— RELRO 段、节偏移、动态 flag："
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ llvm-readelf-23 -lW pie_pie | grep GNU_RELRO\n  GNU_RELRO      0x0007c0 0x00000000000027c0 0x00000000000027c0 0x0001e8 0x000840 R   0x1\n$ llvm-readelf-23 -SW pie_pie | grep -E '\\.got|\\.data'\n  [20] .got              PROGBITS        0000000000002980 000980 000028 00  WA  0   0  8\n  [22] .data             PROGBITS        00000000000039a8 0009a8 000014 00  WA  0   0  8\n  [24] .got.plt          PROGBITS        00000000000039c0 0009c0 000028 00  WA  0   0  8\n$ llvm-readelf-23 -lW pie_fullrelro | grep GNU_RELRO\n  GNU_RELRO      0x0007c0 0x00000000000027c0 0x00000000000027c0 0x000220 0x000840 R   0x1\n$ llvm-readelf-23 -SW pie_fullrelro | grep -E '\\.got|\\.data'\n  [20] .got              PROGBITS        0000000000002990 000990 000028 00  WA  0   0  8\n  [21] .got.plt          PROGBITS        00000000000029b8 0009b8 000028 00  WA  0   0  8\n  [23] .data             PROGBITS        00000000000039e0 0009e0 000014 00  WA  0   0  8\n$ llvm-readelf-23 -d pie_fullrelro | grep FLAGS\n  0x000000000000001e (FLAGS)        BIND_NOW\n  0x000000006ffffffb (FLAGS_1)      NOW PIE"
+        },
+        {
+          "type": "paragraph",
+          "text": "在默认 PIE 构建中，RELRO 段覆盖 `[0x27c0, 0x27c0 + 0x1e8)` = `[0x27c0, 0x29a8)`：`.init_array`、`.dynamic` 和 `.got` —— 但不包括 `.got.plt`，它位于 `0x39c0`、`.data` 旁边，在段外。没有 `BIND_NOW`：跳转槽在首次调用时惰性绑定，表保持可写。这就是 partial RELRO 留下的口子。加上 `-Wl,-z,relro,-z,now`（完整 RELRO），两件事同时发生：动态段获得 `BIND_NOW`，所以每个跳转槽都在加载时解析；链接器在物理上移动 `.got.plt` —— 从 `0x39c0` 到 `0x29b8`，紧挨 `.got` 之后、在扩大的段之内，段的末端（`0x27c0 + 0x220 = 0x29e0`）恰好是 `.got.plt` 的末端。加载器完成后，两张 GOT 表都是只读的；对跳转槽的写入会 fault。"
+        },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "IR：什么都没有。`-pie` 与 `-no-pie` 产生逐字节相同的模块（-O0 和 -O2 都是），flag 在 IR 路径上警告未被使用。IR pass 既不能表达也不能检测位置模型。",
+            "ELF：一切都在里面。`Type`（`EXEC` 对 `DYN`）、`(FLAGS_1) PIE` 和重定位集合（仅库，还是库 + `R_X86_64_RELATIVE` 自重定位）完全决定加载行为。",
+            "加载器：基址。在 ASLR 开启时（这里是 `randomize_va_space = 2`），PIE 基址每次 `exec` 都变；`-no-pie` 的基址就是固定的文件地址。映像内的布局 —— 诸如 `0x2288` 的偏移 —— 无论如何都不变。",
+            "链接器：RELRO 边界。完整 RELRO（`-z now`）把 `.got.plt` 移入 `PT_GNU_RELRO` 段，并立即绑定跳转槽，所以加载完成后两张 GOT 表都是只读的；默认 PIE 构建则让 `.got.plt` 保持可写以支持惰性绑定。"
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "现在，第 1 卷收官里的层级图不再是声明，而是测量：“平台加固”一行 —— PIC/PIE、ASLR、RELRO，处于编译器 + 链接器 + 操作系统层级，MiniShield 注册表无法承载 —— 正是上面证据所展示的。编译器选择重定位模型，链接器写入 `Type`、`FLAGS_1` 标签和 RELRO 段，加载器在每个 IR pass 运行完之后挑选基址并绑定 GOT。这种加固的正确工具是构建 flag，正确的验证是 `readelf` 加运行时地址探针。本部分的标准 —— 以最终产物论 —— 在这里以最字面的方式落地：产物就是可执行文件，加固活在它的头里。"
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：(a) 该固定测试输入的 -no-pie 与 -pie 构建 IR 逐字节相同。那么两个可执行文件里是什么记录了位置决定 —— 说出那个头字段和动态段标签。(b) PIE 可执行文件的重定位包含一种 -no-pie 可执行文件没有的类型，用于可执行文件自己的可写槽。说出该类型、加载器写入的值，以及在本例中它填充的槽。(c) 完整 RELRO 关闭了默认 PIE 构建留下的唯一可写区域。它是哪个节，链接器在完整 RELRO 构建中对它做了什么，伴随改变而来的动态段 flag 是什么？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) ELF 头的 `Type` 字段：`EXEC`（固定地址可执行文件，映射在其记录的文件地址上）对 `DYN`（加载器按共享库方式映射的位置无关对象），外加 PIE 可执行文件动态段上的 `(FLAGS_1) PIE` 标签。IR 中没有任何东西标记这个决定 —— 两个模块逐字节相同。",
+                "(b) `R_X86_64_RELATIVE`：加载器把 `load_base + offset`（记录上读作 `*ABS*+0x16e0` 等）写入可执行文件自己的可写槽 —— 这里是 `0x27c0` 的 `.fini_array` 条目、`0x27c8` 的 `.init_array` 条目，以及 `0x39b0` 的一个 `.data` 槽；`.got` 不在其中，它的库槽仍来自两种构建都携带的 `GLOB_DAT` 记录。自重定位只存在于 PIE 可执行文件中，因为它自己的基址 —— 因此它自己的地址 —— 在加载时被随机化。",
+                "(c) `.got.plt`，惰性绑定填充的跳转表：在默认构建中它位于 `0x39c0`、`.data` 旁边，在 RELRO 段之外，所以保持可写。完整 RELRO 的链接器把它移到 `0x29b8`，在扩大的 `PT_GNU_RELRO` 段之内（段末端恰好是 `.got.plt` 的末端），动态段获得 `BIND_NOW`，所以每个跳转槽都在加载时立即解析。加载完成后，整个 RELRO 范围 —— 两张 GOT 表 —— 都是只读的，对跳转槽的写入会 fault。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 1794
+    },
+    {
+      "id": 88,
+      "number": 1,
+      "day": 3,
+      "group": "fuzzing",
+      "title": "对平坦化 pass 做模糊测试",
+      "originalTitle": "Fuzzing the flattening pass",
+      "summary": "以学习者自己的产物为对象的 libFuzzer 收官：让 IR 模块可独立运行的输入契约（自包含的纯 i32 @f(i32)）、harness（解析并 verify、契约门、通过 PassBuilder 的真实插件流水线、之后的 verify，以及固定 16 参数测试电池上的子进程差分）、区分既有未定义行为与 pass 引发回归的 trap 语义、针对 build/libMiniShield.so 的干净 600 次运行会话，以及负向对照——一行 off-by-one 变异体，被 harness 用精确的变换前后 diff 和错误的 ms.state store 抓住。",
+      "takeaway": "fuzzer 证明的是一个区域，而不是一个点：行为差分（同一输入电池，pass 前后）把 'the pass preserves behavior'（pass 保持行为）变成一个测量，而负向对照 —— 被 harness 抓住的植入的一行 bug —— 才让干净运行的沉默有意义。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "到目前为止每一课都用固定测试输入证明它的观点：一个恰好触发一种行为的选定输入，以及一个恰好显示一处差异的 diff。固定测试输入证明一个点。fuzzer 证明一个区域：它从一把种子出发，变异它们，并探索它们周围的空间——所以 'this pass preserves behavior'（这个 pass 保持行为）变成对已探索区域的测量，而不是对某个选定例子的声明。本课为你们一整周都在产出的那个产物构建这个 fuzzer：`build/libMiniShield.so` 中的 `minishield-flatten` pass。它执行的测试就是 pass 契约所陈述的那一个：平坦化该函数，然后检查该函数是否仍计算同样的东西。"
+        },
+        {
+          "type": "heading",
+          "text": "输入契约"
+        },
+        {
+          "type": "paragraph",
+          "text": "fuzzer 的输入不是 C 程序，而是一个 LLVM IR 模块的文本。该模块必须能独立运行，否则比较的对象就不是这个 pass，而是它周围的一切。harness 在触碰 pass 之前强制执行的契约：`@f` 已定义、返回 `i32`、恰好接受一个 `i32`——电池探测的值空间是已知的；没有已定义的 `@main`——harness 链接自己的包装 `main`，读一个参数并打印 `f(x)`；以及没有非内置函数的 declare——对某个 body 不在手头的函数的调用，要么链接不过，要么让输出依赖于 pass 从不触碰的代码。内置函数的 declare 是允许的。其他一切——错误的签名、外部调用、已定义的 `main`——都在门处被拒绝，并算作一次干净运行：不是 bug，只是区域之外。"
+        },
+        {
+          "type": "heading",
+          "text": "harness（测试执行器）"
+        },
+        {
+          "type": "paragraph",
+          "text": "每次运行做五件事。它解析并 verify 输入（失败则安静地结束本次运行）。它应用契约门。它在模块的一份副本上运行真实插件的 `function(minishield-flatten)` 流水线——插件只加载一次，在第一次运行时通过 `PassPlugin::Load` 加载，流水线通过 `PassBuilder` 构建并带其标准分析注册。它 verify 平坦化后的模块——一个发出非法 IR 的 pass 本身就是回归，行为还没被考虑。然后它运行行为差分：把原始模块和平坦化后的模块各自编译成原生二进制，都链入包装 `main`，并在固定的 16 参数电池上运行两者——`INT_MIN` 和 `INT_MAX`、零、负数，以及分支条件会翻转的小值。"
+        },
+        {
+          "type": "paragraph",
+          "text": "trap 语义是微妙之处。如果原始二进制在某个电池参数上 trap（一个信号，或非零退出），那么该输入在 pass 运行之前就是未定义行为——越界移位、除以零、电池边缘值上的溢出——pass 不为它负责；harness 跳过该输入并返回 0。如果原始是健康的而平坦化后的二进制 trap，或打印了不同的值，那么分歧就是 pass 的：harness 报告它——输入、pass 的诊断、第一个分歧参数及两边的值，以及平坦化模块的 `ms.state` store——并返回 1，libFuzzer 把这标记为有趣，把输入保留在语料库中。"
+        },
+        {
+          "type": "code",
+          "language": "cpp",
+          "text": "// minishield-fuzz.cpp — fuzz the learner's minishield-flatten pass.\n//\n// Each libFuzzer input is the text of an LLVM IR module. Per run:\n//   1. parse and verify it (most mutations die here);\n//   2. check the input contract: a defined i32 @f(i32), no @main, and no\n//      non-intrinsic declares — a self-contained pure function;\n//   3. run the plugin's function(minishield-flatten) pipeline on a clone\n//      (the real plugin from build/libMiniShield.so, loaded once via\n//      PassPlugin::Load);\n//   4. verify the flattened module;\n//   5. behavioral differential: compile the original and the flattened\n//      module into native binaries (each linked with a wrapper main that\n//      prints f(x) for a fixed argument battery) and compare the output\n//      on every argument.\n//\n// Trap semantics:\n//   - the original binary traps on some argument -> the input is\n//     undefined behavior even before the pass -> skip, not a bug;\n//   - the flattened binary traps or disagrees where the original was\n//     healthy -> behavioral regression -> report and return 1 (libFuzzer\n//     marks the input interesting and keeps it in the corpus).\n\n#include \"llvm/IR/Function.h\"\n#include \"llvm/IR/LLVMContext.h\"\n#include \"llvm/IR/Module.h\"\n#include \"llvm/IR/Verifier.h\"\n#include \"llvm/IRReader/IRReader.h\"\n#include \"llvm/Passes/PassBuilder.h\"\n#include \"llvm/Plugins/PassPlugin.h\"\n#include \"llvm/Support/Error.h\"\n#include \"llvm/Support/MemoryBuffer.h\"\n#include \"llvm/Support/SourceMgr.h\"\n#include \"llvm/Support/raw_ostream.h\"\n\n#include <cstdio>\n#include <cstdlib>\n#include <cstring>\n#include <memory>\n#include <optional>\n#include <string>\n#include <vector>\n\n#include <fcntl.h>\n#include <sys/wait.h>\n#include <unistd.h>\n\nusing namespace llvm;\n\nnamespace {\n\n// The plugin under test: build/libMiniShield.so by default, or the\n// MINISHIELD_PLUGIN environment variable (the negative control points it\n// at the mutant build).\nstd::string pluginPath() {\n    if (const char *env = getenv(\"MINISHIELD_PLUGIN\"))\n        return env;\n    return \"build/libMiniShield.so\";\n}\n\n// The argument battery: fixed, nothing excluded — INT_MIN and INT_MAX,\n// zero, negatives, and the small values a branch condition flips on.\nconst int kBattery[] = {\n    -2147483648, -1000, -42, -8, -1, 0, 1, 2, 7, 8, 42, 127, 128, 1000,\n    4096, 2147483647};\nconst int kBatteryN = sizeof(kBattery) / sizeof(kBattery[0]);\n\nconst char *kWorkdir = \"/tmp/minishield-fuzz\";\n\n// The wrapper main: a separate translation unit so the module under test\n// never needs to provide one.\nconst char *kWrapper = R\"WRAP(\n#include <stdio.h>\n#include <stdlib.h>\nextern int f(int);\nint main(int argc, char **argv) {\n    if (argc != 2)\n        return 98;\n    int x = atoi(argv[1]);\n    printf(\"%d\\n\", f(x));\n    return 0;\n}\n)WRAP\";\n\nvoid writeFile(const std::string &path, const std::string &content) {\n    FILE *fp = fopen(path.c_str(), \"w\");\n    if (!fp)\n        return;\n    fputs(content.c_str(), fp);\n    fclose(fp);\n}\n\nstd::string moduleText(const Module &M) {\n    std::string out;\n    raw_string_ostream OS(out);\n    M.print(OS, nullptr);\n    return out;\n}\n\n// Run a command, capturing stdout; pclose returns the wait status.\nstruct RunResult {\n    int status;\n    std::string output;\n};\nRunResult runCapture(const std::string &cmd) {\n    RunResult r;\n    FILE *p = popen(cmd.c_str(), \"r\");\n    if (!p) {\n        r.status = -1;\n        return r;\n    }\n    char buf[8192];\n    size_t n;\n    while ((n = fread(buf, 1, sizeof(buf), p)) > 0)\n        r.output.append(buf, n);\n    r.status = pclose(p);\n    return r;\n}\n\n// A trap: killed by a signal, or a nonzero exit (the wrapper returns 0\n// on every healthy call).\nbool trapped(const RunResult &r) {\n    return r.status == -1 || WIFSIGNALED(r.status) ||\n           (WIFEXITED(r.status) && WEXITSTATUS(r.status) != 0);\n}\n\n// Redirect fd 2 to /dev/null (and back) around the plugin's run, so a\n// fuzzing session stays readable.\nvoid silenceStderr(bool on) {\n    static int saved = -1;\n    if (on) {\n        if (saved == -1)\n            saved = dup(2);\n        int fd = open(\"/dev/null\", O_WRONLY);\n        dup2(fd, 2);\n        close(fd);\n    } else if (saved != -1) {\n        dup2(saved, 2);\n        close(saved);\n        saved = -1;\n    }\n}\n\n// ---- plugin + PassBuilder, initialized once ----------------------------\n// gPB is deliberately leaked: the plugin's pass-plugin is linked against the\n// system libstdc++ while this harness uses the conda one, so destroying the\n// PassBuilder's cross-world std::function callbacks at exit is not safe.\n// The fuzzer process is short-lived, so a one-off leak is harmless.\nPassBuilder *gPB;\nbool gInit = false;\nvoid initOnce() {\n    if (gInit)\n        return;\n    gInit = true;\n    system(\"mkdir -p /tmp/minishield-fuzz\");\n    std::string path = pluginPath();\n    Expected<PassPlugin> plugin = PassPlugin::Load(path);\n    if (!plugin) {\n        fprintf(stderr, \"[fuzz] cannot load plugin '%s': %s\\n\", path.c_str(),\n                toString(plugin.takeError()).c_str());\n        exit(2);\n    }\n    gPB = new PassBuilder(); // leaked on purpose (see above)\n    plugin->registerPassBuilderCallbacks(*gPB);\n}\n\n// Parse and verify; null on any failure. The context must outlive the\n// module (the module's destructor reaches back into it).\nstd::unique_ptr<Module> parseModule(const std::string &irText,\n                                    LLVMContext &Ctx) {\n    MemoryBufferRef MBR(irText, \"<fuzz-input>\");\n    SMDiagnostic Err;\n    std::unique_ptr<Module> M = parseIR(MBR, Err, Ctx);\n    if (!M)\n        return nullptr;\n    std::string V;\n    raw_string_ostream OS(V);\n    if (verifyModule(*M, &OS))\n        return nullptr;\n    return M;\n}\n\n// Parse, verify, and apply the input contract. Returns null for any\n// input that is not a self-contained pure i32 @f(i32).\nstd::unique_ptr<Module> parseGate(const std::string &irText,\n                                  LLVMContext &Ctx) {\n    std::unique_ptr<Module> M = parseModule(irText, Ctx);\n    if (!M)\n        return nullptr;\n    // (Module::getFunction is not used: name-map lookups are unreliable for\n    // parser-built modules in this LLVM; iteration is version-proof.)\n    Function *F = nullptr;\n    for (const Function &Fn : *M) {\n        if (Fn.getName() == \"f\")\n            F = const_cast<Function *>(&Fn);\n        if (Fn.getName() == \"main\" && !Fn.isDeclaration())\n            return nullptr; // the wrapper provides main\n    }\n    if (!F || F->isDeclaration())\n        return nullptr;\n    if (!F->getReturnType()->isIntegerTy(32) || F->arg_size() != 1 ||\n        !F->arg_begin()->getType()->isIntegerTy(32))\n        return nullptr;\n    for (const Function &Fn : *M)\n        if (Fn.isDeclaration() && !Fn.isIntrinsic())\n            return nullptr;\n    return M;\n}\n\n// Run function(minishield-flatten) on the module. Returns false (with a\n// message in errOut) if the pipeline fails or the result does not verify.\nbool runPipeline(Module &M, bool live, std::string &errOut) {\n    // The standard PassBuilder setup: register the known analyses and\n    // cross-register the proxies before running any pipeline.\n    LoopAnalysisManager LAM;\n    FunctionAnalysisManager FAM;\n    CGSCCAnalysisManager CGAM;\n    ModuleAnalysisManager MAM;\n    gPB->registerModuleAnalyses(MAM);\n    gPB->registerFunctionAnalyses(FAM);\n    gPB->registerLoopAnalyses(LAM);\n    gPB->registerCGSCCAnalyses(CGAM);\n    gPB->crossRegisterProxies(LAM, FAM, CGAM, MAM);\n    ModulePassManager MPM;\n    Error E = gPB->parsePassPipeline(MPM, \"function(minishield-flatten)\");\n    if (E) {\n        errOut = toString(std::move(E));\n        return false;\n    }\n    if (!live)\n        silenceStderr(true);\n    MPM.run(M, MAM);\n    if (!live)\n        silenceStderr(false);\n    std::string V;\n    raw_string_ostream OS(V);\n    if (verifyModule(M, &OS)) {\n        errOut = \"verify failed after the pass:\\n\" + V;\n        return false;\n    }\n    return true;\n}\n\nenum class DiffResult { kOk, kSkip, kRegression };\n\nstruct Diff {\n    std::vector<RunResult> before, after;\n    size_t firstBad;\n};\n\n// Compile both modules and run the battery.\nDiffResult differential(const std::string &beforeText,\n                        const std::string &afterText, Diff &diff) {\n    writeFile(std::string(kWorkdir) + \"/before.ll\", beforeText);\n    writeFile(std::string(kWorkdir) + \"/after.ll\", afterText);\n    writeFile(std::string(kWorkdir) + \"/wrapper.c\", kWrapper);\n\n    auto compile = [](const std::string &ll, const std::string &bin) {\n        std::string cmd = \"clang-23 -o \" + bin + \" \" + ll + \" \" +\n                          std::string(kWorkdir) + \"/wrapper.c 2>/dev/null\";\n        return system(cmd.c_str()) == 0;\n    };\n    if (!compile(std::string(kWorkdir) + \"/before.ll\",\n                 std::string(kWorkdir) + \"/before_bin\"))\n        return DiffResult::kSkip; // the original does not even build\n    if (!compile(std::string(kWorkdir) + \"/after.ll\",\n                 std::string(kWorkdir) + \"/after_bin\")) {\n        diff.firstBad = 0;\n        return DiffResult::kRegression; // the flattening broke compilation\n    }\n\n    for (int i = 0; i < kBatteryN; ++i) {\n        char arg[24];\n        snprintf(arg, sizeof(arg), \"%d\", kBattery[i]);\n        diff.before.push_back(\n            runCapture(std::string(kWorkdir) + \"/before_bin \" + arg));\n        diff.after.push_back(\n            runCapture(std::string(kWorkdir) + \"/after_bin \" + arg));\n        if (trapped(diff.before.back()))\n            return DiffResult::kSkip; // undefined behavior before the pass\n        if (trapped(diff.after.back()) ||\n            diff.before.back().output != diff.after.back().output) {\n            diff.firstBad = i;\n            return DiffResult::kRegression;\n        }\n    }\n    return DiffResult::kOk;\n}\n\n// The first whole line of text containing needle (\"\" when absent).\nstd::string findLine(const std::string &text, const char *needle) {\n    size_t pos = 0;\n    while ((pos = text.find(needle, pos)) != std::string::npos) {\n        size_t start = (pos == 0) ? 0 : text.rfind('\\n', pos - 1) + 1;\n        size_t end = text.find('\\n', pos);\n        std::string line = text.substr(start, end - start);\n        size_t a = line.find_first_not_of(\" \\t\");\n        if (a != std::string::npos)\n            return line.substr(a);\n        pos = end + 1;\n    }\n    return \"\";\n}\n\nvoid report(const std::string &irText, const std::string &afterText,\n            const Diff &d, const std::string &pipelineErr) {\n    fprintf(stderr,\n            \"\\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed \"\n            \"the behavior of @f\\n\");\n    fprintf(stderr, \"[fuzz] input module (%zu bytes):\\n%s\\n\", irText.size(),\n            irText.c_str());\n    if (!pipelineErr.empty()) {\n        fprintf(stderr, \"[fuzz] %s\\n\", pipelineErr.c_str());\n        return;\n    }\n    // Re-run the pass with stderr live so its diagnostics are visible.\n    LLVMContext Ctx;\n    std::unique_ptr<Module> M = parseGate(irText, Ctx);\n    if (M) {\n        std::string liveErr;\n        fprintf(stderr, \"[fuzz] pass diagnostics (re-run live):\\n\");\n        runPipeline(*M, /*live=*/true, liveErr);\n    }\n    for (size_t i = 0; i <= d.firstBad && i < d.before.size(); ++i) {\n        char arg[24];\n        snprintf(arg, sizeof(arg), \"%d\", kBattery[(int)i]);\n        if (i == d.firstBad) {\n            if (trapped(d.after[i]))\n                fprintf(stderr,\n                        \"[fuzz] battery arg %s: original healthy, flattened \"\n                        \"traps (signal %d)\\n\",\n                        arg, WTERMSIG(d.after[i].status));\n            else {\n                std::string b = d.before[i].output, a = d.after[i].output;\n                while (!b.empty() && b.back() == '\\n')\n                    b.pop_back();\n                while (!a.empty() && a.back() == '\\n')\n                    a.pop_back();\n                fprintf(stderr,\n                        \"[fuzz] battery arg %s: original=%s flattened=%s\\n\",\n                        arg, b.c_str(), a.c_str());\n            }\n            break;\n        }\n    }\n    std::string store = findLine(afterText, \"ptr %ms.state\");\n    if (!store.empty())\n        fprintf(stderr, \"[fuzz] flattened module carries: %s\\n\",\n                store.c_str());\n}\n\n} // namespace\n\nextern \"C\" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n    initOnce();\n    std::string irText(reinterpret_cast<const char *>(data), size);\n\n    // One context for the whole run; it must outlive every module.\n    LLVMContext Ctx;\n\n    // 1. + 2. parse, verify, shape gate.\n    std::unique_ptr<Module> M = parseGate(irText, Ctx);\n    if (!M)\n        return 0;\n\n    // 3. + 4. the pass on a clone (re-parsed from the canonical text,\n    // since this LLVM has no Module::clone).\n    std::string beforeText = moduleText(*M);\n    std::unique_ptr<Module> M2 = parseModule(beforeText, Ctx);\n    if (!M2)\n        return 0;\n    std::string pipelineErr;\n    if (!runPipeline(*M2, /*live=*/false, pipelineErr)) {\n        report(irText, \"\", Diff{}, pipelineErr);\n        return 1;\n    }\n\n    // 5. the behavioral differential.\n    std::string afterText = moduleText(*M2);\n    Diff diff;\n    DiffResult r = differential(beforeText, afterText, diff);\n    if (r == DiffResult::kSkip)\n        return 0;\n    if (r == DiffResult::kRegression) {\n        report(irText, afterText, diff, \"\");\n        return 1;\n    }\n    return 0;\n}"
+        },
+        {
+          "type": "heading",
+          "text": "构建与运行"
+        },
+        {
+          "type": "paragraph",
+          "text": "从仓库根目录——`build/libMiniShield.so` 所在之处——harness 针对加载插件的那个 LLVM 来构建。`-fsanitize=fuzzer` flag 链接 libFuzzer 的运行时；在这个工具链中它还打包了 ASan/UBSan，所以 harness 自身的 bug 不会安静通过。"
+        },
+        {
+          "type": "paragraph",
+          "text": "libFuzzer 插桩的是 harness 自己的指令：`cov` 统计迄今为止到达的分支边（`ft` 统计函数单元），一条 `NEW` 行意味着某个输入到达了一条此前没有输入到达过的边。大多数变异死在解析器里，所以那些 `NEW` 行报告的边位于解析器和门中，而不在 pass 里——这正是 pass 由差分按行为评判、而不是按覆盖率评判的原因：下面日志中 `cov` 从 185 爬到 195，是门在工作，而不是 pass 在被执行。"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ clang++-23 -fsanitize=fuzzer -std=gnu++20 -O2 -D_GLIBCXX_USE_CXX11_ABI=1 -fPIC \\\n    -I$CONDA_PREFIX/include minishield-fuzz.cpp -o minishield-fuzz \\\n    -L$CONDA_PREFIX/lib -lLLVM-23 -Wl,-rpath,$CONDA_PREFIX/lib\n$ ./minishield-fuzz seeds -runs=600\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO:        7 files found in seeds\nINFO: seed corpus: files: 7 min: 128b max: 354b total: 1722b rss: 60Mb\n#8\tpulse  cov: 185 ft: 187 corp: 3/498b exec/s: 4 rss: 63Mb\n#8\tINITED cov: 185 ft: 187 corp: 3/498b exec/s: 4 rss: 63Mb\n#9\tNEW    cov: 189 ft: 201 corp: 4/663b lim: 191 exec/s: 4 rss: 63Mb L: 165/191 MS: 1 EraseBytes-\n...\n#156\tNEW    cov: 192 ft: 205 corp: 6/842b lim: 191 exec/s: 78 rss: 63Mb L: 13/191 MS: 5 ShuffleBytes-CrossOver-ChangeASCIIInt-EraseBytes-CrossOver-\n#192\tNEW    cov: 195 ft: 208 corp: 7/1033b lim: 191 exec/s: 96 rss: 63Mb L: 191/191 MS: 1 ChangeASCIIInt-\n...\n#600\tDONE   cov: 195 ft: 208 corp: 7/913b lim: 191 exec/s: 150 rss: 63Mb\nDone 600 runs in 4 second(s)\n"
+        },
+        {
+          "type": "paragraph",
+          "text": "没有报告，干净退出。进度行讲着门的故事：一小撮变异输入到达新代码——覆盖率从 185 爬到 195——而所有这些新代码都在解析器和门中，是变异触发的错误分支。在纯随机变异下，能幸存 parse、verify 和契约的变异模块是稀有的，所以 pass 本身主要是在种子上被执行的；差分是随时待命的那一个——一旦出现有效的变异输入，pass 就按行为而不是形状被评判。这次会话还留下了长大的语料库目录：libFuzzer 把找到的每个 有趣输入保存在 `seeds/` 中，与七颗种子并排，所以之后的运行从更宽的区域起步。"
+        },
+        {
+          "type": "heading",
+          "text": "种子"
+        },
+        {
+          "type": "paragraph",
+          "text": "七颗种子覆盖了平坦化 pass 能看到的形态：`seed01`，UncondBr 入口——状态机入口重接真正会重接的唯一形态；`seed02`，没有 phi 的 CondBr 入口——builder 中有 entry-CondBr case 时，脚手架对 CondBr 入口是活的（每个终结指令存储其目标状态并跳转到调度器）；记录的会话截自 entry-CondBr 之前的构建，那里 builder 构建的脚手架没有任何东西能到达；`seed03`，带 UncondBr 入口的 phi 循环——完整流水线，phi 降级加入口重接；`seed04`，body 中的 switch；`seed05`，单块函数，builder 什么都不做；`seed06`，内置调用——harness 的门允许 declare，插件的资格 guard 拒绝 call；`seed07`，带 CondBr 入口的 phi 汇合——phi 降级而无需入口重接。"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "# ---- seeds/seed01_uncondbr.ll ----\nsource_filename = \"seed01_uncondbr.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:\n  ret i32 1\n\ne:\n  ret i32 2\n}\n\n# ---- seeds/seed02_branchy.ll ----\nsource_filename = \"seed02_branchy.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 10\n  br i1 %c, label %t, label %e\n\nt:\n  %a = mul i32 %x, 3\n  %b = add i32 %a, 1\n  ret i32 %b\n\ne:\n  %c2 = icmp sgt i32 %x, 0\n  br i1 %c2, label %p, label %n\n\np:\n  ret i32 100\n\nn:\n  ret i32 -100\n}\n\n# ---- seeds/seed03_loop.ll ----\nsource_filename = \"seed03_loop.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %i = phi i32 [ 0, %entry ], [ %nx, %b ]\n  %c = icmp slt i32 %i, %x\n  br i1 %c, label %b, label %e\n\nb:\n  %nx = add i32 %i, 1\n  br label %h\n\ne:\n  ret i32 %i\n}\n\n# ---- seeds/seed04_switch.ll ----\nsource_filename = \"seed04_switch.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %body, label %zero\n\nzero:\n  ret i32 0\n\nbody:\n  switch i32 %x, label %def [\n    i32 1, label %one\n    i32 2, label %two\n    i32 3, label %three\n  ]\n\none:\n  ret i32 10\n\ntwo:\n  ret i32 20\n\nthree:\n  ret i32 30\n\ndef:\n  ret i32 40\n}\n\n# ---- seeds/seed05_straight.ll ----\nsource_filename = \"seed05_straight.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %a = mul i32 %x, %x\n  %b = add i32 %a, 1\n  ret i32 %b\n}\n\n# ---- seeds/seed06_intrinsic.ll ----\nsource_filename = \"seed06_intrinsic.c\"\n\ndeclare i32 @llvm.abs.i32(i32, i1)\n\ndefine i32 @f(i32 %x) {\nentry:\n  %a = call i32 @llvm.abs.i32(i32 %x, i1 false)\n  %b = add i32 %a, 5\n  ret i32 %b\n}\n\n# ---- seeds/seed07_phi_join.ll ----\nsource_filename = \"seed07_phi_join.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:\n  %a = mul i32 %x, 2\n  br label %j\n\ne:\n  %b = add i32 %x, 10\n  br label %j\n\nj:\n  %v = phi i32 [ %a, %t ], [ %b, %e ]\n  %c2 = icmp sgt i32 %v, 50\n  br i1 %c2, label %big, label %small\n\nbig:\n  ret i32 1\n\nsmall:\n  ret i32 0\n}\n"
+        },
+        {
+          "type": "heading",
+          "text": "负向对照"
+        },
+        {
+          "type": "paragraph",
+          "text": "找不到任何东西的 fuzzer 什么也没证明：它的沉默可能是 'there is no bug'（没有 bug），也可能是 'the harness cannot see bugs of this kind'（harness 看不到这类 bug）。区分两者的方法是植入一个已知的 bug——一个变异体。把插件的六个源文件复制到临时目录，改 `StateMachineBuilder.cpp` 中的一行：入口块存储的初始状态是入口后继的 id；变异体改存下一个 id。"
+        },
+        {
+          "type": "paragraph",
+          "text": "记录的 diff 假设 builder 状态 entry-UncondBr: yes · entry-CondBr: no · non-entry terminators: no——记录/书中的状态，也是记录会话所截自的构建。检查你自己的：`grep -c 'case llvm::Instruction::CondBr' lib/StateMachineBuilder.cpp`（0 = 记录/书中的状态；1 = 有 entry-CondBr case 的树——那一行变异体仍然存在，但第 54 行可能已移动）。产物侧检查：`grep -c 'br label %ms.dispatch' <flattened seed>`（UncondBr 入口的种子为 1，其入口跳转到调度器；此 builder 状态下 CondBr 入口的种子为 0）。"
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ mkdir -p mutant/src && cp lib/*.cpp mutant/src/\n$ diff lib/StateMachineBuilder.cpp mutant/src/StateMachineBuilder.cpp\n54c54\n<                 auto *initialState = entryBuilder.getInt32(successorId);\n---\n>                 auto *initialState = entryBuilder.getInt32(successorId + 1)\n\n$ clang++-23 -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -D_GLIBCXX_USE_CXX11_ABI=1 \\\n    -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS \\\n    -D__STDC_LIMIT_MACROS -Iinclude -I$CONDA_PREFIX/include \\\n    mutant/src/*.cpp -o mutant/libMiniShieldMutant.so \\\n    -L$CONDA_PREFIX/lib -lLLVM-23 -Wl,-rpath,$CONDA_PREFIX/lib"
+        },
+        {
+          "type": "paragraph",
+          "text": "变异体用学习者自己的构建 flag（来自 `build/compile_commands.json` 的那些）构建，同样的 include 树，只差一行。现在把 harness 指向变异体——`MINISHIELD_PLUGIN` 覆盖正是为此而设——并运行同样的种子："
+        },
+        {
+          "type": "code",
+          "language": "bash",
+          "text": "$ MINISHIELD_PLUGIN=mutant/libMiniShieldMutant.so ./minishield-fuzz seeds -runs=7\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO:        7 files found in seeds\nINFO: seed corpus: files: 7 min: 128b max: 354b total: 1722b rss: 60Mb\n\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed the behavior of @f\n[fuzz] input module (179 bytes):\nsource_filename = \"seed01_uncondbr.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:\n  ret i32 1\n\ne:\n  ret i32 2\n}\n\n[fuzz] pass diagnostics (re-run live):\n[MiniShield] eligible: f\nNumber of Phis: 0\n[fuzz] battery arg -2147483648: original=2 flattened=1\n[fuzz] flattened module carries: store i32 1, ptr %ms.state, align 4\n\n[fuzz] BEHAVIORAL REGRESSION: minishield-flatten changed the behavior of @f\n[fuzz] input module (243 bytes):\nsource_filename = \"seed03_loop.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  br label %h\n\nh:\n  %i = phi i32 [ 0, %entry ], [ %nx, %b ]\n  %c = icmp slt i32 %i, %x\n  br i1 %c, label %b, label %e\n\nb:\n  %nx = add i32 %i, 1\n  br label %h\n\ne:\n  ret i32 %i\n}\n\n[fuzz] pass diagnostics (re-run live):\n[MiniShield] eligible: f\nNumber of Phis: 1\n[fuzz] battery arg -2147483648: original=0 flattened=-1721230799\n[fuzz] flattened module carries: store i32 1, ptr %ms.state, align 4\n#8\tINITED cov: 185 ft: 187 corp: 3/607b exec/s: 0 rss: 63Mb\n#8\tDONE   cov: 185 ft: 187 corp: 3/607b lim: 288 exec/s: 0 rss: 63Mb\nDone 8 runs in 0 second(s)\n"
+        },
+        {
+          "type": "paragraph",
+          "text": "两个变异体杀手都触发了，就在第一个电池参数上。对 `seed01`，变异体的错误初始状态把调度直接送往 `%t`，所以 `f` 对每个输入都返回 1——差分抓到 `original=2`（在 `x = INT_MIN` 处）对 `flattened=1`。对 `seed03`，错误的状态让调度落在循环体中，而那时被降级的 phi 的栈槽还没有被写入，所以平坦化后的二进制读到一个未初始化槽：`flattened=-1721230799`。确切数字每次运行都不同；这种方差正是未初始化读取的样子。（libFuzzer 还先运行一个空单元，所以是 8 次运行。）"
+        },
+        {
+          "type": "heading",
+          "text": "在 IR 中读懂这个回归"
+        },
+        {
+          "type": "code",
+          "language": "llvm",
+          "text": "source_filename = \"seed01_uncondbr.c\"\n\ndefine i32 @f(i32 %x) {\nentry:\n  %ms.state = alloca i32, align 4\n  store i32 0, ptr %ms.state, align 4\n  br label %ms.dispatch\n\nh:                                                ; preds = %ms.dispatch\n  %c = icmp sgt i32 %x, 0\n  br i1 %c, label %t, label %e\n\nt:                                                ; preds = %ms.dispatch, %h\n  ret i32 1\n\ne:                                                ; preds = %ms.dispatch, %h\n  ret i32 2\n\nms.dispatch:                                      ; preds = %entry\n  %ms.current = load i32, ptr %ms.state, align 4\n  switch i32 %ms.current, label %ms.invalid [\n    i32 0, label %h\n    i32 1, label %t\n    i32 2, label %e\n  ]\n\nms.invalid:                                       ; preds = %ms.dispatch\n  unreachable\n}\n"
+        },
+        {
+          "type": "paragraph",
+          "text": "报告的最后一行指向证据。平坦化后的 `seed01` 把初始状态存入入口块，并在调度器里对它做 switch：状态 `0` 是 `%h`、`1` 是 `%t`、`2` 是 `%e` —— 这些是 builder 按块顺序分配的 id。变异体的平坦化恰好差一个 token：入口块存的是 `1` 而不是 `0`（在变异体的平坦化模块里，同一行读作 `store i32 1, ptr %ms.state, align 4`），于是第一次分派落到了 `%t` 而不是 `%h`。同样的脚手架、一个错误的 id，`f` 的每个参数都回答 1。这正是差分测试所针对的整类 bug：IR 仍能解析、仍能通过 verify，脚手架形状依旧正确；只是行为挪了位置。只做 verify 的测试永远看不到它。"
+        },
+        {
+          "type": "paragraph",
+          "text": "负向对照既已建立，干净会话的结论就站得住脚：就其当前状态而言，学习者的 `minishield-flatten` 在其探测过的区域内没有任何行为回归 —— 本卷收官部分的退出标准。fuzzer 是一件常备的仪器，而不是一次性的测试：每当 pass 发生变化 —— 接下来的 CondBr 入口重接、其后要做的终结指令工作 —— 同一套 harness、同一批种子，再加一行构建命令，就能告诉你行为是否保持住了。"
+        },
+        {
+          "type": "checkpoint",
+          "text": "检查点：(a) 输入契约拒绝定义 `@main` 或声明非内置函数的模块。为什么这两条中的每一条都必须成立，差分测试才有意义？(b) 当原始二进制在某个 电池参数上 trap 时，harness 跳过该输入；而平坦化后的二进制 trap 或输出不一致时，它会报告。原始程序发生 trap 说明了关于该输入的什么？为什么跳过 —— 而不是报告 —— 才是正确的做法？(c) 负向对照确立了什么，而 600 次运行的干净会话单靠自己无法确立？",
+          "answers": [
+            {
+              "type": "list",
+              "ordered": true,
+              "items": [
+                "(a) harness 会链接一个自己的包装 `main`（读取一个参数，打印 `f(x)`）；模块若自己定义了 `main`，就会与之冲突，比较就不再是“pass 运行过”与“没有运行”之间的比较。非内置函数的 declare 是调用一个 harness 没有函数体的函数：要么二进制链接不上，要么其输出依赖于 pass 从未触碰过的代码，分歧也就无法再归因于平坦化。契约让比较保持封闭：两个二进制之间唯一的差别，就是解析与编译之间是否运行过 `minishield-flatten`。",
+                "(b) 原始程序 —— 未经修改的输入，原样编译 —— 中的 trap，是输入在 pass 运行之前就携带的未定义行为：越界的移位、除以零、电池边界值上的整数溢出。pass 无需为它没有引入的 UB 负责，把它报告出来就是误报；fuzzer 的任务是找到 pass 改变的行为，而不是给输入执法。所以 harness 丢弃该输入（返回 0），继续下一个。发生 trap —— 或者原始程序健康而输出不一致 —— 则归因于 pass 并报告。",
+                "(c) 干净会话只说明在探索过的区域内什么都没发现 —— 但“没发现”与“harness 看不见这类 bug”是相容的。负向对照植入一个已知的行为 bug（初始状态上的一行差一错误），并展示 harness 在第一个 电池参数上就抓到了它，附上确切的 diff 和确切的 IR 行。到那时，干净会话的沉默才成为证据：pass 在探索过的区域内保持了行为，而不是测试太弱、察觉不到。"
+              ]
+            }
+          ]
+        }
+      ],
+      "words": 4303
+    },
+    {
+      "id": 89,
+      "number": 1,
+      "day": 3,
+      "group": "glossary",
+      "title": "查一个术语",
+      "originalTitle": "Glossary. Terms used in Volume 3",
+      "summary": "第 3 卷的工作术语表：加固课程中用到的每个术语，用一到三句话给出定义，并指向出现该术语的课程；第 1-2 卷已定义的术语只做交叉引用，不重复。",
+      "takeaway": "遇到生词时，术语表是最快的绕道。",
+      "source": "volume3",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "按字母顺序排列的、对本卷中出现术语的一至三句定义，供先遇到术语、后读到解释的读者查阅。“See …”指向使用该术语的课程，以课程标题命名；该课的深入剖析比本条目走得更远。第 1 卷和第 2 卷已经定义的术语 —— 未定义行为、差分测试、PHI、SSA、PassBuilder、verify 及其他 —— 不再重复；这些条目分别收录在第 1 卷的术语表和第 2 卷的术语参考中。"
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "术语",
+              "定义"
+            ],
+            [
+              "ASLR（地址空间布局随机化）",
+              "内核对栈、堆和库基址的逐次运行随机化 —— 对于位置无关可执行文件，还包括程序映像本身。ASLR 随机化的是基址，而不是布局：位置无关演示中 `global` 与 `main` 之间的偏移在每次运行中保持不变。固定地址的 `EXEC` 可执行文件使它对映像失效 —— 每次运行都是同样的地址。（见“位置无关”。）"
+            ],
+            [
+              "Battery",
+              "fuzzing harness 用来运行两个二进制的固定参数集合：从 `INT_MIN` 到 `INT_MAX` 的 16 个值，包括零和分支条件会因之翻转的小值。差分在每个 电池参数上比较两个输出，回归报告点名的就是第一个出现分歧的参数。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "行为回归",
+              "在定义良好的输入上，原始程序与 pass 输出之间的分歧：某个 电池参数上取值不同，或者原始程序健康却发生了 trap。负向对照的差一变异体恰好产生两个：在 `seed01` 上（对每个输入都返回 1）和 `seed03` 上（读取一个未初始化的栈槽）。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "`BIND_NOW`",
+              "完整 RELRO 的动态段flag：加载器在加载时立即解析每个跳转槽 —— 不做惰性绑定 —— 整个 `PT_GNU_RELRO` 范围、两张 GOT 表在加载后全部只读。默认的 PIE 构建缺少该flag，`.got.plt` 保持可写。（见“位置无关”。）"
+            ],
+            [
+              "虚假控制流（BCF）",
+              "一种 OLLVM 风格的变换：在每个条件分支处插入一个门控块，由不透明谓词在原目标（真分支）与一个新的死块（假分支）之间选择。门控是静态读者必须建模的东西；本课的三种消解 —— 常量种子、运行时种子、运行时种子加一次不透明调用 —— 展示了最终优化器对它的处置。（见“虚假控制流”。）"
+            ],
+            [
+              "CFI（控制流完整性）",
+              "一族运行期检查，确保每次控制流转移都落在合法目标上：被破坏的函数指针无法分派到类型错误的函数，被破坏的虚表指针无法分派到错误的类。本卷通过阅读 clang 23.1.5 生成的代码来教它的两个具体成员 —— 间接调用检查与vtable 检查 —— 而不是从零编写一个 CFI pass。（见“代码加固全景”。）反向 CFI 是镜像方向的检查 —— 在目标一侧，验证调用者是否被允许到达该目标 —— 即第 1 卷 §1.5.5 已经提到的 CET/影子栈家族。本卷只讲前向检查：守卫位于调用点，在调用前测试指针；本术语表中的每个 CFI 条目都是前向检查。"
+            ],
+            [
+              "CFI-ICALL（间接调用检查）",
+              "每个间接调用之前的守卫：分派之前 verify 目标是否具有预期的函数类型。在 LLVM 23.1.5 中，守卫是 `llvm.type.test` 搭配 `llvm.ubsantrap`，而不是旧资料所描述的遗留 `llvm.cfi_icheck` 内置函数。它是 LTO 特性 —— 缺少 `-flto` 时该标志拒绝工作 —— 而 LTO 会移除所有它能解析出目标的守卫。（见“间接调用检查”。）"
+            ],
+            [
+              "CFI-VCALL（vtable 检查）",
+              "每个虚调用之前的守卫：从对象首字加载的虚表指针，必须指向调用点静态基类的 type-info 层级之内。与 CFI-ICALL 一样，它是 LTO 特性，并且额外要求 `-fvisibility=hidden`，把 type-info 符号固定到本地副本上。它检查的是对象自称属于哪个类，而不是该类的虚表指向什么。（见“vtable 检查”。）"
+            ],
+            [
+              "CFI thunk",
+              "LTO 把一个函数连同其 CFI 类型描述符一起重建时创建的单指令跳转存根：旧地址继续作为跳板指向重建后的函数体（间接调用一课中是从 `op_right` 到 `op_right.cfi`）。thunk 让所有既有调用点在搬移之后保持有效。（见“间接调用检查”。）"
+            ],
+            [
+              "语料库",
+              "fuzzer 积累起来的有趣输入集合：种子加上每个能到达新代码的变异输入，保存在磁盘上的语料库目录里；该目录是 fuzzer 的位置参数。后续运行从更宽的语料库起步 —— 本课 600 次运行的会话把种子目录从 7 个文件长到 12 个，全部是对契约门和解析器错误分支的探索。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "死代码消除（DCE）",
+              "优化器移除那些无法影响可观察行为的指令和块。在 OLLVM 部分，它是 BCF 死块赖以消解的机制：它们的 store 变死、块变空，空的 fallthrough 合并 —— 谓词从未被证明，结构只是被清空了。不透明的副作用是 DCE 不能删除的内容。（见“虚假控制流”。）"
+            ],
+            [
+              "熵功率调度",
+              "libFuzzer 启动时宣布的调度 —— \"Running with entropic power schedule (0xFF, 100).\" —— 为一次会话的变异强度设定节奏；那两个数字是它的参数，`-runs=N` 的会话在达到运行次数时结束。日志打印的进度行（`NEW`、`REDUCE`、`pulse`）就是该调度在工作。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "EXEC",
+              "固定地址可执行文件的 ELF `Type` —— 即 `-no-pie` 的产物：加载器每次都在文件里记录的地址上映射映像，于是每个自地址都预先确定，ASLR 不适用于该映像。位置无关演示的 `-no-pie` 构建在三次运行中打印出完全相同的地址。（见“位置无关”。）"
+            ],
+            [
+              "Fuzzer / libFuzzer",
+              "覆盖率引导的变异 fuzzer：从种子语料库起步，变异输入，运行目标，保留能到达新代码的输入。LLVM 的 libFuzzer 在进程内运行目标 —— 目标是一个单独的 `LLVMFuzzerTestOneInput` 函数，`-fsanitize=fuzzer` 链接其运行时，而该运行时在本工具链中还捆绑了 ASan 和 UBSan。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "GOT（全局偏移表）",
+              "一组槽位的表，加载器把导入函数的最终地址填进这些槽；对导入符号的调用都经过它。PIE 在加载后保持 GOT 可写 —— 这是 RELRO 所应对的那类 GOT 覆写攻击的现成目标。（见“位置无关”。）"
+            ],
+            [
+              "守卫变量（TLS 守卫）",
+              "canary 值本身：每个进程一个随机数，保存在线程局部存储中，在 x86-64 Linux 上从 `%fs:40` 读取。同一个值被种进每个受保护的栈帧，而不是每帧一个；因此能读内存的攻击者可以读出 canary 并把它原样写回，让溢出绕过检查。（见“栈 canary 检查”。）"
+            ],
+            [
+              "加固质量",
+              "全景一课设定的标准：评判依据是技术实施之后，所陈述的攻击者还能做什么，以及对合法用户付出了多大代价。“块数翻倍了”“存在 canary”这样的结构性观察，本身不构成质量主张。本卷的每一章都回到这个标准，而对混淆而言它最扎手：质量在于挺过最终优化器之后还剩什么。（见“代码加固全景”。）"
+            ],
+            [
+              "内联",
+              "优化器用被调函数体替换调用的操作：当被调函数对优化器可见（`internal` 链接）且只有一个调用者时可用。它是子程序拆分的精确逆操作：本课中的 `total.N` 各部分被内联回去，然后优化器在恢复出来的循环上工作（这里，将其按四路宽度向量化）。（见“子程序拆分”。）"
+            ],
+            [
+              "输入契约",
+              "harness 让 IR 模块能独立运行的前提条件：`@f` 有定义，且是 `i32 @f(i32)`；没有已定义的 `@main`（harness 链接自己的包装 `main`）；没有非内置函数的 declare（调用一个 harness 没有函数体的函数，要么链接不上，要么把输出与 pass 从未触碰过的代码绑在一起）。未通过契约门槛的模块算作一次干净运行 —— 不是 bug，只是落在区域之外。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "跳转槽 / 惰性绑定",
+              "动态链接器在首次调用时填充的 `.got.plt` 槽位 —— 即惰性绑定 —— 这正是默认 PIE 构建让 `.got.plt` 保持可写的原因。完整 RELRO 的 `BIND_NOW` 在加载时解析所有跳转槽，并让整个表只读。（见“位置无关”。）"
+            ],
+            [
+              "`llvm.type.test`",
+              "两个 CFI 检查在 LLVM 23.1.5 中都用作守卫的 内置函数：给定一个指针和一个元数据名称，它测试该指针所指的内存是否带有与该名称匹配的 CFI 类型描述符 —— 函数类型 `int(int)` 对应 `_ZTSFiiE`（CFI-ICALL），类 `Base` 对应 `_ZTS4Base`（CFI-VCALL）。它取代了旧资料所描述的遗留 `llvm.cfi_icheck` 内置函数；测试失败则跳转到 `llvm.ubsantrap`。（见“间接调用检查”“vtable 检查”。）"
+            ],
+            [
+              "`llvm.ubsantrap`",
+              "使进程 trap 的 内置函数：它被降级为一条未定义指令，进程以 SIGILL 终止（退出码 132，\"Illegal instruction (core dumped)\"）。这是两个 CFI 检查的失败路径 —— 硬性中止，而不是报告；没有调试器时，这种失败看起来像一次随机的非法指令，而不是 CFI 违规。（见“间接调用检查”。）"
+            ],
+            [
+              "加载基址",
+              "加载器映射位置无关映像所用的地址；映像中的每个自地址都是加载基址加一个偏移，而正是 `R_X86_64_RELATIVE` 重定位把这些值写进去的。ASLR 每次运行选择新的基址；映像内的布局 —— 比如 `global` 与 `main` 之间 `0x2288` 这样的偏移 —— 保持不变。（见“位置无关”。）"
+            ],
+            [
+              "LTO（链接时优化）",
+              "一种编译模式：链接器收到的是 bitcode 而非机器码，并解决逐个翻译单元编译无法解决的问题：去虚化的调用、内联的函数体、折叠掉的守卫。CFI-ICALL 和 CFI-VCALL 都是 LTO 特性 —— 缺少 `-flto` 时这些flag拒绝工作 —— 而 LTO 会移除所有它能解析出目标的 CFI 守卫；这正是间接调用一课中的守卫安放在一个 LTO 永远无法知晓的指针上的原因。（见“间接调用检查”。）"
+            ],
+            [
+              "变异体",
+              "一个被故意做坏的构建，用来证明测试能看见某一类 bug：本课的变异体是插件六个源文件的一份草稿拷贝，在 `StateMachineBuilder.cpp:54` 处有一行差一错误 —— 入口块存的是 `successorId + 1` 而不是 `successorId` —— 用学习者自己的构建 flag编译，并通过 `MINISHIELD_PLUGIN` 覆盖指过去。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "负向对照",
+              "一个故意植入的、测试必须抓到的 bug，在正式判定之前运行：没有它，干净运行的沉默与“harness 看不见这类 bug”是相容的。本课的负向对照 —— 差一变异体 —— 在第一个电池参数上，两个能暴露该变异体的种子都触发；到那时，600 次运行的干净会话的沉默才成为证据。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "差一错误",
+              "状态 id、下标或边界偏移了一：模糊测试一课植入的 bug 类别。变异体的差一错误存入了错误的初始状态，于是第一次分派落到错误的块（`seed01` 落到 `%t` 而不是 `%h`）—— IR 仍能解析、仍能通过 verify，脚手架形状也正确；只是行为挪了位置，而这正是只做 verify 的测试永远看不到的类别。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "OLLVM",
+              "2015 年为 LLVM 汇集混淆变换的项目 —— 虚假控制流、字符串加密、子程序拆分，等等。本卷中的“OLLVM 风格”指的就是这一族：每个变换都改变程序的结构而不改变其行为，前提是静态读者会花时间读多出来的结构；而最终优化器靠证明而非阅读行事，正是这一前提的敌人。（见“虚假控制流”。）"
+            ],
+            [
+              "不透明谓词",
+              "一个依据数论事实恒为真、但优化器在分支上下文中不予证明的条件：在虚假控制流一课中，两个连续整数之积 —— `s*(s-1)` —— 必为偶数，因此 `s*(s-1) % 2 == 0` 恒为真；可在使用运行时种子时，优化器只是把谓词的形状归一化，并不证明其真假。BCF 的门控建立在这样的谓词之上，门控的命运就是谓词的命运。（见“虚假控制流”。）"
+            ],
+            [
+              "持久性",
+              "混淆必须具有的性质：挺过最终优化。OLLVM 部分用学习者自己的平坦化 pass 证明了这条部署规则：混淆必须是产出发布二进制的那条流水线上的最后一个变换 —— “最后”是一个位置，而不是一种性质；在混淆之后又被重新优化的产物并不是被混淆过的产物。（见“最终优化器留下什么”。）"
+            ],
+            [
+              "PIE（位置无关可执行文件）",
+              "ELF `Type` 为 `DYN` 的构建：加载器把程序当作共享库对待，在加载时选择一个基址，映像自身的地址变成相对于加载基址的值，由 `R_X86_64_RELATIVE` 重定位写入。对应 `-pie` flag；在本工具链上是默认行为 —— 正因如此，位置无关一课在每条命令中都把这个flag写出来。（见“位置无关”。）"
+            ],
+            [
+              "RELRO（重定位只读）",
+              "`PT_GNU_RELRO` 段：重定位完成后，加载器将其翻转为只读的范围。部分 RELRO（默认）覆盖 `.got`，但为惰性绑定保留 `.got.plt` 可写；完整 RELRO（`-Wl,-z,relro,-z,now`）把 `.got.plt` 移入扩大的段内并加上 `BIND_NOW`，此后对跳转槽的任何写入都会触发错误。（见“位置无关”。）"
+            ],
+            [
+              "R_X86_64_RELATIVE",
+              "只有 PIE 可执行文件才携带的重定位类型：记录形如 `*ABS*+offset`，加载器把每一条解析为 `load_base + offset`，填入可执行文件自己的可写槽位：`.fini_array` 和 `.init_array` 条目，以及本课固定测试输入里的 `.data` 槽位。程序的自地址由此变成加载期值，而不是固化在文件中的常量。（见“位置无关”。）"
+            ],
+            [
+              "种子",
+              "fuzzer 起步所用的一个语料库输入：手工挑选的有效输入，用于触发某一已知形态。本课的七个种子覆盖平坦化 pass 支持的各种形态 —— 从 builder 什么都不做的单块函数，到带有 UncondBr 入口、能走通完整流水线的 phi 循环 —— 它们定义了 fuzzer 探索的区域。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "SIGILL",
+              "非法指令信号：`llvm.ubsantrap` 杀死进程的方式 —— 退出码 132，\"Illegal instruction (core dumped)\"。CFI 检查的 trap 信号，区别于 SIGABRT（退出码 134），即 canary 的 `__stack_chk_fail` 中止。没有调试器时，这两种失败在 shell 里看起来一样，而且都是硬性中止，不是报告。（见“间接调用检查”“栈 canary 检查”。）"
+            ],
+            [
+              "`ssp` / `sspstrong`",
+              "栈保护各模式的属性束名称，也是 IR 中 canary 的唯一痕迹：`ssp` 标记 `-fstack-protector`（含有大于 8 字节的 char 数组的函数），`sspstrong` 标记 `-fstack-protector-strong`（在此之上，加上任意类型的数组、`alloca` 调用、取局部变量地址），`sspreq` 标记 `-fstack-protector-all`（所有函数）。前端只记录哪些栈帧有资格；后端从该属性出发生成守卫的加载、存储与比较。（见“栈 canary 检查”。）"
+            ],
+            [
+              "栈 canary（栈保护）",
+              "种在栈帧中、位于易受破坏的缓冲与保存的返回地址之间、并在函数退出时比对的随机值：任何到达返回地址的溢出都必须越过 canary，不匹配就会中止进程，抢在被破坏的返回地址执行之前。它检查的是控制数据 —— 栈帧里存着什么 —— 而不是控制流目标；它也不在 IR 中留下任何痕迹。（见“栈 canary 检查”。）"
+            ],
+            [
+              "`__stack_chk_fail`",
+              "canary 退出期比较失败时后端调用的中止入口：它打印 \"stack smashing detected\" 并中止进程（SIGABRT，退出码 134）。canary 的运行时一面，与 CFI trap 同属一类 —— 响亮的中止，而不是带着错误继续。（见“栈 canary 检查”。）"
+            ],
+            [
+              "栈破坏",
+              "缓冲溢出破坏到缓冲之外的栈帧内容；经典的 canary 演示。没有 canary 时，溢出悄悄改写保存的返回地址 —— 程序打印 `HACKED` 并以 0 退出；有了 canary，退出检查发现被破坏的守卫，以 \"stack smashing detected\" 中止（SIGABRT，退出码 134）。（见“栈 canary 检查”。）"
+            ],
+            [
+              "字符串加密（strenc）",
+              "一种 OLLVM 风格变换：把每个明文字符串常量替换为一段加密数据（`@enc`）和一个逐字节密钥（`@key`），并把每处使用改写为 XOR 解密循环，在运行期把明文重建进栈缓冲。它提供的性质是“在发布所用的优化级别下，产物中不存在连续的字符串字面量” —— 而在 -O2 下，这个循环会被常量折叠回立即数存储，因此该变换必须是流水线的最后一步，性质才能成立。（见“字符串加密”。）"
+            ],
+            [
+              "子程序拆分（subdiv）",
+              "一种 OLLVM 风格变换：把函数中每个非入口块移入各自独立的 `internal` 函数；原函数保留入口，变成一个状态调度器 —— 对状态变量做 `switch`，调用正确的部分并循环。本卷三个 OLLVM 变换中最脆弱的一个：它只加结构、不加内容，而内联器恰好是它的逆操作。（见“子程序拆分”。）"
+            ],
+            [
+              "威胁模型",
+              "明确陈述你在防御哪个攻击者、对他们而言“成功”意味着什么 —— 全景一课的第一个术语，也是本卷每个质量主张的分母。控制流平坦化回应了威胁表中“阅读或修补程序逻辑”那一行，其余各行仍然敞开。（见“代码加固全景”。）"
+            ],
+            [
+              "trap 语义",
+              "harness 对某个 电池参数上出现信号或非零退出的规则：如果原始二进制 trap，说明该输入在 pass 运行之前就已经是未定义行为 —— 这是第 2 卷的术语，那里说过“观察到的一次成功运行不是正确性的证据” —— harness 跳过该输入；如果原始程序健康而平坦化后的二进制 trap 或输出不一致，那么分歧属于 pass，harness 报告它并返回 1。（见“对平坦化 pass 做模糊测试”。）"
+            ],
+            [
+              "类型描述符（type-info 名称）",
+              "编译器附加到每个经 CFI 编译的函数定义上、以及附加到类虚表上的那个经过 name mangling 的 `__class_type_info` 名称 —— 即 `_ZTS` 加上 mangled 类型：在函数定义上它是函数类型名（`int(int)` 对应 `_ZTSFiiE`），在类虚表上它是类名（`Base` 对应 `_ZTS4Base`）。它就是 `llvm.type.test` 进行匹配的对象：目标没有它，或名称不同，检查即失败。（见“间接调用检查”“vtable 检查”。）"
+            ]
+          ]
+        }
+      ],
+      "words": 2978
+    }
+  ]
+}
